@@ -90,17 +90,31 @@ export function createScreenRecorder(
     started = true;
     status('Choose a screen to record locally…');
     try {
-      if (!navigator.mediaDevices?.getDisplayMedia) throw new Error('Screen capture is unavailable. Use the updated desktop app or a supported desktop browser.');
+      if (!navigator.mediaDevices?.getDisplayMedia)
+        throw new Error(
+          'Screen capture is unavailable. Use the updated desktop app or a supported desktop browser.',
+        );
       try {
         screen = await navigator.mediaDevices.getDisplayMedia({
-          video: { width: { ideal: 1280, max: 1280 }, height: { ideal: 720, max: 720 }, frameRate: { ideal: 5, max: 5 } },
+          video: {
+            width: { ideal: 1280, max: 1280 },
+            height: { ideal: 720, max: 720 },
+            frameRate: { ideal: 5, max: 5 },
+          },
           audio: false,
         });
       } catch (error) {
         const name = error instanceof Error ? error.name : '';
-        if (name === 'NotSupportedError') throw new Error('Screen capture is not configured in this desktop build. Quit it and launch the rebuilt recording-fix app.');
-        if (name === 'NotAllowedError') throw new Error('Screen sharing was cancelled or denied. Choose a screen and allow this app in macOS Privacy & Security → Screen Recording, then reopen it if requested.');
-        if (name === 'InvalidStateError') throw new Error('Click Start local recording again with the exam window focused.');
+        if (name === 'NotSupportedError')
+          throw new Error(
+            'Screen capture is not configured in this desktop build. Quit it and launch the rebuilt recording-fix app.',
+          );
+        if (name === 'NotAllowedError')
+          throw new Error(
+            'Screen sharing was cancelled or denied. Choose a screen and allow this app in macOS Privacy & Security → Screen Recording, then reopen it if requested.',
+          );
+        if (name === 'InvalidStateError')
+          throw new Error('Click Start local recording again with the exam window focused.');
         throw error;
       }
       if (stopped) {

@@ -62,11 +62,7 @@ export class GeminiRotatingClient {
     return key!;
   }
 
-  private async fetchGemini(
-    endpoint: string,
-    body: unknown,
-    retries = 2,
-  ): Promise<unknown> {
+  private async fetchGemini(endpoint: string, body: unknown, retries = 2): Promise<unknown> {
     const key = this.nextKey();
     const url = `https://generativelanguage.googleapis.com/v1beta/${endpoint}?key=${key}`;
 
@@ -98,10 +94,7 @@ export class GeminiRotatingClient {
 
   async generateContent(prompt: string, imageBase64?: string): Promise<string> {
     const parts: GeminiPart[] = imageBase64
-      ? [
-          { inlineData: { mimeType: 'image/jpeg', data: imageBase64 } },
-          { text: prompt },
-        ]
+      ? [{ inlineData: { mimeType: 'image/jpeg', data: imageBase64 } }, { text: prompt }]
       : [{ text: prompt }];
 
     const request: GeminiGenerateRequest = {

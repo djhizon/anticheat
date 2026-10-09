@@ -150,7 +150,11 @@ export interface InstructorExamVersion {
   readonly id: string;
   readonly title: string;
   readonly versionNumber: number;
-  readonly questions: readonly { readonly id: string; readonly prompt: string; readonly type: string }[];
+  readonly questions: readonly {
+    readonly id: string;
+    readonly prompt: string;
+    readonly type: string;
+  }[];
 }
 
 export interface InstructorExamVersionsResponse {

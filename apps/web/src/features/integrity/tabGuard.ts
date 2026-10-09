@@ -20,10 +20,7 @@ export interface ViolationEvent {
   readonly count: number;
 }
 
-export function createTabGuard(
-  examKey: string,
-  onViolation: (v: ViolationEvent) => void,
-) {
+export function createTabGuard(examKey: string, onViolation: (v: ViolationEvent) => void) {
   const myId = crypto.randomUUID();
   const lsKey = `exam-tab-guard:${examKey}`;
   const channelName = `exam-guard:${examKey}`;
@@ -78,7 +75,9 @@ export function createTabGuard(
           fireViolation('duplicate_tab');
           return Promise.resolve();
         }
-        return new Promise<void>((resolve) => { releaseLock = resolve; });
+        return new Promise<void>((resolve) => {
+          releaseLock = resolve;
+        });
       },
     );
   }
@@ -96,11 +95,11 @@ export function createTabGuard(
 
 /** Thresholds before a violation becomes a kick */
 export const VIOLATION_KICK_THRESHOLD: Record<ViolationType, number> = {
-  duplicate_tab: 1,    // instant kick — zero tolerance
-  focus_lost: 5,       // 5 focus losses = kick
-  page_hidden: 3,      // 3 page hides = kick
-  fullscreen_exit: 3,  // 3 fullscreen exits = kick
-  paste_detected: 10,  // 10 pastes = kick (already blocked but logged)
+  duplicate_tab: 1, // instant kick — zero tolerance
+  focus_lost: 5, // 5 focus losses = kick
+  page_hidden: 3, // 3 page hides = kick
+  fullscreen_exit: 3, // 3 fullscreen exits = kick
+  paste_detected: 10, // 10 pastes = kick (already blocked but logged)
   overlay_detected: 1, // 1 transparent iframe = instant kick
   keystroke_violation: Infinity, // bot-like typing is flagged for review, never auto-kicked
 };

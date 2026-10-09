@@ -58,7 +58,12 @@ describe('bounded local transcription', () => {
     vi.stubEnv('WHISPER_MAX_QUEUE', '1');
     let finishFirst!: () => void;
     mocks.execute
-      .mockImplementationOnce(() => new Promise((resolve) => { finishFirst = () => resolve({ stdout: '' }); }))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishFirst = () => resolve({ stdout: '' });
+          }),
+      )
       .mockResolvedValue({ stdout: ' queued ' });
     const first = transcribeAudio(Buffer.from('one'));
     const second = transcribeAudio(Buffer.from('two'));

@@ -10,7 +10,9 @@ function fakeServer() {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const requests: string[] = [];
-  stdin.on('data', (chunk: Buffer) => requests.push(...chunk.toString().split('\n').filter(Boolean)));
+  stdin.on('data', (chunk: Buffer) =>
+    requests.push(...chunk.toString().split('\n').filter(Boolean)),
+  );
   Object.assign(child, { stdin, stdout, stderr: new PassThrough(), kill: vi.fn() });
   return { child: child as ChildProcess, stdout, requests };
 }

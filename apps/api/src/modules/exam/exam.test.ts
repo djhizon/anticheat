@@ -21,7 +21,10 @@ import type { GeminiRotatingClient } from '../integrity/gemini.js';
 import { transcribeAudio } from '../integrity/whisper.js';
 import { PhonePresenceService } from '../integrity/phonePresence.js';
 
-vi.mock('../integrity/whisper.js', async (original) => ({ ...await original<typeof import('../integrity/whisper.js')>(), transcribeAudio: vi.fn() }));
+vi.mock('../integrity/whisper.js', async (original) => ({
+  ...(await original<typeof import('../integrity/whisper.js')>()),
+  transcribeAudio: vi.fn(),
+}));
 
 const origin = 'http://localhost:5173';
 const password = 'correct horse battery staple';
@@ -238,9 +241,7 @@ describe('exam delivery boundary', () => {
     expect(rejected.status).toBe(403);
     expect(auth.database.prepare('SELECT COUNT(*) AS count FROM exams').get()?.count).toBe(1);
 
-    const generated = await exam.routes.handle(
-      studentRequest(student, 'POST', '/exam/generate'),
-    );
+    const generated = await exam.routes.handle(studentRequest(student, 'POST', '/exam/generate'));
     expect(generated.status).toBe(201);
     expect((generated.body as ExamGenerationResponse).source).toBe('fallback');
 
@@ -503,63 +504,154 @@ describe('exam delivery boundary', () => {
     const owner = await registerStudent('owner@example.test');
     const other = await registerStudent('other@example.test');
     const seeded = await seedExam();
-    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: owner.userId });
-    const started = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: owner.userId,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
     const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
-    const integrity = { enrollPhone: vi.fn(() => ({ token: 'synthetic' })), checkPhoneStatus: vi.fn(() => ({ active: true })) };
-    const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity as unknown as IntegrityService);
+    const integrity = {
+      enrollPhone: vi.fn(() => ({ token: 'synthetic' })),
+      checkPhoneStatus: vi.fn(() => ({ active: true })),
+    };
+    const routes = new ExamRoutes(
+      exam.service,
+      auth.boundary,
+      config,
+      integrity as unknown as IntegrityService,
+    );
     const enroll = studentRequest(owner, 'POST', `/exam/attempts/${attemptId}/enroll-phone`);
     const missingCsrf = { ...enroll, headers: { ...enroll.headers, 'x-csrf-token': undefined } };
     expect((await routes.handle(missingCsrf)).status).toBe(403);
     expect((await routes.handle(studentRequest(other, 'POST', enroll.path))).status).toBe(404);
-    expect((await routes.handle(studentRequest(other, 'GET', `/exam/attempts/${attemptId}/phone-status`))).status).toBe(404);
+    expect(
+      (
+        await routes.handle(
+          studentRequest(other, 'GET', `/exam/attempts/${attemptId}/phone-status`),
+        )
+      ).status,
+    ).toBe(404);
     expect(integrity.enrollPhone).not.toHaveBeenCalled();
     expect(integrity.checkPhoneStatus).not.toHaveBeenCalled();
     expect((await routes.handle(enroll)).status).toBe(201);
-    expect((await routes.handle(studentRequest(owner, 'GET', `/exam/attempts/${attemptId}/phone-status`))).body).toEqual({ active: true });
+    expect(
+      (
+        await routes.handle(
+          studentRequest(owner, 'GET', `/exam/attempts/${attemptId}/phone-status`),
+        )
+      ).body,
+    ).toEqual({ active: true });
   });
 
   it('requires a session, CSRF and attempt ownership to record desktop events', async () => {
     const owner = await registerStudent('events@example.test');
     const other = await registerStudent('other@example.test');
     const seeded = await seedExam();
-    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: owner.userId });
-    const started = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: owner.userId,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
     const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
     const integrity = { recordAppEvent: vi.fn() };
-    const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity as unknown as IntegrityService);
-    const request = studentRequest(owner, 'PATCH', `/exam/attempts/${attemptId}/events`, { foregroundApp: 'Discord', displayCount: 2 });
-    expect((await routes.handle({ method: 'PATCH', path: request.path, headers: {}, body: request.body })).status).toBe(401);
-    expect((await routes.handle({ ...request, headers: { ...request.headers, 'x-csrf-token': undefined } })).status).toBe(403);
-    expect((await routes.handle(studentRequest(other, 'PATCH', request.path, request.body))).status).toBe(404);
+    const routes = new ExamRoutes(
+      exam.service,
+      auth.boundary,
+      config,
+      integrity as unknown as IntegrityService,
+    );
+    const request = studentRequest(owner, 'PATCH', `/exam/attempts/${attemptId}/events`, {
+      foregroundApp: 'Discord',
+      displayCount: 2,
+    });
+    expect(
+      (
+        await routes.handle({
+          method: 'PATCH',
+          path: request.path,
+          headers: {},
+          body: request.body,
+        })
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await routes.handle({
+          ...request,
+          headers: { ...request.headers, 'x-csrf-token': undefined },
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (await routes.handle(studentRequest(other, 'PATCH', request.path, request.body))).status,
+    ).toBe(404);
     expect(integrity.recordAppEvent).not.toHaveBeenCalled();
     expect((await routes.handle(request)).status).toBe(200);
     expect(integrity.recordAppEvent).toHaveBeenCalledWith(attemptId, 'Discord', 2);
   });
 
-  it('runs AI checks only on the caller\'s own saved answers', async () => {
+  it("runs AI checks only on the caller's own saved answers", async () => {
     const owner = await registerStudent('aicheck@example.test');
     const other = await registerStudent('other@example.test');
     const seeded = await seedExam();
-    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: owner.userId });
-    const started = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: owner.userId,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
     const delivery = (started.body as ExamDeliveryResponse).delivery;
     const attemptId = delivery.attempt.id;
     const shortAnswer = delivery.questions.find((question) => question.type === 'short_answer')!;
-    const integrity = { runAiCheck: vi.fn(async () => ({ score: 0.1, flags: [], summary: 'ok', checkedAt: 'now' })) };
-    const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity as unknown as IntegrityService);
+    const integrity = {
+      runAiCheck: vi.fn(async () => ({ score: 0.1, flags: [], summary: 'ok', checkedAt: 'now' })),
+    };
+    const routes = new ExamRoutes(
+      exam.service,
+      auth.boundary,
+      config,
+      integrity as unknown as IntegrityService,
+    );
     const path = `/exam/attempts/${attemptId}/ai-check`;
 
-    expect((await routes.handle(studentRequest(other, 'POST', path, { questionId: shortAnswer.id }))).status).toBe(404);
-    expect((await routes.handle(studentRequest(owner, 'POST', path, { question: 'q', answer: 'arbitrary text' }))).status).toBe(400);
-    expect((await routes.handle(studentRequest(owner, 'POST', path, { questionId: shortAnswer.id }))).status).toBe(400);
+    expect(
+      (await routes.handle(studentRequest(other, 'POST', path, { questionId: shortAnswer.id })))
+        .status,
+    ).toBe(404);
+    expect(
+      (
+        await routes.handle(
+          studentRequest(owner, 'POST', path, { question: 'q', answer: 'arbitrary text' }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (await routes.handle(studentRequest(owner, 'POST', path, { questionId: shortAnswer.id })))
+        .status,
+    ).toBe(400);
     expect(integrity.runAiCheck).not.toHaveBeenCalled();
 
-    const saved = await exam.routes.handle(studentRequest(owner, 'PUT', `/exam/attempts/${attemptId}/answers`, {
-      revision: 0, idempotencyKey: 'ai-check-save-key-1', answers: Object.fromEntries(delivery.questions.map((question) => [question.id, question.id === shortAnswer.id ? 'my own words' : null])),
-    }));
+    const saved = await exam.routes.handle(
+      studentRequest(owner, 'PUT', `/exam/attempts/${attemptId}/answers`, {
+        revision: 0,
+        idempotencyKey: 'ai-check-save-key-1',
+        answers: Object.fromEntries(
+          delivery.questions.map((question) => [
+            question.id,
+            question.id === shortAnswer.id ? 'my own words' : null,
+          ]),
+        ),
+      }),
+    );
     expect(saved.status).toBe(200);
-    const checked = await routes.handle(studentRequest(owner, 'POST', path, { questionId: shortAnswer.id, answer: 'ignored' }));
+    const checked = await routes.handle(
+      studentRequest(owner, 'POST', path, { questionId: shortAnswer.id, answer: 'ignored' }),
+    );
     expect(checked.status).toBe(200);
     expect(integrity.runAiCheck).toHaveBeenCalledWith(shortAnswer.prompt, 'my own words');
   });
@@ -568,28 +660,62 @@ describe('exam delivery boundary', () => {
     const owner = await registerStudent('scoped@example.test');
     const other = await registerStudent('other@example.test');
     const seeded = await seedExam();
-    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: owner.userId });
-    const started = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: owner.userId,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
     const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
     const integrity = { verifyLiveness: vi.fn(), getRevisions: vi.fn(() => []) };
-    const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity as unknown as IntegrityService);
+    const routes = new ExamRoutes(
+      exam.service,
+      auth.boundary,
+      config,
+      integrity as unknown as IntegrityService,
+    );
     const base = `/exam/attempts/${attemptId}`;
-    expect((await routes.handle(studentRequest(other, 'POST', `${base}/liveness-verify`, { nonce: 'n', layer: 2 }))).status).toBe(404);
-    expect((await routes.handle(studentRequest(other, 'GET', `${base}/revisions?questionId=q`))).status).toBe(404);
-    expect((await routes.handle(studentRequest(other, 'POST', `${base}/recording`, { index: 0, chunk: '' }))).status).toBe(404);
+    expect(
+      (
+        await routes.handle(
+          studentRequest(other, 'POST', `${base}/liveness-verify`, { nonce: 'n', layer: 2 }),
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (await routes.handle(studentRequest(other, 'GET', `${base}/revisions?questionId=q`))).status,
+    ).toBe(404);
+    expect(
+      (
+        await routes.handle(
+          studentRequest(other, 'POST', `${base}/recording`, { index: 0, chunk: '' }),
+        )
+      ).status,
+    ).toBe(404);
     expect(integrity.verifyLiveness).not.toHaveBeenCalled();
     expect(integrity.getRevisions).not.toHaveBeenCalled();
-    expect((await routes.handle(studentRequest(owner, 'GET', `${base}/revisions?questionId=q`))).status).toBe(200);
+    expect(
+      (await routes.handle(studentRequest(owner, 'GET', `${base}/revisions?questionId=q`))).status,
+    ).toBe(200);
   });
 
   it('answers CORS preflight for every browser-called exam route', async () => {
-    const paths = ['/exam/speedtest', ...['recording', 'vision-check', 'telemetry', 'transparency', 'events', 'ai-check']
-      .map((route) => `/exam/attempts/attempt-1/${route}`)];
+    const paths = [
+      '/exam/speedtest',
+      ...['recording', 'vision-check', 'telemetry', 'transparency', 'events', 'ai-check'].map(
+        (route) => `/exam/attempts/attempt-1/${route}`,
+      ),
+    ];
     for (const path of paths) {
       const preflight = await exam.routes.handle({
         method: 'OPTIONS',
         path,
-        headers: { origin, 'access-control-request-method': 'POST', 'access-control-request-headers': 'content-type, x-csrf-token' },
+        headers: {
+          origin,
+          'access-control-request-method': 'POST',
+          'access-control-request-headers': 'content-type, x-csrf-token',
+        },
       });
       expect({ path, status: preflight.status }).toEqual({ path, status: 204 });
     }
@@ -599,15 +725,29 @@ describe('exam delivery boundary', () => {
     const owner = await registerStudent('telemetry@example.test');
     const other = await registerStudent('other@example.test');
     const seeded = await seedExam();
-    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: owner.userId });
-    const started = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: owner.userId,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
     const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
-    const integrity = new IntegrityService(new IntegrityRepository(auth.database), {} as GeminiRotatingClient);
+    const integrity = new IntegrityService(
+      new IntegrityRepository(auth.database),
+      {} as GeminiRotatingClient,
+    );
     const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity);
     const path = `/exam/attempts/${attemptId}/telemetry`;
     const body = {
-      keystrokes: [{ questionId: 'q1', dwellMs: 80, flightMs: 120 }, { dwellMs: -5, flightMs: 'x' }],
-      gaze: [{ timestamp: '2026-09-15T00:00:01.000Z', durationMs: 4200 }, { timestamp: 'never', durationMs: 10 }],
+      keystrokes: [
+        { questionId: 'q1', dwellMs: 80, flightMs: 120 },
+        { dwellMs: -5, flightMs: 'x' },
+      ],
+      gaze: [
+        { timestamp: '2026-09-15T00:00:01.000Z', durationMs: 4200 },
+        { timestamp: 'never', durationMs: 10 },
+      ],
       voice: [{ timestamp: Date.parse('2026-09-15T00:00:02.000Z'), durationMs: 900, peakDb: -20 }],
     };
 
@@ -616,28 +756,53 @@ describe('exam delivery boundary', () => {
     expect(stored.status).toBe(202);
     expect(stored.body).toEqual({ accepted: { keystrokes: 1, gaze: 1, voice: 1 } });
     const count = (table: string) =>
-      (auth.database.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE attempt_id = ?`).get(attemptId) as { n: number }).n;
-    expect([count('keystroke_events'), count('gaze_events'), count('voice_events')]).toEqual([1, 1, 1]);
+      (
+        auth.database
+          .prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE attempt_id = ?`)
+          .get(attemptId) as { n: number }
+      ).n;
+    expect([count('keystroke_events'), count('gaze_events'), count('voice_events')]).toEqual([
+      1, 1, 1,
+    ]);
   });
 
   it('shows the attempt owner a transparency report of recorded events', async () => {
     const owner = await registerStudent('transparency@example.test');
     const other = await registerStudent('other@example.test');
     const seeded = await seedExam();
-    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: owner.userId });
-    const started = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: owner.userId,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
     const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
-    const integrity = new IntegrityService(new IntegrityRepository(auth.database), {} as GeminiRotatingClient);
+    const integrity = new IntegrityService(
+      new IntegrityRepository(auth.database),
+      {} as GeminiRotatingClient,
+    );
     const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity);
     const base = `/exam/attempts/${attemptId}`;
-    await routes.handle(studentRequest(owner, 'PATCH', `${base}/events`, { event: 'keystroke_violation' }));
-    await routes.handle(studentRequest(owner, 'PATCH', `${base}/events`, { foregroundApp: 'Exam', displayCount: 2 }));
+    await routes.handle(
+      studentRequest(owner, 'PATCH', `${base}/events`, { event: 'keystroke_violation' }),
+    );
+    await routes.handle(
+      studentRequest(owner, 'PATCH', `${base}/events`, { foregroundApp: 'Exam', displayCount: 2 }),
+    );
 
-    expect((await routes.handle(studentRequest(other, 'GET', `${base}/transparency`))).status).toBe(404);
+    expect((await routes.handle(studentRequest(other, 'GET', `${base}/transparency`))).status).toBe(
+      404,
+    );
     const report = await routes.handle(studentRequest(owner, 'GET', `${base}/transparency`));
     expect(report.status).toBe(200);
-    expect((report.body as { events: Array<{ type: string; description: string }> }).events).toEqual([
-      expect.objectContaining({ type: 'SOFTWARE', description: 'Flagged behaviour: keystroke violation' }),
+    expect(
+      (report.body as { events: Array<{ type: string; description: string }> }).events,
+    ).toEqual([
+      expect.objectContaining({
+        type: 'SOFTWARE',
+        description: 'Flagged behaviour: keystroke violation',
+      }),
       expect.objectContaining({ type: 'HARDWARE', description: 'Multiple displays detected (2)' }),
     ]);
   });
@@ -645,39 +810,71 @@ describe('exam delivery boundary', () => {
   it('keeps integrity monitoring available without Gemini keys', async () => {
     const owner = await registerStudent('nokeys@example.test');
     const seeded = await seedExam();
-    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: owner.userId });
-    const started = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: owner.userId,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
     const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
     expect(config.geminiKeys).toHaveLength(0);
-    const telemetry = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/attempts/${attemptId}/telemetry`, { keystrokes: [] }));
+    const telemetry = await exam.routes.handle(
+      studentRequest(owner, 'POST', `/exam/attempts/${attemptId}/telemetry`, { keystrokes: [] }),
+    );
     expect(telemetry.status).toBe(202);
-    expect((await exam.routes.handle(studentRequest(owner, 'GET', `/exam/attempts/${attemptId}/transparency`))).status).toBe(200);
+    expect(
+      (
+        await exam.routes.handle(
+          studentRequest(owner, 'GET', `/exam/attempts/${attemptId}/transparency`),
+        )
+      ).status,
+    ).toBe(200);
   });
 
   it('lets instructors run cross-student similarity on saved answers', async () => {
     const seeded = await seedExam();
     const instructor = await registerStudent('teacher@example.test');
-    auth.database.prepare(`UPDATE users SET role = 'instructor' WHERE id = ?`).run(instructor.userId);
+    auth.database
+      .prepare(`UPDATE users SET role = 'instructor' WHERE id = ?`)
+      .run(instructor.userId);
     const texts = ['the same copied answer', 'the same copied answer!', 'an original thought'];
     let shortAnswerId = '';
     for (const [index, text] of texts.entries()) {
       const student = await registerStudent(`student${index}@example.test`);
-      const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: student.userId });
+      const assignmentId = await exam.service.assignExam({
+        examVersionId: seeded.examVersionId,
+        studentId: student.userId,
+      });
       const start = await exam.service.startAttempt(assignmentId, student.userId);
-      shortAnswerId = start.delivery.questions.find((question) => question.type === 'short_answer')!.id;
+      shortAnswerId = start.delivery.questions.find(
+        (question) => question.type === 'short_answer',
+      )!.id;
       await exam.service.saveAnswers(start.delivery.attempt.id, student.userId, {
         revision: 0,
         idempotencyKey: `similarity-save-${index}-key`,
-        answers: Object.fromEntries(start.delivery.questions.map((q) => [q.id, q.id === shortAnswerId ? text : null])),
+        answers: Object.fromEntries(
+          start.delivery.questions.map((q) => [q.id, q.id === shortAnswerId ? text : null]),
+        ),
       });
     }
-    const gemini = { embedText: vi.fn(async (text: string) => (text.includes('same') ? [1, 0] : [0, 1])) };
-    const integrity = new IntegrityService(new IntegrityRepository(auth.database), gemini as unknown as GeminiRotatingClient);
+    const gemini = {
+      embedText: vi.fn(async (text: string) => (text.includes('same') ? [1, 0] : [0, 1])),
+    };
+    const integrity = new IntegrityService(
+      new IntegrityRepository(auth.database),
+      gemini as unknown as GeminiRotatingClient,
+    );
     const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity);
 
-    const listed = await routes.handle(studentRequest(instructor, 'GET', '/exam/instructor/versions'));
+    const listed = await routes.handle(
+      studentRequest(instructor, 'GET', '/exam/instructor/versions'),
+    );
     expect(listed.status).toBe(200);
-    expect((listed.body as { versions: Array<{ id: string; questions: Array<{ id: string }> }> }).versions[0]).toMatchObject({
+    expect(
+      (listed.body as { versions: Array<{ id: string; questions: Array<{ id: string }> }> })
+        .versions[0],
+    ).toMatchObject({
       id: seeded.examVersionId,
       questions: expect.arrayContaining([expect.objectContaining({ id: shortAnswerId })]),
     });
@@ -687,38 +884,63 @@ describe('exam delivery boundary', () => {
     expect((await routes.handle(studentRequest(student, 'POST', path))).status).toBe(403);
     const run = await routes.handle(studentRequest(instructor, 'POST', path));
     expect(run.status).toBe(200);
-    const body = run.body as { report: { pairs: Array<{ flagged: boolean; studentAId: string; studentBId: string }> }; students: Record<string, string> };
+    const body = run.body as {
+      report: { pairs: Array<{ flagged: boolean; studentAId: string; studentBId: string }> };
+      students: Record<string, string>;
+    };
     const flagged = body.report.pairs.filter((pair) => pair.flagged);
     expect(flagged).toHaveLength(1);
-    expect([body.students[flagged[0]!.studentAId], body.students[flagged[0]!.studentBId]].sort()).toEqual([
-      'student0@example.test',
-      'student1@example.test',
-    ]);
+    expect(
+      [body.students[flagged[0]!.studentAId], body.students[flagged[0]!.studentBId]].sort(),
+    ).toEqual(['student0@example.test', 'student1@example.test']);
   });
 
   it('runs opt-in backend vision on in-progress attempts and logs detected devices', async () => {
     const owner = await registerStudent('vision@example.test');
     const other = await registerStudent('other@example.test');
     const seeded = await seedExam();
-    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: owner.userId });
-    const started = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: owner.userId,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
     const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
     const integrity = { recordAppEvent: vi.fn() };
     const detector = vi.fn(async () => ({
       status: 'ok' as const,
-      detections: [{ label: 'person', score: 0.99 }, { label: 'cell phone', score: 0.8 }],
+      detections: [
+        { label: 'person', score: 0.99 },
+        { label: 'cell phone', score: 0.8 },
+      ],
     }));
     const path = `/exam/attempts/${attemptId}/vision-check`;
-    const frame = { imageBase64: `data:image/jpeg;base64,${Buffer.from('jpeg').toString('base64')}` };
+    const frame = {
+      imageBase64: `data:image/jpeg;base64,${Buffer.from('jpeg').toString('base64')}`,
+    };
 
     expect((await exam.routes.handle(studentRequest(owner, 'POST', path, frame))).status).toBe(404); // disabled by default
-    const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity as unknown as IntegrityService, null, detector);
+    const routes = new ExamRoutes(
+      exam.service,
+      auth.boundary,
+      config,
+      integrity as unknown as IntegrityService,
+      null,
+      detector,
+    );
     expect((await routes.handle(studentRequest(other, 'POST', path, frame))).status).toBe(404);
-    expect((await routes.handle(studentRequest(owner, 'POST', path, { imageBase64: 'not base64!' }))).status).toBe(400);
+    expect(
+      (await routes.handle(studentRequest(owner, 'POST', path, { imageBase64: 'not base64!' })))
+        .status,
+    ).toBe(400);
     expect(detector).not.toHaveBeenCalled();
 
     const checked = await routes.handle(studentRequest(owner, 'POST', path, frame));
-    expect(checked.body).toEqual({ status: 'ok', detections: [{ label: 'cell phone', score: 0.8 }] });
+    expect(checked.body).toEqual({
+      status: 'ok',
+      detections: [{ label: 'cell phone', score: 0.8 }],
+    });
     expect(detector).toHaveBeenCalledWith(Buffer.from('jpeg').toString('base64'));
     expect(integrity.recordAppEvent).toHaveBeenCalledWith(attemptId, 'flag:vision_cell_phone', 1);
   });
@@ -727,12 +949,29 @@ describe('exam delivery boundary', () => {
     const owner = await registerStudent('audio@example.test');
     const other = await registerStudent('other@example.test');
     const seeded = await seedExam();
-    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: owner.userId });
-    const started = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: owner.userId,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
     const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
-    const request = studentRequest(owner, 'POST', `/exam/attempts/${attemptId}/audio`, { audio: Buffer.from('synthetic audio').toString('base64'), durationMs: 5000 });
-    expect((await exam.routes.handle(studentRequest(other, 'POST', request.path, request.body))).status).toBe(404);
-    expect((await exam.routes.handle({ ...request, headers: { ...request.headers, 'x-csrf-token': undefined } })).status).toBe(403);
+    const request = studentRequest(owner, 'POST', `/exam/attempts/${attemptId}/audio`, {
+      audio: Buffer.from('synthetic audio').toString('base64'),
+      durationMs: 5000,
+    });
+    expect(
+      (await exam.routes.handle(studentRequest(other, 'POST', request.path, request.body))).status,
+    ).toBe(404);
+    expect(
+      (
+        await exam.routes.handle({
+          ...request,
+          headers: { ...request.headers, 'x-csrf-token': undefined },
+        })
+      ).status,
+    ).toBe(403);
     expect(transcribeAudio).not.toHaveBeenCalled();
     vi.mocked(transcribeAudio).mockRejectedValueOnce(new Error('fixture failure'));
     const failed = await exam.routes.handle(request);
@@ -746,23 +985,43 @@ describe('exam delivery boundary', () => {
 
   it('accepts a configured LAN heartbeat without a student cookie and rejects other origins', async () => {
     const lanOrigin = 'http://192.168.1.8:5173';
-    const integrity = { phoneHeartbeat: vi.fn((token: string) => ({ ok: token === 'synthetic', attemptId: null })) };
-    const routes = new ExamRoutes(exam.service, auth.boundary,
-      { ...config, allowedOrigins: [origin, lanOrigin] }, integrity as unknown as IntegrityService);
-    const request = { method: 'POST', path: '/exam/phone-heartbeat', headers: { origin: lanOrigin }, body: { token: 'synthetic' } };
+    const integrity = {
+      phoneHeartbeat: vi.fn((token: string) => ({ ok: token === 'synthetic', attemptId: null })),
+    };
+    const routes = new ExamRoutes(
+      exam.service,
+      auth.boundary,
+      { ...config, allowedOrigins: [origin, lanOrigin] },
+      integrity as unknown as IntegrityService,
+    );
+    const request = {
+      method: 'POST',
+      path: '/exam/phone-heartbeat',
+      headers: { origin: lanOrigin },
+      body: { token: 'synthetic' },
+    };
     const response = await routes.handle(request);
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ ok: true, attemptId: null });
-    expect((await routes.handle({ ...request, body: { token: 'invalid' } })).body).toMatchObject({ ok: false });
-    expect((await routes.handle({ ...request, headers: { origin: 'http://untrusted.test' } })).status).toBe(403);
+    expect((await routes.handle({ ...request, body: { token: 'invalid' } })).body).toMatchObject({
+      ok: false,
+    });
+    expect(
+      (await routes.handle({ ...request, headers: { origin: 'http://untrusted.test' } })).status,
+    ).toBe(403);
     expect(integrity.phoneHeartbeat).toHaveBeenCalledTimes(2);
   });
 
   async function phoneFixture() {
     const student = await registerStudent('phone-owner@example.test');
     const seeded = await seedExam();
-    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: student.userId });
-    const started = await exam.routes.handle(studentRequest(student, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: student.userId,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(student, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
     const delivery = (started.body as ExamDeliveryResponse).delivery;
     return { student, delivery, attemptId: delivery.attempt.id };
   }
@@ -772,14 +1031,26 @@ describe('exam delivery boundary', () => {
     const path = `/exam/attempts/${attemptId}/phone-presence`;
     expect(exam.phonePresence.status(attemptId).required).toBe(false);
     const request = studentRequest(student, 'POST', path);
-    expect((await exam.routes.handle({ ...request, headers: { ...request.headers, 'x-csrf-token': undefined } })).status).toBe(403);
+    expect(
+      (
+        await exam.routes.handle({
+          ...request,
+          headers: { ...request.headers, 'x-csrf-token': undefined },
+        })
+      ).status,
+    ).toBe(403);
     const other = await registerStudent('phone-other@example.test');
     expect((await exam.routes.handle(studentRequest(other, 'POST', path))).status).toBe(404);
     expect((await exam.routes.handle(studentRequest(other, 'GET', path))).status).toBe(404);
     const enrolled = await exam.routes.handle(request);
     expect(enrolled.status).toBe(201);
     const { code } = enrolled.body as { code: string };
-    const claimed = await exam.routes.handle({ method: 'POST', path: '/exam/phone-presence/claim', headers: {}, body: { code } });
+    const claimed = await exam.routes.handle({
+      method: 'POST',
+      path: '/exam/phone-presence/claim',
+      headers: {},
+      body: { code },
+    });
     expect(claimed.status).toBe(200);
     const { credential } = claimed.body as { credential: string };
     expect(() => exam.phonePresence.claim(code)).toThrow();
@@ -801,16 +1072,24 @@ describe('exam delivery boundary', () => {
     const { attemptId } = await phoneFixture();
     const { credential } = exam.phonePresence.claim(exam.phonePresence.enroll(attemptId).code);
     const first = exam.phonePresence.challenge(credential);
-    expect(() => exam.phonePresence.heartbeat(credential, first.challenge, first.sequence, false)).toThrow();
+    expect(() =>
+      exam.phonePresence.heartbeat(credential, first.challenge, first.sequence, false),
+    ).toThrow();
     clock.advance(3);
     exam.phonePresence.heartbeat(credential, first.challenge, first.sequence, true);
     expect(exam.phonePresence.status(attemptId).remainingMs).toBe(5000);
-    expect(() => exam.phonePresence.heartbeat(credential, first.challenge, first.sequence, true)).toThrow();
+    expect(() =>
+      exam.phonePresence.heartbeat(credential, first.challenge, first.sequence, true),
+    ).toThrow();
     const second = exam.phonePresence.challenge(credential);
-    expect(() => exam.phonePresence.heartbeat(credential, second.challenge, first.sequence, true)).toThrow();
+    expect(() =>
+      exam.phonePresence.heartbeat(credential, second.challenge, first.sequence, true),
+    ).toThrow();
     clock.advance(5);
     expect(exam.phonePresence.status(attemptId).active).toBe(false);
-    expect(() => exam.phonePresence.heartbeat(credential, second.challenge, second.sequence, true)).toThrow();
+    expect(() =>
+      exam.phonePresence.heartbeat(credential, second.challenge, second.sequence, true),
+    ).toThrow();
     const resumed = exam.phonePresence.challenge(credential);
     exam.phonePresence.heartbeat(credential, resumed.challenge, resumed.sequence, true);
     expect(exam.phonePresence.status(attemptId).active).toBe(true);
@@ -823,27 +1102,51 @@ describe('exam delivery boundary', () => {
   it('gates real answer writes and preserves acknowledged idempotent replay and finalization', async () => {
     const { student, attemptId, delivery } = await phoneFixture();
     const { credential } = exam.phonePresence.claim(exam.phonePresence.enroll(attemptId).code);
-    const answers = Object.fromEntries(delivery.questions.map(q => [q.id, null]));
+    const answers = Object.fromEntries(delivery.questions.map((q) => [q.id, null]));
     const request = { revision: 0, idempotencyKey: 'phone-save-fixture-0001', answers };
-    await expect(exam.service.saveAnswers(attemptId, student.userId, request)).rejects.toThrow('Phone connection lost');
+    await expect(exam.service.saveAnswers(attemptId, student.userId, request)).rejects.toThrow(
+      'Phone connection lost',
+    );
     const challenge = exam.phonePresence.challenge(credential);
     exam.phonePresence.heartbeat(credential, challenge.challenge, challenge.sequence, true);
     const saved = await exam.service.saveAnswers(attemptId, student.userId, request);
     clock.advance(8);
     expect(await exam.service.saveAnswers(attemptId, student.userId, request)).toEqual(saved);
-    const blocked = await exam.routes.handle(studentRequest(student, 'PUT', `/exam/attempts/${attemptId}/answers`, { ...request, revision: 1, idempotencyKey: 'phone-blocked-fixture-0002' }));
+    const blocked = await exam.routes.handle(
+      studentRequest(student, 'PUT', `/exam/attempts/${attemptId}/answers`, {
+        ...request,
+        revision: 1,
+        idempotencyKey: 'phone-blocked-fixture-0002',
+      }),
+    );
     expect(blocked.status).toBe(409);
-    expect((await exam.service.getAttemptDelivery(attemptId, student.userId)).answers.revision).toBe(1);
-    const submitted = await exam.service.submitAttemptWithAnswers(attemptId, student.userId, { expectedRevision: 1, idempotencyKey: 'phone-submit-fixture-0003' });
+    expect(
+      (await exam.service.getAttemptDelivery(attemptId, student.userId)).answers.revision,
+    ).toBe(1);
+    const submitted = await exam.service.submitAttemptWithAnswers(attemptId, student.userId, {
+      expectedRevision: 1,
+      idempotencyKey: 'phone-submit-fixture-0003',
+    });
     expect(submitted.receipt.status).toBe('submitted');
     expect(() => exam.phonePresence.challenge(credential)).toThrow();
   });
 
   it('expires an unclaimed pairing QR after two minutes', async () => {
     const student = await registerStudent('pair-expiry@example.test');
-    const seeded = await exam.service.seedPublishedExam({ slug: 'long-pairing', title: 'Pairing timeout', versionNumber: 1, durationSeconds: 600, questions: [{ type: 'true_false', prompt: 'Synthetic?', answerKey: true }] });
-    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: student.userId });
-    const start = await exam.routes.handle(studentRequest(student, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const seeded = await exam.service.seedPublishedExam({
+      slug: 'long-pairing',
+      title: 'Pairing timeout',
+      versionNumber: 1,
+      durationSeconds: 600,
+      questions: [{ type: 'true_false', prompt: 'Synthetic?', answerKey: true }],
+    });
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: student.userId,
+    });
+    const start = await exam.routes.handle(
+      studentRequest(student, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
     const attemptId = (start.body as ExamDeliveryResponse).delivery.attempt.id;
     const { code } = exam.phonePresence.enroll(attemptId);
     clock.advance(120);

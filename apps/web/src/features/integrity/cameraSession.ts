@@ -186,7 +186,15 @@ export function createCameraSession(
         if (latest !== null && env.monotonicNow() - latestAt > 1500) {
           latest = baseline = null;
           phone.clear();
-          state = { ...state, faces: null, phone: 'waiting', earbuds: null, smartGlasses: null, calibrated: false, relative: null };
+          state = {
+            ...state,
+            faces: null,
+            phone: 'waiting',
+            earbuds: null,
+            smartGlasses: null,
+            calibrated: false,
+            relative: null,
+          };
         }
         state = { ...state, remainingSeconds: Math.ceil(remaining() / 1000) };
         notify();
@@ -207,7 +215,14 @@ export function createCameraSession(
           state = {
             ...state,
             faces: observation.faces,
-            phone: observation.phoneAvailable === false ? 'unavailable' : confirmed ? 'observed' : observation.phone ? 'candidate' : 'not_observed',
+            phone:
+              observation.phoneAvailable === false
+                ? 'unavailable'
+                : confirmed
+                  ? 'observed'
+                  : observation.phone
+                    ? 'candidate'
+                    : 'not_observed',
             earbuds: observation.earbuds ?? null,
             smartGlasses: observation.smartGlasses ?? null,
             calibrated: baseline !== null,

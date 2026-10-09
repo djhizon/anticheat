@@ -86,7 +86,8 @@ export function LoginPage(): React.ReactElement {
         <p className="auth-kicker">Pack 8 Active</p>
         <h1 id="auth-intro-title">Strict Exam Environment</h1>
         <p className="auth-intro-copy">
-          Your exam is secured by advanced machine learning, native OS hardware tracking, and physical environment validation.
+          Your exam is secured by advanced machine learning, native OS hardware tracking, and
+          physical environment validation.
         </p>
         <div className="auth-promise" role="note">
           <span className="promise-icon" aria-hidden="true">

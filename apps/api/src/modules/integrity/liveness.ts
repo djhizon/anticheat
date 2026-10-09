@@ -8,15 +8,16 @@ export const NOISE_THRESHOLD = 3.0;
 export const GESTURE_CHALLENGES = ['fingers_1', 'fingers_2', 'fingers_3', 'thumbs_up'] as const;
 export type GestureChallenge = (typeof GESTURE_CHALLENGES)[number];
 
-const GESTURE_LABELS: Record<GestureChallenge, string> = { fingers_1: 'Hold up 1 finger', fingers_2: 'Hold up 2 fingers', fingers_3: 'Hold up 3 fingers', thumbs_up: 'Give a thumbs up' };
-
-
+const GESTURE_LABELS: Record<GestureChallenge, string> = {
+  fingers_1: 'Hold up 1 finger',
+  fingers_2: 'Hold up 2 fingers',
+  fingers_3: 'Hold up 3 fingers',
+  thumbs_up: 'Give a thumbs up',
+};
 
 export function generateNonce(): string {
   return randomBytes(16).toString('hex');
 }
-
-
 
 export type ChallengeType = 'flash' | 'gesture';
 
@@ -50,7 +51,6 @@ export interface VerifyResult {
   readonly passed: boolean;
   readonly detail: string;
 }
-
 
 export function verifyFlashChallenge(
   brightnessDelta: number,

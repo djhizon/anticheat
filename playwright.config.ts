@@ -11,12 +11,17 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   projects: [
-    { name: 'chromium', use: {
-      ...devices['Desktop Chrome'],
-      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? {
-        launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE },
-      } : {}),
-    } },
+    {
+      name: 'chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+          ? {
+              launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE },
+            }
+          : {}),
+      },
+    },
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
   ],
 });

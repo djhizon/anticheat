@@ -38,7 +38,9 @@ export function startDesktopWatcher(
     if (key === last) return;
     last = key;
     if (!suspicious || snapshot.foregroundApp === 'unknown') return;
-    send({ foregroundApp: snapshot.foregroundApp, displayCount: snapshot.displayCount }).catch(() => {});
+    send({ foregroundApp: snapshot.foregroundApp, displayCount: snapshot.displayCount }).catch(
+      () => {},
+    );
   });
   bridge.startWatcher(attemptId);
   return () => {

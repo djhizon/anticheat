@@ -108,7 +108,7 @@ function StudentWorkspace({
   const [generatingExam, setGeneratingExam] = useState(false);
   const [generationMessage, setGenerationMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  
+
   const [preflightPassed, setPreflightPassed] = useState(false);
 
   const loadAssignments = useCallback(async (): Promise<void> => {
@@ -162,19 +162,21 @@ function StudentWorkspace({
   const [permissionsGranted, setPermissionsGranted] = useState(false);
   const [permissionsError, setPermissionsError] = useState<string | null>(null);
   const tabGuardRef = useRef<{ release(): void } | null>(null);
-  const [violations, setViolations] = useState<import('./features/integrity/tabGuard.js').ViolationEvent[]>([]);
+  const [violations, setViolations] = useState<
+    import('./features/integrity/tabGuard.js').ViolationEvent[]
+  >([]);
 
   function requestOpen(assignment: ExamAssignmentProjection): void {
     console.log('requestOpen called for', assignment.title);
     try {
-      if (tabGuardRef.current !== null) { 
+      if (tabGuardRef.current !== null) {
         console.log('releasing old tab guard');
-        tabGuardRef.current.release(); 
-        tabGuardRef.current = null; 
+        tabGuardRef.current.release();
+        tabGuardRef.current = null;
       }
       console.log('clearing local storage guard');
       localStorage.removeItem(`exam-tab-guard:${assignment.id}`);
-      
+
       console.log('setting pending assignment', assignment.id);
       setPendingAssignment(assignment);
       setConsentChecked(false);
@@ -190,12 +192,16 @@ function StudentWorkspace({
     try {
       setPermissionsError(null);
       const camera = await acquirePhysicalCamera();
-      camera.getTracks().forEach(track => track.stop());
+      camera.getTracks().forEach((track) => track.stop());
       const microphone = await acquireBuiltInMicrophone();
-      microphone.getTracks().forEach(track => track.stop());
+      microphone.getTracks().forEach((track) => track.stop());
       setPermissionsGranted(true);
     } catch (err) {
-      setPermissionsError(err instanceof Error ? err.message : 'Camera or built-in microphone unavailable. Check macOS Privacy settings.');
+      setPermissionsError(
+        err instanceof Error
+          ? err.message
+          : 'Camera or built-in microphone unavailable. Check macOS Privacy settings.',
+      );
     }
   }
 
@@ -246,7 +252,9 @@ function StudentWorkspace({
   }
 
   if (!preflightPassed) {
-    return <PreflightCheck onPassed={() => setPreflightPassed(true)} onCancel={() => void onLogout()} />;
+    return (
+      <PreflightCheck onPassed={() => setPreflightPassed(true)} onCancel={() => void onLogout()} />
+    );
   }
 
   if (selectedAssignment !== null) {
@@ -268,7 +276,7 @@ function StudentWorkspace({
       {/* ── Consent modal ───────────────────────────────────────────────────── */}
       {pendingAssignment !== null && (
         <div className="modal-backdrop" onClick={() => setPendingAssignment(null)}>
-          <div className="modal-card" onClick={e => e.stopPropagation()}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-icon">🛡️</div>
             <h2 className="modal-title">Before you begin</h2>
             <p className="modal-subtitle">{pendingAssignment.title}</p>
@@ -278,14 +286,20 @@ function StudentWorkspace({
                 <span className="consent-icon">📷</span>
                 <div>
                   <strong>Camera &amp; Face Detection</strong>
-                  <p>Your face will be monitored throughout the exam to verify your identity and detect phone use.</p>
+                  <p>
+                    Your face will be monitored throughout the exam to verify your identity and
+                    detect phone use.
+                  </p>
                 </div>
               </li>
               <li>
                 <span className="consent-icon">🎙️</span>
                 <div>
                   <strong>Audio Monitoring</strong>
-                  <p>Microphone access is requested to detect voices other than your own during the exam.</p>
+                  <p>
+                    Microphone access is requested to detect voices other than your own during the
+                    exam.
+                  </p>
                 </div>
               </li>
               <li>
@@ -306,7 +320,10 @@ function StudentWorkspace({
                 <span className="consent-icon">☁️</span>
                 <div>
                   <strong>Cloud Screen Recording</strong>
-                  <p>Your screen and microphone will be continuously recorded and uploaded to the cloud for appeal reviews.</p>
+                  <p>
+                    Your screen and microphone will be continuously recorded and uploaded to the
+                    cloud for appeal reviews.
+                  </p>
                 </div>
               </li>
               <li>
@@ -320,7 +337,10 @@ function StudentWorkspace({
                 <span className="consent-icon">🤖</span>
                 <div>
                   <strong>AI Integrity Check</strong>
-                  <p>Answers may be analysed by Gemini AI for signs of AI-generated text after submission.</p>
+                  <p>
+                    Answers may be analysed by Gemini AI for signs of AI-generated text after
+                    submission.
+                  </p>
                 </div>
               </li>
             </ul>
@@ -329,7 +349,7 @@ function StudentWorkspace({
               <input
                 type="checkbox"
                 checked={consentChecked}
-                onChange={e => setConsentChecked(e.target.checked)}
+                onChange={(e) => setConsentChecked(e.target.checked)}
               />
               <span>I understand and agree to these monitoring conditions for this exam.</span>
             </label>
@@ -347,10 +367,12 @@ function StudentWorkspace({
                 </button>
                 {permissionsError && (
                   <div style={{ marginTop: '0.5rem', textAlign: 'center' }}>
-                    <p style={{ color: '#ff6b6b', fontSize: '0.9rem', marginBottom: '0.5rem' }}>{permissionsError}</p>
-                    <button 
-                      onClick={requestHardwarePermissions} 
-                      className="btn btn-secondary" 
+                    <p style={{ color: '#ff6b6b', fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+                      {permissionsError}
+                    </p>
+                    <button
+                      onClick={requestHardwarePermissions}
+                      className="btn btn-secondary"
                       style={{ fontSize: '0.8rem', padding: '0.25rem 0.75rem' }}
                     >
                       Retry Camera Connection
@@ -367,11 +389,7 @@ function StudentWorkspace({
                 >
                   Cancel
                 </button>
-                <button
-                  className="topbar-submit"
-                  onClick={() => void confirmOpen()}
-                  type="button"
-                >
+                <button className="topbar-submit" onClick={() => void confirmOpen()} type="button">
                   I Agree — Start Exam
                 </button>
               </div>
@@ -411,9 +429,17 @@ function StudentWorkspace({
           ) : null}
         </section>
 
-        {loading ? <p role="status" style={{ textAlign: 'center', color: 'var(--color-muted)' }}>Loading assignments…</p> : null}
+        {loading ? (
+          <p role="status" style={{ textAlign: 'center', color: 'var(--color-muted)' }}>
+            Loading assignments…
+          </p>
+        ) : null}
         {error !== null ? (
-          <p aria-live="polite" role="alert" style={{ color: 'var(--color-error)', textAlign: 'center' }}>
+          <p
+            aria-live="polite"
+            role="alert"
+            style={{ color: 'var(--color-error)', textAlign: 'center' }}
+          >
             {error}
           </p>
         ) : null}
@@ -431,12 +457,20 @@ function StudentWorkspace({
             const isInProgress = assignment.attemptStatus === 'in_progress';
             const isDisabled = isSubmitted || isExpired;
             return (
-              <article className="assignment-card" key={assignment.id} style={isDisabled ? { opacity: 0.5 } : {}}>
+              <article
+                className="assignment-card"
+                key={assignment.id}
+                style={isDisabled ? { opacity: 0.5 } : {}}
+              >
                 <div className="card-status-dot" data-status={assignment.attemptStatus ?? 'none'} />
                 <p className="eyebrow">Version {assignment.versionNumber}</p>
                 <h2>{assignment.title}</h2>
-                <p className="muted">Assigned {new Date(assignment.assignedAt).toLocaleDateString()}</p>
-                <p className={`assignment-status ${isSubmitted ? 'status-ok' : isInProgress ? 'status-progress' : ''}`}>
+                <p className="muted">
+                  Assigned {new Date(assignment.assignedAt).toLocaleDateString()}
+                </p>
+                <p
+                  className={`assignment-status ${isSubmitted ? 'status-ok' : isInProgress ? 'status-progress' : ''}`}
+                >
                   {assignment.attemptStatus === null
                     ? '○ Not started'
                     : isInProgress

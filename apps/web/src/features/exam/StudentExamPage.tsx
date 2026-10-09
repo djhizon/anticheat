@@ -21,8 +21,12 @@ function timeLimitOf(question: object): number | undefined {
   return typeof limit === 'number' && limit > 0 ? limit : undefined;
 }
 
-const AudioPanel = React.lazy(() => import('../integrity/AudioPanel.js').then((m) => ({ default: m.AudioPanel })));
-const CameraIntegrityPanel = React.lazy(() => import('../integrity/CameraIntegrityPanel.js').then((m) => ({ default: m.CameraIntegrityPanel })));
+const AudioPanel = React.lazy(() =>
+  import('../integrity/AudioPanel.js').then((m) => ({ default: m.AudioPanel })),
+);
+const CameraIntegrityPanel = React.lazy(() =>
+  import('../integrity/CameraIntegrityPanel.js').then((m) => ({ default: m.CameraIntegrityPanel })),
+);
 
 export interface StudentExamPageProps {
   readonly delivery: ExamDeliveryProjection | null;
@@ -37,10 +41,20 @@ export interface StudentExamPageProps {
 type AnswerMap = Record<string, ExamAnswerValue>;
 type SaveState = 'Saved' | 'Saving…' | 'Save failed' | 'Not saved';
 
-function formatQuestionType(type: ExamDeliveryProjection['questions'][number]['type']): string { return type.replaceAll('_', ' '); }
-function formatDeadline(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? 'Unavailable' : date.toLocaleString(); }
-function createIdempotencyKey(prefix: string): string { const randomUuid = globalThis.crypto?.randomUUID?.(); return `${prefix}-${randomUuid ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`; }
-function displayValue(value: ExamAnswerValue): string { return value === null ? '' : String(value); }
+function formatQuestionType(type: ExamDeliveryProjection['questions'][number]['type']): string {
+  return type.replaceAll('_', ' ');
+}
+function formatDeadline(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Unavailable' : date.toLocaleString();
+}
+function createIdempotencyKey(prefix: string): string {
+  const randomUuid = globalThis.crypto?.randomUUID?.();
+  return `${prefix}-${randomUuid ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+}
+function displayValue(value: ExamAnswerValue): string {
+  return value === null ? '' : String(value);
+}
 
 export function StudentExamPage({
   delivery,
@@ -73,12 +87,18 @@ export function StudentExamPage({
   const [recordScreen, setRecordScreen] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState('Screen recording off — local-only demo.');
   const [focusedMode] = useState(true);
-  const phonePresence = usePhonePresence(currentDelivery?.attempt.id, currentDelivery?.attempt.status === 'in_progress', examApi);
+  const phonePresence = usePhonePresence(
+    currentDelivery?.attempt.id,
+    currentDelivery?.attempt.status === 'in_progress',
+    examApi,
+  );
   const phoneBlockedRef = useRef(phonePresence.blocked);
   phoneBlockedRef.current = phonePresence.blocked;
 
   function handleNextQuestion(): void {
-    setCurrentQuestionIndex(index => Math.min(index + 1, (currentDelivery?.questions.length ?? 1) - 1));
+    setCurrentQuestionIndex((index) =>
+      Math.min(index + 1, (currentDelivery?.questions.length ?? 1) - 1),
+    );
   }
 
   const pendingAnswersRef = useRef<AnswerMap | null>(null);
@@ -118,13 +138,13 @@ export function StudentExamPage({
           timestamp: Date.now(),
           count: pageHiddenCount,
         });
-        
+
         // Visibility is already reported above; it is not a measured gaze event.
       }
     };
     window.addEventListener('blur', onBlur);
     document.addEventListener('visibilitychange', onVisibility);
-    
+
     let stopOverlayDetector: (() => void) | null = null;
     import('../integrity/cluelyDetector.js').then(({ createOverlayDetector }) => {
       stopOverlayDetector = createOverlayDetector(() => {
@@ -170,7 +190,7 @@ export function StudentExamPage({
         ? 'Not saved'
         : 'Saved',
     );
-    
+
     // Initialize question timers
     const initialTimeouts: Record<string, number> = {};
     currentDelivery.questions.forEach((q) => {
@@ -180,25 +200,31 @@ export function StudentExamPage({
       }
     });
     if (Object.keys(initialTimeouts).length > 0) {
-      setQuestionTimeLeft(prev => ({ ...prev, ...initialTimeouts }));
+      setQuestionTimeLeft((prev) => ({ ...prev, ...initialTimeouts }));
     }
   }, [currentDelivery]);
 
   // Per-question timer
   useEffect(() => {
-    if (!focusedMode || !currentDelivery || currentDelivery.attempt.status !== 'in_progress' || examPaused) return;
+    if (
+      !focusedMode ||
+      !currentDelivery ||
+      currentDelivery.attempt.status !== 'in_progress' ||
+      examPaused
+    )
+      return;
     const q = currentDelivery.questions[currentQuestionIndex];
     const limit = q === undefined ? undefined : timeLimitOf(q);
     if (!q || limit === undefined) return;
 
     const timer = setInterval(() => {
-      setQuestionTimeLeft(prev => {
+      setQuestionTimeLeft((prev) => {
         const left = prev[q.id] ?? limit;
         if (left <= 1) {
           clearInterval(timer);
           // auto advance
           if (currentQuestionIndex < currentDelivery.questions.length - 1) {
-            setCurrentQuestionIndex(i => i + 1);
+            setCurrentQuestionIndex((i) => i + 1);
           }
           return { ...prev, [q.id]: 0 };
         }
@@ -208,12 +234,9 @@ export function StudentExamPage({
     return () => clearInterval(timer);
   }, [focusedMode, currentQuestionIndex, currentDelivery, examPaused]);
 
-
-
-
   // --- TELEMETRY UPLOAD ENGINE ---
   const keystrokeTracker = useRef(createKeystrokeDynamics('global'));
-  
+
   useEffect(() => {
     const tracker = keystrokeTracker.current;
     window.addEventListener('keydown', tracker.onKeyDown);
@@ -226,11 +249,11 @@ export function StudentExamPage({
 
   useEffect(() => {
     if (!currentDelivery || currentDelivery.attempt.status !== 'in_progress' || !examApi) return;
-    
+
     const interval = setInterval(() => {
       const snap = keystrokeTracker.current.snapshot();
       if (snap.events.length === 0) return;
-      
+
       if (snap.suspiciousUniformity) {
         onViolation?.({
           type: 'keystroke_violation',
@@ -238,17 +261,19 @@ export function StudentExamPage({
           count: 1,
         });
       }
-      
+
       // Upload telemetry chunk
-      examApi.uploadTelemetry(currentDelivery.attempt.id, {
-        keystrokes: snap.events,
-        gaze: [], // Currently handled by page hidden/focus lost
-        voice: []
-      }).catch(console.error);
-      
+      examApi
+        .uploadTelemetry(currentDelivery.attempt.id, {
+          keystrokes: snap.events,
+          gaze: [], // Currently handled by page hidden/focus lost
+          voice: [],
+        })
+        .catch(console.error);
+
       keystrokeTracker.current.reset();
     }, 15000); // Upload every 15 seconds
-    
+
     return () => clearInterval(interval);
   }, [currentDelivery?.attempt.id, currentDelivery?.attempt.status, examApi, onViolation]);
 
@@ -256,7 +281,8 @@ export function StudentExamPage({
   // the authenticated events endpoint for the transparency report.
   useEffect(() => {
     const bridge = desktopWatcherBridge();
-    if (!bridge || !examApi || !currentDelivery || currentDelivery.attempt.status !== 'in_progress') return;
+    if (!bridge || !examApi || !currentDelivery || currentDelivery.attempt.status !== 'in_progress')
+      return;
     const attemptId = currentDelivery.attempt.id;
     return startDesktopWatcher(bridge, attemptId, (event) => examApi.patchEvents(attemptId, event));
   }, [currentDelivery?.attempt.id, currentDelivery?.attempt.status, examApi]);
@@ -264,15 +290,23 @@ export function StudentExamPage({
   // Explicit, local-only recording; never start expensive capture with the exam.
 
   useEffect(() => {
-    if (!recordScreen || !currentDelivery || currentDelivery.attempt.status !== 'in_progress') return;
-    
+    if (!recordScreen || !currentDelivery || currentDelivery.attempt.status !== 'in_progress')
+      return;
+
     let stopRecorder: (() => void) | null = null;
     let disposed = false;
     import('../integrity/screenRecorder.js').then(({ createScreenRecorder }) => {
       if (disposed) return;
-      const recorder = createScreenRecorder(currentDelivery.attempt.id, examApi, message => { if (!disposed) setRecordingStatus(message); });
+      const recorder = createScreenRecorder(currentDelivery.attempt.id, examApi, (message) => {
+        if (!disposed) setRecordingStatus(message);
+      });
       recorder.start().catch((err) => {
-        if (!disposed) { setRecordingStatus(err instanceof Error ? err.message : 'Screen recording failed. Retry.'); setRecordScreen(false); }
+        if (!disposed) {
+          setRecordingStatus(
+            err instanceof Error ? err.message : 'Screen recording failed. Retry.',
+          );
+          setRecordScreen(false);
+        }
       });
       stopRecorder = recorder.stop;
     });
@@ -282,7 +316,6 @@ export function StudentExamPage({
       stopRecorder?.();
     };
   }, [recordScreen, currentDelivery?.attempt.id, currentDelivery?.attempt.status, examApi]);
-
 
   useEffect(
     () => () => {
@@ -296,12 +329,15 @@ export function StudentExamPage({
   // Ultrasound Beacon for Mobile Proximity
   useEffect(() => {
     if (delivery === null) return;
-    
+
     let audioCtx: AudioContext | null = null;
     let oscillator: OscillatorNode | null = null;
-    
+
     try {
-      audioCtx = new (window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)();
+      audioCtx = new (
+        window.AudioContext ||
+        (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      )();
       oscillator = audioCtx.createOscillator();
       oscillator.type = 'sine';
       oscillator.frequency.value = 19000; // 19kHz (inaudible but phones can hear it)
@@ -310,7 +346,7 @@ export function StudentExamPage({
     } catch (e) {
       console.warn('Failed to start ultrasound beacon', e);
     }
-    
+
     return () => {
       oscillator?.stop();
       oscillator?.disconnect();
@@ -318,17 +354,22 @@ export function StudentExamPage({
     };
   }, [delivery]);
 
-  async function enqueueSave(snapshot: AnswerMap, timingData?: { qId: string, timeDeltaMs: number, wordCount: number }): Promise<ExamAnswerSaveResponse | null> {
+  async function enqueueSave(
+    snapshot: AnswerMap,
+    timingData?: { qId: string; timeDeltaMs: number; wordCount: number },
+  ): Promise<ExamAnswerSaveResponse | null> {
     if (examApi === undefined || currentDeliveryRef.current?.attempt.status !== 'in_progress') {
       return null;
     }
 
     if (timingData) {
       if (timingData.wordCount > 20 && timingData.timeDeltaMs < timingData.wordCount * 400) {
-        examApi.patchEvents(currentDeliveryRef.current.attempt.id, {
-          event: 'suspicious_timing',
-          questionId: timingData.qId,
-        }).catch(() => {});
+        examApi
+          .patchEvents(currentDeliveryRef.current.attempt.id, {
+            event: 'suspicious_timing',
+            questionId: timingData.qId,
+          })
+          .catch(() => {});
       }
     }
 
@@ -337,7 +378,10 @@ export function StudentExamPage({
       if (activeDelivery === null || activeDelivery.attempt.status !== 'in_progress') {
         return null;
       }
-      if (phoneBlockedRef.current) { setSaveState('Not saved'); return null; }
+      if (phoneBlockedRef.current) {
+        setSaveState('Not saved');
+        return null;
+      }
       setSaveState('Saving…');
       const response = await examApi.saveAnswers(activeDelivery.attempt.id, {
         revision: revisionRef.current,
@@ -425,14 +469,16 @@ export function StudentExamPage({
         const mean = recent.reduce((a, b) => a + b, 0) / recent.length;
         const variance = recent.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / recent.length;
         const stddev = Math.sqrt(variance);
-        
-        const zeros = recent.filter(f => f === 0).length;
-        
+
+        const zeros = recent.filter((f) => f === 0).length;
+
         if (stddev < 5 || zeros > 5) {
-          examApi?.patchEvents(currentDeliveryRef.current?.attempt.id ?? '', {
-            event: 'keystroke_violation',
-            reason: 'suspiciously uniform flight times'
-          }).catch(() => {});
+          examApi
+            ?.patchEvents(currentDeliveryRef.current?.attempt.id ?? '', {
+              event: 'keystroke_violation',
+              reason: 'suspiciously uniform flight times',
+            })
+            .catch(() => {});
           flightTimes.current = []; // reset after flagging
         }
       }
@@ -449,11 +495,18 @@ export function StudentExamPage({
       examApi === undefined ||
       activeDelivery === null ||
       activeDelivery.attempt.status !== 'in_progress' ||
-      submitting || (phoneBlockedRef.current && !savedOnly)
+      submitting ||
+      (phoneBlockedRef.current && !savedOnly)
     ) {
       return;
     }
-    if (!globalThis.confirm(savedOnly ? 'Submit only the last server-saved answers? Any unsaved draft will NOT be included. This ends the exam.' : 'Submit this exam? You will not be able to change your answers.')) {
+    if (
+      !globalThis.confirm(
+        savedOnly
+          ? 'Submit only the last server-saved answers? Any unsaved draft will NOT be included. This ends the exam.'
+          : 'Submit this exam? You will not be able to change your answers.',
+      )
+    ) {
       return;
     }
 
@@ -503,7 +556,13 @@ export function StudentExamPage({
   ): React.ReactElement {
     const value = answers[question.id] ?? null;
     const timeOut = timeLimitOf(question) !== undefined && questionTimeLeft[question.id] === 0;
-    const disabled = !isActive || submitting || examApi === undefined || examPaused || phonePresence.blocked || timeOut;
+    const disabled =
+      !isActive ||
+      submitting ||
+      examApi === undefined ||
+      examPaused ||
+      phonePresence.blocked ||
+      timeOut;
 
     if (question.type === 'multiple_choice') {
       return (
@@ -585,7 +644,7 @@ export function StudentExamPage({
             updateAnswer(
               question.id,
               event.currentTarget.value === '' ? null : event.currentTarget.value,
-              event.currentTarget.value
+              event.currentTarget.value,
             )
           }
           type="text"
@@ -599,9 +658,13 @@ export function StudentExamPage({
     return (
       <main className="panel singleton-blocked">
         <h2>🚫 Exam Session Terminated</h2>
-        <p>Your exam was locked due to: <strong>{kickViolation.type.replaceAll('_', ' ')}</strong></p>
+        <p>
+          Your exam was locked due to: <strong>{kickViolation.type.replaceAll('_', ' ')}</strong>
+        </p>
         <p className="muted">Contact your instructor if you believe this was an error.</p>
-        <button className="secondary-button" onClick={onBack}>← Back to assignments</button>
+        <button className="secondary-button" onClick={onBack}>
+          ← Back to assignments
+        </button>
       </main>
     );
   }
@@ -641,7 +704,7 @@ export function StudentExamPage({
   const currentQuestion = visibleDelivery.questions[currentQuestionIndex];
   const totalQuestions = visibleDelivery.questions.length;
   const timeLeft = currentQuestion ? questionTimeLeft[currentQuestion.id] : undefined;
-  const answeredCount = Object.values(answers).filter(v => v !== null && v !== '').length;
+  const answeredCount = Object.values(answers).filter((v) => v !== null && v !== '').length;
 
   const attemptProps = {
     id: visibleDelivery.attempt.id,
@@ -663,40 +726,76 @@ export function StudentExamPage({
             <span className="pause-icon">⏸</span>
             <h2>Exam Paused</h2>
             <p>You navigated away from this window.</p>
-            <button className="submit-button" type="button">Click to Resume</button>
+            <button className="submit-button" type="button">
+              Click to Resume
+            </button>
           </div>
         </div>
       )}
       {isActive && phonePresence.blocked && (
         <div role="alert" className="phone-connection-notice">
           <section>
-            <h2>{phonePresence.checking ? 'Checking phone connection…' : 'Phone connection lost — answering paused'}</h2>
-            <p>Keep the paired iPhone app open and active. Returning to it resumes answering after a fresh ping. Your draft stays here; the exam deadline continues.</p>
-            <p>Home, screen lock, permission prompts, calls, or a Wi-Fi interruption may cause a pause. This is not a cheating verdict.</p>
-            <p>You can navigate questions while setting up. Answering and saving remain paused; timers are unchanged.</p>
+            <h2>
+              {phonePresence.checking
+                ? 'Checking phone connection…'
+                : 'Phone connection lost — answering paused'}
+            </h2>
+            <p>
+              Keep the paired iPhone app open and active. Returning to it resumes answering after a
+              fresh ping. Your draft stays here; the exam deadline continues.
+            </p>
+            <p>
+              Home, screen lock, permission prompts, calls, or a Wi-Fi interruption may cause a
+              pause. This is not a cheating verdict.
+            </p>
+            <p>
+              You can navigate questions while setting up. Answering and saving remain paused;
+              timers are unchanged.
+            </p>
             <div className="exam-control-group">
-            <button className="exam-control" type="button" onClick={() => setShowPhoneModal(true)}>Pair / replace iPhone</button>
-            <button className="exam-control exam-control--secondary" type="button" disabled={submitting} onClick={() => void submit(true)}>Submit last saved answers only</button>
-            <button className="exam-control exam-control--secondary" type="button" onClick={onBack}>Back to assignments</button>
+              <button
+                className="exam-control"
+                type="button"
+                onClick={() => setShowPhoneModal(true)}
+              >
+                Pair / replace iPhone
+              </button>
+              <button
+                className="exam-control exam-control--secondary"
+                type="button"
+                disabled={submitting}
+                onClick={() => void submit(true)}
+              >
+                Submit last saved answers only
+              </button>
+              <button
+                className="exam-control exam-control--secondary"
+                type="button"
+                onClick={onBack}
+              >
+                Back to assignments
+              </button>
             </div>
           </section>
         </div>
       )}
       {violations.length > 0 && !kickViolation && (
         <div className="violation-banner" role="alert">
-          ⚠️ {violations.length} violation{violations.length !== 1 ? 's' : ''} logged — repeated violations will lock your exam
+          ⚠️ {violations.length} violation{violations.length !== 1 ? 's' : ''} logged — repeated
+          violations will lock your exam
         </div>
       )}
       {brightnessBanner && isActive && (
         <div className="brightness-banner">
           💡 For best face tracking, please increase your screen brightness to maximum.
-          <button className="brightness-close" onClick={() => setBrightnessBanner(false)}>×</button>
+          <button className="brightness-close" onClick={() => setBrightnessBanner(false)}>
+            ×
+          </button>
         </div>
       )}
 
       {/* Full-screen exam shell */}
       <div className="exam-shell">
-
         {/* ── Top bar ─────────────────────────────────────────────────────── */}
         <header className="exam-topbar">
           <button className="topbar-back" onClick={onBack} type="button">
@@ -711,10 +810,14 @@ export function StudentExamPage({
               {saveState === 'Saved' ? '✅' : saveState === 'Saving…' ? '⏳' : '⚠️'} {saveState}
             </span>
             {submitError !== null && (
-              <span className="topbar-chip topbar-chip--error" role="alert">⚠️ Submit failed</span>
+              <span className="topbar-chip topbar-chip--error" role="alert">
+                ⚠️ Submit failed
+              </span>
             )}
             {receiptMessage !== null && (
-              <span className="topbar-chip topbar-chip--ok" role="status">✅ Submitted</span>
+              <span className="topbar-chip topbar-chip--ok" role="status">
+                ✅ Submitted
+              </span>
             )}
             {isActive && examApi !== undefined && (
               <>
@@ -736,9 +839,18 @@ export function StudentExamPage({
               </>
             )}
             {isActive && phonePresence.connected && <span role="status">iPhone connected</span>}
-            {isActive && !phonePresence.blocked && (saveState === 'Not saved' || saveState === 'Save failed') && (
-              <button className="exam-control" type="button" disabled={submitting} onClick={() => void enqueueSave(answersRef.current).catch(() => {})}>Save retained draft</button>
-            )}
+            {isActive &&
+              !phonePresence.blocked &&
+              (saveState === 'Not saved' || saveState === 'Save failed') && (
+                <button
+                  className="exam-control"
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => void enqueueSave(answersRef.current).catch(() => {})}
+                >
+                  Save retained draft
+                </button>
+              )}
             {!isActive && (
               <span className={`status status-${visibleDelivery.attempt.status}`}>
                 {visibleDelivery.attempt.status}
@@ -749,8 +861,6 @@ export function StudentExamPage({
 
         {/* ── 3-column layout ──────────────────────────────────────────────── */}
         <div className="exam-layout">
-
-
           {/* LEFT SIDEBAR: Camera & Detection */}
           <aside className="exam-sidebar exam-sidebar--left">
             <div className="sidebar-section">
@@ -800,7 +910,9 @@ export function StudentExamPage({
                     </div>
                   )}
 
-                  <h2 className="question-prompt">{embedWatermark(currentQuestion.prompt, visibleDelivery.attempt.id)}</h2>
+                  <h2 className="question-prompt">
+                    {embedWatermark(currentQuestion.prompt, visibleDelivery.attempt.id)}
+                  </h2>
 
                   <div className="answer-area">
                     {renderAnswerControl(currentQuestion, isActive)}
@@ -816,7 +928,7 @@ export function StudentExamPage({
               <button
                 className="nav-btn nav-btn--prev"
                 disabled={currentQuestionIndex === 0}
-                onClick={() => setCurrentQuestionIndex(i => i - 1)}
+                onClick={() => setCurrentQuestionIndex((i) => i - 1)}
                 type="button"
               >
                 ←
@@ -833,7 +945,13 @@ export function StudentExamPage({
                         ? 'dot--answered'
                         : '',
                     ].join(' ')}
-                    onClick={() => { if (i > currentQuestionIndex) { handleNextQuestion(); } else { setCurrentQuestionIndex(i); } }}
+                    onClick={() => {
+                      if (i > currentQuestionIndex) {
+                        handleNextQuestion();
+                      } else {
+                        setCurrentQuestionIndex(i);
+                      }
+                    }}
                     title={`Question ${i + 1}`}
                     type="button"
                   />
@@ -850,7 +968,10 @@ export function StudentExamPage({
               </button>
             </div>
             {!isActive && examApi?.getTransparencyReport !== undefined && (
-              <TransparencyReport attemptId={visibleDelivery.attempt.id} load={loadTransparencyReport} />
+              <TransparencyReport
+                attemptId={visibleDelivery.attempt.id}
+                load={loadTransparencyReport}
+              />
             )}
           </main>
 
@@ -858,14 +979,35 @@ export function StudentExamPage({
           <aside className="exam-sidebar exam-sidebar--right">
             <section className="sidebar-section">
               <p className="sidebar-label">Local screen recording</p>
-              <p className="muted">Includes the built-in microphone. Saves to this Mac only; no upload. Stop to finish the last clip.</p>
-              {isActive && <button className="exam-control" type="button" onClick={() => { setRecordScreen(value => !value); if (recordScreen) setRecordingStatus('Recording stopped. Check Downloads/save dialog for the final segment.'); }}>{recordScreen ? 'Stop local recording' : 'Start local recording'}</button>}
+              <p className="muted">
+                Includes the built-in microphone. Saves to this Mac only; no upload. Stop to finish
+                the last clip.
+              </p>
+              {isActive && (
+                <button
+                  className="exam-control"
+                  type="button"
+                  onClick={() => {
+                    setRecordScreen((value) => !value);
+                    if (recordScreen)
+                      setRecordingStatus(
+                        'Recording stopped. Check Downloads/save dialog for the final segment.',
+                      );
+                  }}
+                >
+                  {recordScreen ? 'Stop local recording' : 'Start local recording'}
+                </button>
+              )}
               <p role="status">{recordingStatus}</p>
             </section>
             <div className="sidebar-section">
               <p className="sidebar-label">🎙️ Audio Monitor</p>
               <Suspense fallback={<p className="sidebar-loading">Loading…</p>}>
-                <AudioPanel attemptId={visibleDelivery.attempt.id} active={isActive} {...(examApi ? { examApi } : {})} />
+                <AudioPanel
+                  attemptId={visibleDelivery.attempt.id}
+                  active={isActive}
+                  {...(examApi ? { examApi } : {})}
+                />
               </Suspense>
             </div>
             <div className="sidebar-section sidebar-section--meta">
@@ -888,7 +1030,7 @@ export function StudentExamPage({
           </aside>
         </div>
       </div>
-      
+
       {showPhoneModal && examApi !== undefined && (
         <NativePhoneModal
           attemptId={visibleDelivery.attempt.id}
@@ -898,18 +1040,17 @@ export function StudentExamPage({
       )}
 
       {showLivenessModal && examApi && (
-        <LivenessModal 
-          attemptId={visibleDelivery.attempt.id} 
-          examApi={examApi} 
-          videoEl={document.querySelector('video')} 
+        <LivenessModal
+          attemptId={visibleDelivery.attempt.id}
+          examApi={examApi}
+          videoEl={document.querySelector('video')}
           onComplete={() => {
             setShowLivenessModal(false);
             setExamPaused(false);
-            setCurrentQuestionIndex(i => i + 1);
-          }} 
+            setCurrentQuestionIndex((i) => i + 1);
+          }}
         />
       )}
-
     </>
   );
 }

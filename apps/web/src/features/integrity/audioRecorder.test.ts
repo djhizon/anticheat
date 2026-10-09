@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAudioRecorder } from './audioRecorder.js';
 import type { ExamApi } from '../exam/api.js';
-vi.mock('./builtInMicrophone.js', () => ({ acquireBuiltInMicrophone: () => navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: 'mac' } } }) }));
+vi.mock('./builtInMicrophone.js', () => ({
+  acquireBuiltInMicrophone: () =>
+    navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: 'mac' } } }),
+}));
 
 class Recorder {
   static instances: Recorder[] = [];

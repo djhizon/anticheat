@@ -51,7 +51,10 @@ STUDENT ANSWER: ${answer}`;
   try {
     const raw = await gemini.generateContent(prompt);
     // Strip markdown code fences if Gemini wraps in ```json
-    const cleaned = raw.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+    const cleaned = raw
+      .replace(/^```json\s*/i, '')
+      .replace(/```\s*$/i, '')
+      .trim();
     const parsed = JSON.parse(cleaned) as {
       score: number;
       flags: { phrase: string; reason: string }[];

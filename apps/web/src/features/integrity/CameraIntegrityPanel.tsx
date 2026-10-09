@@ -77,7 +77,8 @@ export function CameraIntegrityPanel({ attempt }: { readonly attempt: AttemptCon
         </button>
       </div>
       <p className="muted">
-        Camera checks start after consent and run at most once per second. Missing models are not treated as clear results.
+        Camera checks start after consent and run at most once per second. Missing models are not
+        treated as clear results.
       </p>
       <div className="cam-preview">
         <video
@@ -135,8 +136,22 @@ export function CameraIntegrityPanel({ attempt }: { readonly attempt: AttemptCon
                         ? 'Not observed'
                         : 'Waiting for result'}
               </p>
-              <p>Earbuds: {snapshot.earbuds === null ? 'Unavailable — detector model not loaded' : snapshot.earbuds ? 'Detected' : 'Not observed'}</p>
-              <p>Smart glasses: {snapshot.smartGlasses === null ? 'Unavailable — detector model not loaded' : snapshot.smartGlasses ? 'Detected' : 'Not observed'}</p>
+              <p>
+                Earbuds:{' '}
+                {snapshot.earbuds === null
+                  ? 'Unavailable — detector model not loaded'
+                  : snapshot.earbuds
+                    ? 'Detected'
+                    : 'Not observed'}
+              </p>
+              <p>
+                Smart glasses:{' '}
+                {snapshot.smartGlasses === null
+                  ? 'Unavailable — detector model not loaded'
+                  : snapshot.smartGlasses
+                    ? 'Detected'
+                    : 'Not observed'}
+              </p>
               <p>Wired earphones / headphones: unavailable — no compatible detector installed</p>
             </>
           )}

@@ -1,6 +1,6 @@
 export interface KeystrokeEvent {
-  readonly dwellMs: number;   // how long key was held
-  readonly flightMs: number;  // time from prev keyup to this keydown
+  readonly dwellMs: number; // how long key was held
+  readonly flightMs: number; // time from prev keyup to this keydown
   readonly questionId: string;
   readonly capturedAt: number; // performance.now()
 }
@@ -44,18 +44,24 @@ export function createKeystrokeDynamics(questionId: string) {
 
   function snapshot(): KeystrokeDynamicsSnapshot {
     if (events.length < 5) {
-      return { events: [...events], avgDwellMs: 0, avgFlightMs: 0, suspiciousUniformity: false, wpm: 0 };
+      return {
+        events: [...events],
+        avgDwellMs: 0,
+        avgFlightMs: 0,
+        suspiciousUniformity: false,
+        wpm: 0,
+      };
     }
     const dwells = events.map((e) => e.dwellMs);
     const flights = events.filter((e) => e.flightMs > 0).map((e) => e.flightMs);
     const avgDwell = dwells.reduce((a, b) => a + b, 0) / dwells.length;
     const avgFlight = flights.length > 0 ? flights.reduce((a, b) => a + b, 0) / flights.length : 0;
-    
+
     // Coefficient of variation — bots have CV < 0.1 (too uniform)
     const stdDwell = Math.sqrt(dwells.reduce((a, b) => a + (b - avgDwell) ** 2, 0) / dwells.length);
     const cv = avgDwell > 0 ? stdDwell / avgDwell : 1;
     const elapsedMin = (performance.now() - startTime) / 60_000;
-    const wpm = elapsedMin > 0 ? Math.round((charCount / 5) / elapsedMin) : 0;
+    const wpm = elapsedMin > 0 ? Math.round(charCount / 5 / elapsedMin) : 0;
 
     return {
       events: [...events],
@@ -66,5 +72,13 @@ export function createKeystrokeDynamics(questionId: string) {
     };
   }
 
-  return { onKeyDown, onKeyUp, snapshot, reset: () => { events.length = 0; charCount = 0; } };
+  return {
+    onKeyDown,
+    onKeyUp,
+    snapshot,
+    reset: () => {
+      events.length = 0;
+      charCount = 0;
+    },
+  };
 }

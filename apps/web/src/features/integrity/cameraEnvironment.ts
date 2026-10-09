@@ -3,7 +3,11 @@ import type { VisionReply } from './visionSignals.js';
 import { VISION_WORKER_CSP } from './visionPolicy.js';
 import { acquirePhysicalCamera } from './physicalCamera.js';
 
-export function cameraEnvironment(video: HTMLVideoElement, cameraStatus: (label: string) => void = () => {}, objects = false): CameraEnvironment {
+export function cameraEnvironment(
+  video: HTMLVideoElement,
+  cameraStatus: (label: string) => void = () => {},
+  objects = false,
+): CameraEnvironment {
   return {
     page: document,
     window,

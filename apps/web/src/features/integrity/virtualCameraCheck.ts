@@ -1,7 +1,17 @@
 /** Known virtual camera software labels */
 const VIRTUAL_CAM_LABELS = [
-  'obs', 'manycam', 'xsplit', 'vcam', 'snap camera', 'mmhmm',
-  'virtual', 'fake', 'loopback', 'ndi', 'droidcam', 'iriun'
+  'obs',
+  'manycam',
+  'xsplit',
+  'vcam',
+  'snap camera',
+  'mmhmm',
+  'virtual',
+  'fake',
+  'loopback',
+  'ndi',
+  'droidcam',
+  'iriun',
 ];
 
 export interface VirtualCamCheck {

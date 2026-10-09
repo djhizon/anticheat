@@ -72,7 +72,9 @@ async function seedDemo(): Promise<void> {
     if (auth.repository.findUserByEmail(instructorEmail) === null) {
       await auth.service.register({ email: instructorEmail, password: instructorPassword });
     }
-    auth.database.prepare(`UPDATE users SET role = 'instructor' WHERE email = ?`).run(instructorEmail);
+    auth.database
+      .prepare(`UPDATE users SET role = 'instructor' WHERE email = ?`)
+      .run(instructorEmail);
 
     const exam = createExamPlugin(auth.database, auth.boundary, config);
 
@@ -95,7 +97,10 @@ async function seedDemo(): Promise<void> {
         examDuration = generatedResult.estimatedDurationSeconds;
         console.log(`✅  Generated ${questions.length} questions (Est time: ${examDuration}s)`);
       } catch (err) {
-        console.warn('⚠️  Gemini generation failed, falling back to static questions:', err instanceof Error ? err.message : err);
+        console.warn(
+          '⚠️  Gemini generation failed, falling back to static questions:',
+          err instanceof Error ? err.message : err,
+        );
         questions = FALLBACK_QUESTIONS;
       }
     } else {
@@ -176,7 +181,8 @@ const FALLBACK_QUESTIONS = [
   },
   {
     type: 'identification' as const,
-    prompt: 'Name the sorting algorithm with average time complexity O(n log n) that uses a pivot element.',
+    prompt:
+      'Name the sorting algorithm with average time complexity O(n log n) that uses a pivot element.',
     answerKey: 'Quicksort',
   },
   {
@@ -186,7 +192,8 @@ const FALLBACK_QUESTIONS = [
   },
   {
     type: 'short_answer' as const,
-    prompt: 'Explain the difference between symmetric and asymmetric encryption in two to three sentences.',
+    prompt:
+      'Explain the difference between symmetric and asymmetric encryption in two to three sentences.',
     answerKey:
       'Symmetric encryption uses the same key for encryption and decryption, making it fast but requiring secure key exchange. Asymmetric encryption uses a key pair — a public key to encrypt and a private key to decrypt — eliminating the need to share a secret key. Asymmetric is slower but enables secure communication over untrusted channels.',
   },

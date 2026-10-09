@@ -1,6 +1,10 @@
 import { expect, it, vi } from 'vitest';
 
-import { startDesktopWatcher, type AppSnapshot, type DesktopWatcherBridge } from './desktopWatcher.js';
+import {
+  startDesktopWatcher,
+  type AppSnapshot,
+  type DesktopWatcherBridge,
+} from './desktopWatcher.js';
 
 function fakeBridge() {
   let listener: ((snapshot: AppSnapshot) => void) | null = null;
@@ -9,7 +13,9 @@ function fakeBridge() {
     stopWatcher: vi.fn(),
     onAppSnapshot: vi.fn((callback) => {
       listener = callback;
-      return () => { listener = null; };
+      return () => {
+        listener = null;
+      };
     }),
   };
   return { bridge, emit: (snapshot: AppSnapshot) => listener?.(snapshot) };

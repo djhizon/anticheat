@@ -131,13 +131,25 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     csrfHeaderName: 'x-csrf-token',
     freshExamGenerationEnabled,
     backendVisionEnabled: parseBoolean(env.ENABLE_BACKEND_VISION, false, 'ENABLE_BACKEND_VISION'),
-    geminiKeys: env.GEMINI_API_KEYS ? env.GEMINI_API_KEYS.split(',').map(k => k.trim()).filter(k => k !== '') : [],
+    geminiKeys: env.GEMINI_API_KEYS
+      ? env.GEMINI_API_KEYS.split(',')
+          .map((k) => k.trim())
+          .filter((k) => k !== '')
+      : [],
     geminiModel: env.GEMINI_MODEL?.trim() || 'gemini-3.6-flash',
     geminiEmbeddingModel: env.GEMINI_EMBEDDING_MODEL?.trim() || 'gemini-embedding-exp-03-07',
-    audioRetainDays: env.AUDIO_RETAIN_DAYS ? parseInteger(env.AUDIO_RETAIN_DAYS, 30, 'AUDIO_RETAIN_DAYS') : 30,
-    livenessFlashThreshold: env.LIVENESS_FLASH_THRESHOLD ? parseFloat(env.LIVENESS_FLASH_THRESHOLD) : 8.0,
-    livenessNoiseThreshold: env.LIVENESS_NOISE_THRESHOLD ? parseFloat(env.LIVENESS_NOISE_THRESHOLD) : 3.0,
-    livenessJitterThreshold: env.LIVENESS_JITTER_THRESHOLD ? parseFloat(env.LIVENESS_JITTER_THRESHOLD) : 0.15,
+    audioRetainDays: env.AUDIO_RETAIN_DAYS
+      ? parseInteger(env.AUDIO_RETAIN_DAYS, 30, 'AUDIO_RETAIN_DAYS')
+      : 30,
+    livenessFlashThreshold: env.LIVENESS_FLASH_THRESHOLD
+      ? parseFloat(env.LIVENESS_FLASH_THRESHOLD)
+      : 8.0,
+    livenessNoiseThreshold: env.LIVENESS_NOISE_THRESHOLD
+      ? parseFloat(env.LIVENESS_NOISE_THRESHOLD)
+      : 3.0,
+    livenessJitterThreshold: env.LIVENESS_JITTER_THRESHOLD
+      ? parseFloat(env.LIVENESS_JITTER_THRESHOLD)
+      : 0.15,
     msTenantId: env.MS_TENANT_ID,
     msClientId: env.MS_CLIENT_ID,
     msClientSecret: env.MS_CLIENT_SECRET,

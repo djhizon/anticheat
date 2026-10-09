@@ -17,7 +17,12 @@
   "build": {
     "appId": "com.exam-anti-cheat.desktop",
     "productName": "Exam Anti-Cheat",
-    "extraResources": [{ "from": "native-bin/app-control", "to": "app-control" }],
+    "extraResources": [
+      {
+        "from": "native-bin/app-control",
+        "to": "app-control"
+      }
+    ],
     "mac": {
       "category": "public.app-category.education",
       "target": [

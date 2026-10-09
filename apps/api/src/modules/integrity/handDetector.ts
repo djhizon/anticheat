@@ -15,12 +15,15 @@ async function getDetector() {
   return detector;
 }
 
-export async function verifyGestureLocally(imageBase64: string, expectedGesture: string): Promise<{ passed: boolean; detail: string }> {
+export async function verifyGestureLocally(
+  imageBase64: string,
+  expectedGesture: string,
+): Promise<{ passed: boolean; detail: string }> {
   try {
     const buffer = Buffer.from(imageBase64, 'base64');
     const tensor = tf.node.decodeImage(buffer, 3);
     const det = await getDetector();
-    
+
     const hands = await det.estimateHands(tensor as Parameters<typeof det.estimateHands>[0]);
     tensor.dispose();
 
@@ -29,9 +32,9 @@ export async function verifyGestureLocally(imageBase64: string, expectedGesture:
     }
 
     const hand = hands[0]!;
-    
+
     // Simple heuristic to count extended fingers based on landmarks
-    // Landmarks array: 0 is wrist. 
+    // Landmarks array: 0 is wrist.
     // Thumb: 1, 2, 3, 4 (tip)
     // Index: 5, 6, 7, 8 (tip)
     // Middle: 9, 10, 11, 12 (tip)
@@ -39,7 +42,7 @@ export async function verifyGestureLocally(imageBase64: string, expectedGesture:
     // Pinky: 17, 18, 19, 20 (tip)
     const keypoints3D = hand.keypoints3D;
     if (!keypoints3D) {
-       return { passed: false, detail: 'Could not extract 3D hand keypoints.' };
+      return { passed: false, detail: 'Could not extract 3D hand keypoints.' };
     }
 
     const isExtended = (tipIdx: number, dipIdx: number) => {
@@ -53,7 +56,9 @@ export async function verifyGestureLocally(imageBase64: string, expectedGesture:
     const ringExtended = isExtended(16, 15);
     const pinkyExtended = isExtended(20, 19);
 
-    const extendedCount = [indexExtended, middleExtended, ringExtended, pinkyExtended].filter(Boolean).length;
+    const extendedCount = [indexExtended, middleExtended, ringExtended, pinkyExtended].filter(
+      Boolean,
+    ).length;
 
     let passed = false;
     let detail = `Detected ${extendedCount} fingers extended.`;
@@ -70,7 +75,6 @@ export async function verifyGestureLocally(imageBase64: string, expectedGesture:
     }
 
     return { passed, detail: passed ? 'Gesture confirmed.' : detail };
-
   } catch (err) {
     console.error(err);
     return { passed: false, detail: 'Internal model error during verification.' };

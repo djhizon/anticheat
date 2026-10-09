@@ -1,1 +1,5 @@
 apps/web/public/vision/**
+apps/api/vendor/**
+apps/desktop/out*/**
+package-lock.json
+apps/desktop/package-lock.json

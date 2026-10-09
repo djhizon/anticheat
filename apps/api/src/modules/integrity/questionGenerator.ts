@@ -101,7 +101,8 @@ export function createFallbackExamQuestions(): readonly GeneratedQuestion[] {
   }));
 }
 
-const QUESTION_GEN_PROMPT = (opts: GenerateQuestionsOptions) => `
+const QUESTION_GEN_PROMPT = (opts: GenerateQuestionsOptions) =>
+  `
 You are an exam question writer for a university-level course.
 Generate exactly ${opts.count ?? 10} exam questions about: "${opts.topic}"
 Difficulty: ${opts.difficulty ?? 'medium'}
@@ -147,8 +148,8 @@ Return ONLY valid JSON array with this exact shape, no markdown:
 export async function generateExamQuestions(
   apiKeys: readonly string[],
   opts: GenerateQuestionsOptions,
-): Promise<{ questions: readonly GeneratedQuestion[], estimatedDurationSeconds: number }> {
-  const genKeys = apiKeys.slice(0, 5).filter(k => k.length > 0);
+): Promise<{ questions: readonly GeneratedQuestion[]; estimatedDurationSeconds: number }> {
+  const genKeys = apiKeys.slice(0, 5).filter((k) => k.length > 0);
   if (genKeys.length === 0) {
     throw new Error('No Gemini API keys available for question generation.');
   }
@@ -174,7 +175,7 @@ export async function generateExamQuestions(
       allQuestions.push(...parsed);
       remaining -= thisBatch;
       if (remaining > 0) {
-        await new Promise(r => setTimeout(r, 300));
+        await new Promise((r) => setTimeout(r, 300));
       }
     }
     allQuestions = allQuestions.slice(0, count);

@@ -240,7 +240,10 @@ export interface PhonePresenceStatus {
 
 export interface ExamApi {
   getPhonePresence(attemptId: string, signal?: AbortSignal): Promise<PhonePresenceStatus>;
-  requirePhonePresence(attemptId: string, signal?: AbortSignal): Promise<{ code: string; expiresAt: string }>;
+  requirePhonePresence(
+    attemptId: string,
+    signal?: AbortSignal,
+  ): Promise<{ code: string; expiresAt: string }>;
   listAssignments(): Promise<ExamAssignmentListResponse>;
   generateExam(): Promise<ExamGenerationResponse>;
   getPhoneStatus(attemptId: string): Promise<{ active: boolean }>;
@@ -250,8 +253,16 @@ export interface ExamApi {
   saveAnswers(attemptId: string, request: ExamAnswerSaveRequest): Promise<ExamAnswerSaveResponse>;
   submitAttempt(attemptId: string, request: ExamSubmitRequest): Promise<ExamSubmitResponse>;
   postLivenessChallenge(attemptId: string): Promise<LivenessChallenge>;
-  postLivenessVerify(attemptId: string, body: Record<string, unknown>): Promise<LivenessVerifyResult>;
-  postAudio(attemptId: string, audioBase64: string, durationMs: number, signal?: AbortSignal): Promise<{ readonly transcript?: unknown }>;
+  postLivenessVerify(
+    attemptId: string,
+    body: Record<string, unknown>,
+  ): Promise<LivenessVerifyResult>;
+  postAudio(
+    attemptId: string,
+    audioBase64: string,
+    durationMs: number,
+    signal?: AbortSignal,
+  ): Promise<{ readonly transcript?: unknown }>;
   postEnrollPhone(attemptId: string): Promise<PhoneEnrollment>;
   patchEvents(attemptId: string, body: Record<string, unknown>): Promise<unknown>;
   speedtest(dummyData: string): Promise<void>;
@@ -374,22 +385,51 @@ export class BrowserExamApi implements ExamApi {
   }
 
   async postLivenessChallenge(attemptId: string): Promise<LivenessChallenge> {
-    const body = await this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/liveness-challenge`, 'POST', undefined, true);
-    if (!isRecord(body) || !isString(body.nonce) || !isString(body.type) || !isRecord(body.data) || !isString(body.expiresAt)) {
+    const body = await this.request(
+      `/exam/attempts/${encodeURIComponent(attemptId)}/liveness-challenge`,
+      'POST',
+      undefined,
+      true,
+    );
+    if (
+      !isRecord(body) ||
+      !isString(body.nonce) ||
+      !isString(body.type) ||
+      !isRecord(body.data) ||
+      !isString(body.expiresAt)
+    ) {
       throw new ExamApiError(fallbackProblem);
     }
     return { nonce: body.nonce, type: body.type, data: body.data, expiresAt: body.expiresAt };
   }
 
-  async postLivenessVerify(attemptId: string, request: Record<string, unknown>): Promise<LivenessVerifyResult> {
-    const body = await this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/liveness-verify`, 'POST', request, true);
-    if (!isRecord(body) || typeof body.passed !== 'boolean' || typeof body.layer !== 'number' || !isString(body.detail)) {
+  async postLivenessVerify(
+    attemptId: string,
+    request: Record<string, unknown>,
+  ): Promise<LivenessVerifyResult> {
+    const body = await this.request(
+      `/exam/attempts/${encodeURIComponent(attemptId)}/liveness-verify`,
+      'POST',
+      request,
+      true,
+    );
+    if (
+      !isRecord(body) ||
+      typeof body.passed !== 'boolean' ||
+      typeof body.layer !== 'number' ||
+      !isString(body.detail)
+    ) {
       throw new ExamApiError(fallbackProblem);
     }
     return { passed: body.passed, layer: body.layer, detail: body.detail };
   }
 
-  async postAudio(attemptId: string, audioBase64: string, durationMs: number, signal?: AbortSignal): Promise<{ readonly transcript?: unknown }> {
+  async postAudio(
+    attemptId: string,
+    audioBase64: string,
+    durationMs: number,
+    signal?: AbortSignal,
+  ): Promise<{ readonly transcript?: unknown }> {
     const controller = new AbortController();
     const cancel = () => controller.abort();
     signal?.addEventListener('abort', cancel, { once: true });
@@ -397,25 +437,37 @@ export class BrowserExamApi implements ExamApi {
     const timeout = setTimeout(cancel, 50000); // 15s conversion + 30s inference + transport.
     try {
       const token = await this.csrfTokenProvider();
-      const response = await this.fetchImpl(`${this.baseUrl}/exam/attempts/${encodeURIComponent(attemptId)}/audio`, {
-        method: 'POST', signal: controller.signal,
-        headers: { 'content-type': 'application/json', 'x-csrf-token': token },
-        body: JSON.stringify({ audio: audioBase64, durationMs }), credentials: 'include',
-      });
+      const response = await this.fetchImpl(
+        `${this.baseUrl}/exam/attempts/${encodeURIComponent(attemptId)}/audio`,
+        {
+          method: 'POST',
+          signal: controller.signal,
+          headers: { 'content-type': 'application/json', 'x-csrf-token': token },
+          body: JSON.stringify({ audio: audioBase64, durationMs }),
+          credentials: 'include',
+        },
+      );
       if (!response.ok) {
         if (response.status === 503) {
           const body: unknown = await response.json().catch(() => null);
-          if (isRecord(body) && body.code === 'invalid_state' && typeof body.message === 'string' && body.message.length < 300)
+          if (
+            isRecord(body) &&
+            body.code === 'invalid_state' &&
+            typeof body.message === 'string' &&
+            body.message.length < 300
+          )
             throw new Error(body.message);
         }
         throw new ExamApiError(safeProblems[response.status] ?? fallbackProblem);
       }
       return await response.json();
     } catch (error) {
-      if (controller.signal.aborted) throw new Error('Transcription stopped or timed out. Check the server, then retry audio.');
+      if (controller.signal.aborted)
+        throw new Error('Transcription stopped or timed out. Check the server, then retry audio.');
       throw error;
     } finally {
-      clearTimeout(timeout); signal?.removeEventListener('abort', cancel);
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', cancel);
     }
   }
 
@@ -433,25 +485,62 @@ export class BrowserExamApi implements ExamApi {
   }
 
   async getPhonePresence(attemptId: string, signal?: AbortSignal): Promise<PhonePresenceStatus> {
-    const body = await this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/phone-presence`, 'GET', undefined, false, signal);
-    if (!isRecord(body) || typeof body.required !== 'boolean' || typeof body.active !== 'boolean' ||
-      typeof body.remainingMs !== 'number' || !Number.isFinite(body.remainingMs) || body.remainingMs < 0 || body.remainingMs > 8000) {
+    const body = await this.request(
+      `/exam/attempts/${encodeURIComponent(attemptId)}/phone-presence`,
+      'GET',
+      undefined,
+      false,
+      signal,
+    );
+    if (
+      !isRecord(body) ||
+      typeof body.required !== 'boolean' ||
+      typeof body.active !== 'boolean' ||
+      typeof body.remainingMs !== 'number' ||
+      !Number.isFinite(body.remainingMs) ||
+      body.remainingMs < 0 ||
+      body.remainingMs > 8000
+    ) {
       throw new ExamApiError(fallbackProblem);
     }
     return { required: body.required, active: body.active, remainingMs: body.remainingMs };
   }
 
-  async requirePhonePresence(attemptId: string, signal?: AbortSignal): Promise<{ code: string; expiresAt: string }> {
-    const body = await this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/phone-presence`, 'POST', undefined, true, signal);
-    if (!isRecord(body) || typeof body.code !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(body.code) || typeof body.expiresAt !== 'string') {
+  async requirePhonePresence(
+    attemptId: string,
+    signal?: AbortSignal,
+  ): Promise<{ code: string; expiresAt: string }> {
+    const body = await this.request(
+      `/exam/attempts/${encodeURIComponent(attemptId)}/phone-presence`,
+      'POST',
+      undefined,
+      true,
+      signal,
+    );
+    if (
+      !isRecord(body) ||
+      typeof body.code !== 'string' ||
+      !/^[A-Za-z0-9_-]{43}$/.test(body.code) ||
+      typeof body.expiresAt !== 'string'
+    ) {
       throw new ExamApiError(fallbackProblem);
     }
     return { code: body.code, expiresAt: body.expiresAt };
   }
 
   async postEnrollPhone(attemptId: string): Promise<PhoneEnrollment> {
-    const body = await this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/enroll-phone`, 'POST', undefined, true);
-    if (!isRecord(body) || !isString(body.token) || !isString(body.qrData) || !isString(body.expiresAt)) {
+    const body = await this.request(
+      `/exam/attempts/${encodeURIComponent(attemptId)}/enroll-phone`,
+      'POST',
+      undefined,
+      true,
+    );
+    if (
+      !isRecord(body) ||
+      !isString(body.token) ||
+      !isString(body.qrData) ||
+      !isString(body.expiresAt)
+    ) {
       throw new ExamApiError(fallbackProblem);
     }
     return { token: body.token, qrData: body.qrData, expiresAt: body.expiresAt };
@@ -460,12 +549,15 @@ export class BrowserExamApi implements ExamApi {
   async patchEvents(attemptId: string, body: Record<string, unknown>): Promise<unknown> {
     // Note: patch is not naturally supported by request method, so we make a direct call
     const token = await this.csrfTokenProvider();
-    const response = await this.fetchImpl(`${this.baseUrl}/exam/attempts/${encodeURIComponent(attemptId)}/events`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json', 'x-csrf-token': token },
-      body: JSON.stringify(body),
-      credentials: 'include',
-    });
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/exam/attempts/${encodeURIComponent(attemptId)}/events`,
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', 'x-csrf-token': token },
+        body: JSON.stringify(body),
+        credentials: 'include',
+      },
+    );
     if (!response.ok) throw new ExamApiError(safeProblems[response.status] ?? fallbackProblem);
     return response.json();
   }
@@ -474,23 +566,40 @@ export class BrowserExamApi implements ExamApi {
     await this.request('/exam/speedtest', 'POST', { data: dummyData }, true);
   }
 
-  
   async uploadTelemetry(attemptId: string, payload: unknown): Promise<void> {
-    await this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/telemetry`, 'POST', payload, true);
+    await this.request(
+      `/exam/attempts/${encodeURIComponent(attemptId)}/telemetry`,
+      'POST',
+      payload,
+      true,
+    );
   }
 
   async uploadRecordingChunk(attemptId: string, index: number, chunkBase64: string): Promise<void> {
-    await this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/recording`, 'POST', { index, chunk: chunkBase64 }, true);
+    await this.request(
+      `/exam/attempts/${encodeURIComponent(attemptId)}/recording`,
+      'POST',
+      { index, chunk: chunkBase64 },
+      true,
+    );
   }
 
   async getTransparencyReport(attemptId: string): Promise<readonly TransparencyEvent[]> {
-    const body = await this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/transparency`, 'GET');
+    const body = await this.request(
+      `/exam/attempts/${encodeURIComponent(attemptId)}/transparency`,
+      'GET',
+    );
     if (!isRecord(body) || !Array.isArray(body.events)) throw new ExamApiError(fallbackProblem);
     const types = new Set(['HARDWARE', 'SOFTWARE', 'VISION', 'GAZE', 'AUDIO']);
     const severities = new Set(['low', 'medium', 'high']);
-    return body.events.filter((event): event is TransparencyEvent =>
-      isRecord(event) && isString(event.timestamp) && isString(event.description) &&
-      types.has(event.type as string) && severities.has(event.severity as string));
+    return body.events.filter(
+      (event): event is TransparencyEvent =>
+        isRecord(event) &&
+        isString(event.timestamp) &&
+        isString(event.description) &&
+        types.has(event.type as string) &&
+        severities.has(event.severity as string),
+    );
   }
 
   private delivery(body: unknown): ExamDeliveryProjection {

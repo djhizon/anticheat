@@ -42,7 +42,7 @@ async function getGraphToken(config: ApiConfig): Promise<string> {
   cachedToken = data.access_token;
   // Expire 5 minutes early to be safe
   tokenExpiresAt = Date.now() + (data.expires_in - 300) * 1000;
-  
+
   return cachedToken;
 }
 
@@ -55,7 +55,7 @@ export async function uploadRecordingChunk(
   examId: string,
   attemptId: string,
   chunkIndex: number,
-  buffer: Buffer
+  buffer: Buffer,
 ): Promise<void> {
   const { msTargetEmail } = config;
   if (!msTargetEmail) {
@@ -63,18 +63,18 @@ export async function uploadRecordingChunk(
   }
 
   const token = await getGraphToken(config);
-  
+
   // Format chunk index to be 001, 002, etc. so they sort alphabetically
   const paddedIndex = chunkIndex.toString().padStart(3, '0');
   const filename = `recording_${paddedIndex}.webm`;
   const path = `/ExamAntiCheat/exam_${examId}/attempt_${attemptId}/${filename}`;
-  
+
   const uploadUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(msTargetEmail)}/drive/root:${path}:/content`;
 
   const response = await fetch(uploadUrl, {
     method: 'PUT',
     headers: {
-      'Authorization': `Bearer ${token}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'video/webm',
     },
     body: new Uint8Array(buffer),

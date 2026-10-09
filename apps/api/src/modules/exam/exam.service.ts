@@ -441,24 +441,19 @@ export class ExamService {
 
     if (geminiKeys.length > 0) {
       try {
-        const generated = await (
-          this.dependencies.questionGenerator ?? generateExamQuestions
-        )(geminiKeys, {
-          topic: FRESH_EXAM_TOPIC,
-          count: FRESH_EXAM_QUESTION_COUNT,
-          difficulty: 'medium',
-          types: [
-            'multiple_choice',
-            'true_false',
-            'identification',
-            'short_answer',
-            'numeric',
-          ],
-          ...(options.geminiModel === undefined ? {} : { model: options.geminiModel }),
-          ...(options.geminiEmbeddingModel === undefined
-            ? {}
-            : { embeddingModel: options.geminiEmbeddingModel }),
-        });
+        const generated = await (this.dependencies.questionGenerator ?? generateExamQuestions)(
+          geminiKeys,
+          {
+            topic: FRESH_EXAM_TOPIC,
+            count: FRESH_EXAM_QUESTION_COUNT,
+            difficulty: 'medium',
+            types: ['multiple_choice', 'true_false', 'identification', 'short_answer', 'numeric'],
+            ...(options.geminiModel === undefined ? {} : { model: options.geminiModel }),
+            ...(options.geminiEmbeddingModel === undefined
+              ? {}
+              : { embeddingModel: options.geminiEmbeddingModel }),
+          },
+        );
         questions = generated.questions;
         durationSeconds = generated.estimatedDurationSeconds;
         source = 'gemini';
@@ -480,12 +475,8 @@ export class ExamService {
     }
     const normalizedQuestions = questions.map(normalizeQuestion);
     const examId = asExamOpaque<'ExamId'>(this.dependencies.idGenerator.generate(16));
-    const examVersionId = asExamOpaque<'ExamVersionId'>(
-      this.dependencies.idGenerator.generate(16),
-    );
-    const assignmentId = asExamOpaque<'AssignmentId'>(
-      this.dependencies.idGenerator.generate(16),
-    );
+    const examVersionId = asExamOpaque<'ExamVersionId'>(this.dependencies.idGenerator.generate(16));
+    const assignmentId = asExamOpaque<'AssignmentId'>(this.dependencies.idGenerator.generate(16));
     const slug = requireText(
       `generated-${this.dependencies.idGenerator.generate(12)}`,
       'Exam slug',

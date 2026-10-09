@@ -39,42 +39,83 @@ export interface TelemetryCounts {
 export class IntegrityService {
   async getTransparencyReport(attemptId: string): Promise<TransparencyEvent[]> {
     const data = this.repo.getTransparencyEvents(attemptId);
-    
+
     const events: TransparencyEvent[] = [];
-    
+
     for (const app of data.apps) {
       if (app.display_count > 1) {
-        events.push({ timestamp: app.created_at, type: 'HARDWARE', severity: 'high', description: `Multiple displays detected (${app.display_count})` });
+        events.push({
+          timestamp: app.created_at,
+          type: 'HARDWARE',
+          severity: 'high',
+          description: `Multiple displays detected (${app.display_count})`,
+        });
       } else if (app.foreground_app.startsWith('flag:vision_')) {
-        events.push({ timestamp: app.created_at, type: 'VISION', severity: 'high', description: `Server vision detected: ${app.foreground_app.slice(12).replaceAll('_', ' ')}` });
+        events.push({
+          timestamp: app.created_at,
+          type: 'VISION',
+          severity: 'high',
+          description: `Server vision detected: ${app.foreground_app.slice(12).replaceAll('_', ' ')}`,
+        });
       } else if (app.foreground_app.startsWith('flag:')) {
-        events.push({ timestamp: app.created_at, type: 'SOFTWARE', severity: 'medium', description: `Flagged behaviour: ${app.foreground_app.slice(5).replaceAll('_', ' ')}` });
+        events.push({
+          timestamp: app.created_at,
+          type: 'SOFTWARE',
+          severity: 'medium',
+          description: `Flagged behaviour: ${app.foreground_app.slice(5).replaceAll('_', ' ')}`,
+        });
       } else if (app.foreground_app.startsWith('🎙️')) {
-        events.push({ timestamp: app.created_at, type: 'AUDIO', severity: 'low', description: app.foreground_app.replace(/^🎙️\s*/u, '') });
+        events.push({
+          timestamp: app.created_at,
+          type: 'AUDIO',
+          severity: 'low',
+          description: app.foreground_app.replace(/^🎙️\s*/u, ''),
+        });
       } else if (app.foreground_app && app.foreground_app !== 'unknown') {
-        events.push({ timestamp: app.created_at, type: 'SOFTWARE', severity: 'medium', description: `Unauthorized app focused: ${app.foreground_app}` });
+        events.push({
+          timestamp: app.created_at,
+          type: 'SOFTWARE',
+          severity: 'medium',
+          description: `Unauthorized app focused: ${app.foreground_app}`,
+        });
       }
     }
-    
+
     for (const live of data.liveness) {
       let desc = 'Liveness check failed';
       try {
         const det = JSON.parse(live.details_json);
         if (det.detail) desc = det.detail;
         if (det.earbuds) desc = 'Earbuds detected by AI vision';
-        if (det.phone === 'observed' || det.phone === 'candidate') desc = 'Mobile phone detected in frame';
+        if (det.phone === 'observed' || det.phone === 'candidate')
+          desc = 'Mobile phone detected in frame';
       } catch (e) {}
-      events.push({ timestamp: live.created_at, type: 'VISION', severity: 'high', description: desc });
+      events.push({
+        timestamp: live.created_at,
+        type: 'VISION',
+        severity: 'high',
+        description: desc,
+      });
     }
-    
+
     for (const g of data.gaze) {
-      events.push({ timestamp: g.created_at, type: 'GAZE', severity: 'low', description: `Looked away from screen for ${Math.round(g.duration_ms / 1000)}s` });
+      events.push({
+        timestamp: g.created_at,
+        type: 'GAZE',
+        severity: 'low',
+        description: `Looked away from screen for ${Math.round(g.duration_ms / 1000)}s`,
+      });
     }
-    
+
     for (const v of data.voice) {
-      events.push({ timestamp: v.created_at, type: 'AUDIO', severity: 'medium', description: `Speech detected for ${Math.round(v.duration_ms / 1000)}s` });
+      events.push({
+        timestamp: v.created_at,
+        type: 'AUDIO',
+        severity: 'medium',
+        description: `Speech detected for ${Math.round(v.duration_ms / 1000)}s`,
+      });
     }
-    
+
     events.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
     return events;
   }
@@ -138,7 +179,11 @@ export class IntegrityService {
       } catch {
         // Preserve one-use challenges, but record an unavailable engine honestly
         // rather than losing the event or treating infrastructure failure as a pass.
-        result = { passed: false, detail: 'Gesture engine unavailable. Check the local model installation and request a fresh challenge.' };
+        result = {
+          passed: false,
+          detail:
+            'Gesture engine unavailable. Check the local model installation and request a fresh challenge.',
+        };
       }
     } else {
       result = { passed: false, detail: 'Unknown challenge type' };
@@ -168,17 +213,30 @@ export class IntegrityService {
   }
 
   async runSimilarity(examVersionId: string, questionId: string): Promise<SimilarityRunResponse> {
-    const version = this.repo.listVersionsWithTextQuestions().find((candidate) => candidate.id === examVersionId);
-    if (version === undefined || !version.questions.some((question) => question.id === questionId)) {
+    const version = this.repo
+      .listVersionsWithTextQuestions()
+      .find((candidate) => candidate.id === examVersionId);
+    if (
+      version === undefined ||
+      !version.questions.some((question) => question.id === questionId)
+    ) {
       throw new DomainError('not_found', 'The exam question was not found.');
     }
     const answers = this.repo.listTextAnswers(examVersionId, questionId);
     // Fewer than two answers needs no embeddings, so it works without Gemini keys too.
     const report =
       answers.length < 2
-        ? { questionId, pairs: [], threshold: SIMILARITY_THRESHOLD, generatedAt: new Date().toISOString() }
+        ? {
+            questionId,
+            pairs: [],
+            threshold: SIMILARITY_THRESHOLD,
+            generatedAt: new Date().toISOString(),
+          }
         : await computeSimilarityReport(this.requireGemini(), questionId, answers);
-    return { report, students: Object.fromEntries(answers.map((answer) => [answer.studentId, answer.email])) };
+    return {
+      report,
+      students: Object.fromEntries(answers.map((answer) => [answer.studentId, answer.email])),
+    };
   }
 
   // ── Phone Enrollment ─────────────────────────────────────────────────────────
@@ -208,7 +266,6 @@ export class IntegrityService {
 
   // ── Native Companion ─────────────────────────────────────────────────────────
 
-  
   /**
    * Store one telemetry batch from the browser. Every field is validated and
    * each list is capped, so malformed or oversized uploads cannot hit the
@@ -217,7 +274,11 @@ export class IntegrityService {
   recordTelemetry(attemptId: string, payload: Record<string, unknown>): TelemetryCounts {
     const list = (value: unknown, max: number): Record<string, unknown>[] =>
       Array.isArray(value)
-        ? value.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null).slice(0, max)
+        ? value
+            .filter(
+              (item): item is Record<string, unknown> => typeof item === 'object' && item !== null,
+            )
+            .slice(0, max)
         : [];
     const duration = (value: unknown): number | null => {
       const n = Number(value);
@@ -233,7 +294,10 @@ export class IntegrityService {
       const dwell = duration(k.dwellMs);
       const flight = duration(k.flightMs);
       if (dwell === null || flight === null) continue;
-      const questionId = typeof k.questionId === 'string' && k.questionId !== '' ? k.questionId.slice(0, 128) : 'unknown';
+      const questionId =
+        typeof k.questionId === 'string' && k.questionId !== ''
+          ? k.questionId.slice(0, 128)
+          : 'unknown';
       this.repo.insertKeystrokeEvent(attemptId, questionId, dwell, flight);
       counts.keystrokes += 1;
     }
@@ -249,7 +313,12 @@ export class IntegrityService {
       const ms = duration(v.durationMs);
       if (at === null || ms === null || ms === 0) continue;
       const peak = Number(v.peakDb);
-      this.repo.insertVoiceEvent(attemptId, at, Math.max(1, Math.round(ms)), Number.isFinite(peak) ? peak : 0);
+      this.repo.insertVoiceEvent(
+        attemptId,
+        at,
+        Math.max(1, Math.round(ms)),
+        Number.isFinite(peak) ? peak : 0,
+      );
       counts.voice += 1;
     }
     return counts;

@@ -26,38 +26,47 @@ async function initialize(objects: boolean): Promise<void> {
     baseOptions: { modelAssetPath: '/vision/models/face_landmarker.task', delegate: 'CPU' },
     runningMode: 'VIDEO',
     numFaces: 2,
-    outputFaceBlendshapes: true,       // ← enable blink detection
+    outputFaceBlendshapes: true, // ← enable blink detection
     outputFacialTransformationMatrixes: true,
   });
   if (objects) {
-  worker.ModuleFactory = ModuleFactory;
-  try { phone = await ObjectDetector.createFromOptions(files, {
-    baseOptions: { modelAssetPath: '/vision/models/efficientdet_lite0.tflite', delegate: 'CPU' },
-    runningMode: 'VIDEO',
-    categoryAllowlist: ['cell phone'],
-    scoreThreshold: 0.6,
-    maxResults: 1,
-  }); } catch { phone = null; }
-  
-  // Custom Earbuds Model (requires user to drop a custom earbuds.tflite model into public/vision/models)
-  try {
-    earbuds = await ObjectDetector.createFromOptions(files, {
-      baseOptions: { modelAssetPath: '/vision/models/earbuds_custom.tflite', delegate: 'CPU' },
-      runningMode: 'VIDEO',
-      scoreThreshold: 0.5,
-      maxResults: 2,
-    });
-  } catch (e) {}
+    worker.ModuleFactory = ModuleFactory;
+    try {
+      phone = await ObjectDetector.createFromOptions(files, {
+        baseOptions: {
+          modelAssetPath: '/vision/models/efficientdet_lite0.tflite',
+          delegate: 'CPU',
+        },
+        runningMode: 'VIDEO',
+        categoryAllowlist: ['cell phone'],
+        scoreThreshold: 0.6,
+        maxResults: 1,
+      });
+    } catch {
+      phone = null;
+    }
 
-  try {
-    smartGlasses = await ObjectDetector.createFromOptions(files, {
-      baseOptions: { modelAssetPath: '/vision/models/smart_glasses_custom.tflite', delegate: 'CPU' },
-      runningMode: 'VIDEO',
-      scoreThreshold: 0.5,
-      maxResults: 1,
-    });
-  } catch (e) {}
+    // Custom Earbuds Model (requires user to drop a custom earbuds.tflite model into public/vision/models)
+    try {
+      earbuds = await ObjectDetector.createFromOptions(files, {
+        baseOptions: { modelAssetPath: '/vision/models/earbuds_custom.tflite', delegate: 'CPU' },
+        runningMode: 'VIDEO',
+        scoreThreshold: 0.5,
+        maxResults: 2,
+      });
+    } catch (e) {}
 
+    try {
+      smartGlasses = await ObjectDetector.createFromOptions(files, {
+        baseOptions: {
+          modelAssetPath: '/vision/models/smart_glasses_custom.tflite',
+          delegate: 'CPU',
+        },
+        runningMode: 'VIDEO',
+        scoreThreshold: 0.5,
+        maxResults: 1,
+      });
+    } catch (e) {}
   }
 
   // Warm up both engines
@@ -78,7 +87,9 @@ function stdDev(arr: number[]): number {
   return Math.sqrt(variance);
 }
 
-worker.onmessage = (event: MessageEvent<{ type: string; bitmap?: ImageBitmap; objects?: boolean }>) => {
+worker.onmessage = (
+  event: MessageEvent<{ type: string; bitmap?: ImageBitmap; objects?: boolean }>,
+) => {
   const { type, bitmap } = event.data;
   if (type === 'init' && !initializing) {
     initializing = true;
@@ -95,14 +106,16 @@ worker.onmessage = (event: MessageEvent<{ type: string; bitmap?: ImageBitmap; ob
     const faces = face.detectForVideo(bitmap, timestamp);
     const objects = phone?.detectForVideo(bitmap, timestamp);
     const earbudObjects = earbuds ? earbuds.detectForVideo(bitmap, timestamp) : { detections: [] };
-    const glassObjects = smartGlasses ? smartGlasses.detectForVideo(bitmap, timestamp) : { detections: [] };
+    const glassObjects = smartGlasses
+      ? smartGlasses.detectForVideo(bitmap, timestamp)
+      : { detections: [] };
 
     // ── Blink score from blendshapes ──────────────────────────────────────
     let blinkScore = 0;
     const blendshapes = faces.faceBlendshapes[0]?.categories;
     if (blendshapes && blendshapes.length > 0) {
-      const leftBlink = blendshapes.find(c => c.categoryName === 'eyeBlinkLeft')?.score ?? 0;
-      const rightBlink = blendshapes.find(c => c.categoryName === 'eyeBlinkRight')?.score ?? 0;
+      const leftBlink = blendshapes.find((c) => c.categoryName === 'eyeBlinkLeft')?.score ?? 0;
+      const rightBlink = blendshapes.find((c) => c.categoryName === 'eyeBlinkRight')?.score ?? 0;
       blinkScore = (leftBlink + rightBlink) / 2;
     }
 
@@ -125,11 +138,12 @@ worker.onmessage = (event: MessageEvent<{ type: string; bitmap?: ImageBitmap; ob
         faces: faces.faceLandmarks.length,
         pose: faces.faceLandmarks.length === 1 && matrix ? poseFromMatrix(matrix.data) : null,
         phoneAvailable: phone !== null,
-        phone: objects?.detections.some((detection) =>
-          detection.categories.some(
-            (category) => category.categoryName === 'cell phone' && category.score >= 0.6,
-          ),
-        ) ?? false,
+        phone:
+          objects?.detections.some((detection) =>
+            detection.categories.some(
+              (category) => category.categoryName === 'cell phone' && category.score >= 0.6,
+            ),
+          ) ?? false,
         blinkScore,
         earbuds: earbuds ? earbudObjects.detections.length > 0 : null,
         smartGlasses: smartGlasses ? glassObjects.detections.length > 0 : null,

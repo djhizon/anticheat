@@ -7,7 +7,12 @@ import { DevelopmentExemptions } from './DevelopmentExemptions.js';
 import type { DesktopAppTarget } from './desktopApps.js';
 
 const target = (name = 'Notes', exempt = false): DesktopAppTarget => ({
-  id: name, name, exempt, protected: exempt, reason: exempt ? 'Temporary exemption' : '', canForce: false,
+  id: name,
+  name,
+  exempt,
+  protected: exempt,
+  reason: exempt ? 'Temporary exemption' : '',
+  canForce: false,
 });
 
 describe('desktop preflight recovery', () => {
@@ -30,12 +35,29 @@ describe('desktop preflight recovery', () => {
     Reflect.deleteProperty(window, 'electronExam');
     vi.useRealTimers();
   });
-  async function render(listAppTargets: () => Promise<unknown>, getDisplayCount = () => Promise.resolve(1)) {
-    Object.assign(window, { electronExam: { listAppTargets, getDisplayCount, closeAppTarget: vi.fn(async () => ({ status: 'cancelled', message: 'Cancelled' })) } });
-    await act(async () => root.render(<StrictMode><PreflightCheck onPassed={passed} onCancel={cancelled} /></StrictMode>));
+  async function render(
+    listAppTargets: () => Promise<unknown>,
+    getDisplayCount = () => Promise.resolve(1),
+  ) {
+    Object.assign(window, {
+      electronExam: {
+        listAppTargets,
+        getDisplayCount,
+        closeAppTarget: vi.fn(async () => ({ status: 'cancelled', message: 'Cancelled' })),
+      },
+    });
+    await act(async () =>
+      root.render(
+        <StrictMode>
+          <PreflightCheck onPassed={passed} onCancel={cancelled} />
+        </StrictMode>,
+      ),
+    );
   }
   function click(label: string) {
-    const button = [...container.querySelectorAll('button')].find(button => button.textContent === label);
+    const button = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === label,
+    );
     expect(button).toBeDefined();
     button!.click();
   }
@@ -45,7 +67,9 @@ describe('desktop preflight recovery', () => {
     expect(passed).toHaveBeenCalledTimes(1);
   });
   it('shows native check rejection and lets the user sign out', async () => {
-    await render(async () => { throw new Error('IPC failed'); });
+    await render(async () => {
+      throw new Error('IPC failed');
+    });
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('failed');
     await act(async () => click('Sign out'));
     expect(cancelled).toHaveBeenCalledTimes(1);
@@ -63,14 +87,22 @@ describe('desktop preflight recovery', () => {
   });
   it('times out a stalled IPC and ignores a late success', async () => {
     let resolve!: (apps: string[]) => void;
-    await render(() => new Promise<string[]>(done => { resolve = done; }));
+    await render(
+      () =>
+        new Promise<string[]>((done) => {
+          resolve = done;
+        }),
+    );
     await act(async () => vi.advanceTimersByTime(8000));
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('timed out');
     await act(async () => resolve([]));
     expect(passed).not.toHaveBeenCalled();
   });
   it('can retry after a failed check', async () => {
-    const apps = vi.fn().mockRejectedValueOnce(new Error('IPC failed')).mockResolvedValue([target('Exam', true)]);
+    const apps = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('IPC failed'))
+      .mockResolvedValue([target('Exam', true)]);
     await render(apps);
     await act(async () => click('Re-check Environment'));
     expect(passed).toHaveBeenCalledTimes(1);
@@ -78,13 +110,24 @@ describe('desktop preflight recovery', () => {
   it('continues blocking extra displays and disallowed apps', async () => {
     await render(async () => [target()]);
     expect(container.textContent).toContain('Notes');
-    expect([...container.querySelectorAll('button')].some(button => button.textContent?.includes('Force Close'))).toBe(false);
+    expect(
+      [...container.querySelectorAll('button')].some((button) =>
+        button.textContent?.includes('Force Close'),
+      ),
+    ).toBe(false);
     expect(container.textContent).toContain('Save your work');
-    expect([...container.querySelectorAll('button')].some(button => button.textContent === 'Quit normally')).toBe(true);
+    expect(
+      [...container.querySelectorAll('button')].some(
+        (button) => button.textContent === 'Quit normally',
+      ),
+    ).toBe(true);
     expect(passed).not.toHaveBeenCalled();
     await act(async () => root.unmount());
     root = createRoot(container);
-    await render(async () => [], () => Promise.resolve(2));
+    await render(
+      async () => [],
+      () => Promise.resolve(2),
+    );
     expect(container.textContent).toContain('Multiple Displays Detected');
     expect(passed).not.toHaveBeenCalled();
   });
@@ -92,16 +135,21 @@ describe('desktop preflight recovery', () => {
     await render(async () => [target('Terminal', true), target('ChatGPT', true)]);
     expect(passed).toHaveBeenCalledTimes(1);
     await act(async () => root.render(<DevelopmentExemptions />));
-    expect(container.textContent).toContain('Remove these exam-policy exemptions before the presentation');
+    expect(container.textContent).toContain(
+      'Remove these exam-policy exemptions before the presentation',
+    );
     expect(container.querySelector('button')).toBeNull();
   });
   it('renders force quit only when the native controller grants eligibility', async () => {
     await render(async () => [{ ...target(), canForce: true }, target('Terminal', true)]);
-    const buttons = [...container.querySelectorAll('button')].map(button => button.textContent);
-    expect(buttons.filter(label => label === 'Quit normally')).toHaveLength(1);
-    expect(buttons.filter(label => label === 'Force Quit…')).toHaveLength(1);
+    const buttons = [...container.querySelectorAll('button')].map((button) => button.textContent);
+    expect(buttons.filter((label) => label === 'Quit normally')).toHaveLength(1);
+    expect(buttons.filter((label) => label === 'Force Quit…')).toHaveLength(1);
     await act(async () => click('Force Quit…'));
-    expect((window as unknown as { electronExam: { closeAppTarget: unknown } }).electronExam.closeAppTarget).toHaveBeenCalledWith('Notes', 'force');
+    expect(
+      (window as unknown as { electronExam: { closeAppTarget: unknown } }).electronExam
+        .closeAppTarget,
+    ).toHaveBeenCalledWith('Notes', 'force');
     expect(container.textContent).toContain('Cancelled');
   });
 });

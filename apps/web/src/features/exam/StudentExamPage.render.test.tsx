@@ -13,7 +13,12 @@ describe('exam screen crash regression', () => {
 
   it('renders a recoverable failed request', () => {
     const html = renderToString(
-      <StudentExamPage delivery={null} error="Exam unavailable" loading={false} onBack={() => {}} />,
+      <StudentExamPage
+        delivery={null}
+        error="Exam unavailable"
+        loading={false}
+        onBack={() => {}}
+      />,
     );
     expect(html).toContain('Exam unavailable');
     expect(html).toContain('Back to assignments');

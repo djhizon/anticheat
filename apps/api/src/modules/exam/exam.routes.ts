@@ -52,7 +52,8 @@ const recordingPattern = /^\/exam\/attempts\/([^/]+)\/recording$/u;
 const speedtestPattern = /^\/exam\/speedtest$/u;
 const phonePresencePattern = /^\/exam\/attempts\/([^/]+)\/phone-presence$/u;
 const instructorVersionsPath = '/exam/instructor/versions';
-const similarityPattern = /^\/exam\/instructor\/versions\/([^/]+)\/questions\/([^/]+)\/similarity$/u;
+const similarityPattern =
+  /^\/exam\/instructor\/versions\/([^/]+)\/questions\/([^/]+)\/similarity$/u;
 
 const problemStatus: Record<ProblemCode, number> = {
   unauthorized: 401,
@@ -122,7 +123,11 @@ function isExamPath(path: string): boolean {
     path === '/exam/speedtest' ||
     path === instructorVersionsPath ||
     similarityPattern.test(path) ||
-    ['/exam/phone-presence/claim', '/exam/phone-presence/challenge', '/exam/phone-presence/heartbeat'].includes(path) ||
+    [
+      '/exam/phone-presence/claim',
+      '/exam/phone-presence/challenge',
+      '/exam/phone-presence/heartbeat',
+    ].includes(path) ||
     phonePresencePattern.test(path) ||
     path === '/exam/generate' ||
     assignmentStartPattern.test(path) ||
@@ -134,7 +139,8 @@ function isExamPath(path: string): boolean {
     livChallengePattern.test(path) ||
     livVerifyPattern.test(path) ||
     eventsPattern.test(path) ||
-    enrollPhonePattern.test(path) || phoneStatusPattern.test(path) ||
+    enrollPhonePattern.test(path) ||
+    phoneStatusPattern.test(path) ||
     revisionsPattern.test(path) ||
     recordingPattern.test(path) ||
     visionPattern.test(path) ||
@@ -240,21 +246,46 @@ export class ExamRoutes {
         this.boundary.validateUnsafe(request, principal);
         const attemptId = parsePathId<'AttemptId'>(presenceMatch[1] ?? '', 'Attempt ID');
         await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
-        return jsonResponse(request, this.config.allowedOrigins, method === 'POST' ? 201 : 200,
-          method === 'POST' ? this.phonePresence.enroll(attemptId) : this.phonePresence.status(attemptId));
+        return jsonResponse(
+          request,
+          this.config.allowedOrigins,
+          method === 'POST' ? 201 : 200,
+          method === 'POST'
+            ? this.phonePresence.enroll(attemptId)
+            : this.phonePresence.status(attemptId),
+        );
       }
       if (method === 'POST' && this.phonePresence && path.startsWith('/exam/phone-presence/')) {
         const body = parseObject(request.body, 'Phone presence body required');
         // Native endpoints authenticate only the scoped credential, never browser cookies.
         if (path === '/exam/phone-presence/claim') {
-          return jsonResponse(request, this.config.allowedOrigins, 200, this.phonePresence.claim(body.code));
+          return jsonResponse(
+            request,
+            this.config.allowedOrigins,
+            200,
+            this.phonePresence.claim(body.code),
+          );
         }
         if (path === '/exam/phone-presence/challenge') {
-          return jsonResponse(request, this.config.allowedOrigins, 200, this.phonePresence.challenge(body.credential));
+          return jsonResponse(
+            request,
+            this.config.allowedOrigins,
+            200,
+            this.phonePresence.challenge(body.credential),
+          );
         }
         if (path === '/exam/phone-presence/heartbeat') {
-          return jsonResponse(request, this.config.allowedOrigins, 200,
-            this.phonePresence.heartbeat(body.credential, body.challenge, body.sequence, body.active));
+          return jsonResponse(
+            request,
+            this.config.allowedOrigins,
+            200,
+            this.phonePresence.heartbeat(
+              body.credential,
+              body.challenge,
+              body.sequence,
+              body.active,
+            ),
+          );
         }
       }
 
@@ -309,7 +340,10 @@ export class ExamRoutes {
       if (method === 'PUT' && answersMatch !== null) {
         const principal = this.requireStudent(request);
         this.boundary.validateUnsafe(request, principal);
-        const attemptId = parsePathId<'AttemptId'>(answersMatch[1] ?? '', 'Attempt ID') as AttemptId;
+        const attemptId = parsePathId<'AttemptId'>(
+          answersMatch[1] ?? '',
+          'Attempt ID',
+        ) as AttemptId;
         const saveReq = parseAnswerSaveRequest(request.body);
         const result = await this.service.saveAnswers(attemptId, principal.user.id, saveReq);
         // Pack 8: record a revision for each written answer
@@ -400,7 +434,10 @@ export class ExamRoutes {
         const question = delivery.questions.find((candidate) => candidate.id === body.questionId);
         const answer = question === undefined ? undefined : delivery.answers.answers[question.id];
         if (question === undefined || typeof answer !== 'string' || answer.trim() === '') {
-          throw new DomainError('validation_failed', 'A saved text answer is required for an AI check.');
+          throw new DomainError(
+            'validation_failed',
+            'A saved text answer is required for an AI check.',
+          );
         }
         const report = await this.integrity.runAiCheck(question.prompt, answer);
         return jsonResponse(request, this.config.allowedOrigins, 200, report);
@@ -416,7 +453,10 @@ export class ExamRoutes {
         const body = parseObject(request.body, 'Events body required');
         this.integrity.recordAppEvent(
           String(attemptId),
-          String(body.foregroundApp ?? (body.event === undefined ? 'unknown' : `flag:${String(body.event)}`)).slice(0, 200),
+          String(
+            body.foregroundApp ??
+              (body.event === undefined ? 'unknown' : `flag:${String(body.event)}`),
+          ).slice(0, 200),
           Number(body.displayCount ?? 1),
         );
         return jsonResponse(request, this.config.allowedOrigins, 200, { ok: true });
@@ -428,9 +468,15 @@ export class ExamRoutes {
         const principal = this.requireStudent(request);
         this.boundary.validateUnsafe(request, principal);
         const attemptId = parsePathId<'AttemptId'>(telemetryMatch[1] ?? '', 'Attempt ID');
-        const delivery = await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
+        const delivery = await this.service.getAttemptDelivery(
+          attemptId as AttemptId,
+          principal.user.id,
+        );
         if (delivery.attempt.status !== 'in_progress') {
-          throw new DomainError('conflict', 'Telemetry is only accepted while the attempt is in progress.');
+          throw new DomainError(
+            'conflict',
+            'Telemetry is only accepted while the attempt is in progress.',
+          );
         }
         const body = parseObject(request.body, 'Telemetry body required');
         const accepted = this.integrity.recordTelemetry(String(attemptId), body);
@@ -470,19 +516,37 @@ export class ExamRoutes {
         const principal = this.requireStudent(request);
         this.boundary.validateUnsafe(request, principal);
         const attemptId = parsePathId<'AttemptId'>(visionMatch[1] ?? '', 'Attempt ID');
-        const delivery = await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
+        const delivery = await this.service.getAttemptDelivery(
+          attemptId as AttemptId,
+          principal.user.id,
+        );
         if (delivery.attempt.status !== 'in_progress') {
-          throw new DomainError('conflict', 'Vision checks are only accepted while the attempt is in progress.');
+          throw new DomainError(
+            'conflict',
+            'Vision checks are only accepted while the attempt is in progress.',
+          );
         }
         const body = parseObject(request.body, 'Vision body required');
-        const image = typeof body.imageBase64 === 'string' ? body.imageBase64.replace(/^data:image\/\w+;base64,/u, '') : '';
+        const image =
+          typeof body.imageBase64 === 'string'
+            ? body.imageBase64.replace(/^data:image\/\w+;base64,/u, '')
+            : '';
         if (image === '' || image.length > 2_000_000 || !/^[A-Za-z0-9+/=]+$/u.test(image)) {
-          throw new DomainError('validation_failed', 'A base64 camera frame under 1.5 MB is required.');
+          throw new DomainError(
+            'validation_failed',
+            'A base64 camera frame under 1.5 MB is required.',
+          );
         }
         const result = await this.visionDetector(image);
-        const threats = (result.detections ?? []).filter((detection) => detection.label !== 'person');
+        const threats = (result.detections ?? []).filter(
+          (detection) => detection.label !== 'person',
+        );
         for (const threat of threats) {
-          this.integrity?.recordAppEvent(String(attemptId), `flag:vision_${threat.label.replaceAll(' ', '_')}`, 1);
+          this.integrity?.recordAppEvent(
+            String(attemptId),
+            `flag:vision_${threat.label.replaceAll(' ', '_')}`,
+            1,
+          );
         }
         return jsonResponse(request, this.config.allowedOrigins, 200, {
           status: result.status,
@@ -501,7 +565,6 @@ export class ExamRoutes {
         return jsonResponse(request, this.config.allowedOrigins, 201, response);
       }
 
-      
       // ── Pack 8: Phone status ──────────────────────────────────────────────
       const phoneStatusMatch = phoneStatusPattern.exec(path);
       if (method === 'GET' && phoneStatusMatch !== null && this.integrity !== null) {
@@ -537,34 +600,37 @@ export class ExamRoutes {
         this.boundary.validateUnsafe(request, principal);
         const attemptId = parsePathId<'AttemptId'>(audioMatch[1] ?? '', 'Attempt ID');
         await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
-        
+
         // The client sends a complete recording container as base64 JSON.
         const body = parseObject(request.body, 'Audio chunk required');
         const audioBase64 = String(body.audio ?? '');
         const buffer = Buffer.from(audioBase64, 'base64');
-        
+
         try {
           const { transcribeAudio } = await import('../integrity/whisper.js');
           const transcript = await transcribeAudio(buffer);
-          
+
           if (transcript && transcript.length > 0) {
             // Log it to the database
             if (this.integrity) {
               this.integrity.recordAppEvent(
                 String(attemptId),
                 `🎙️ Whisper Transcript: "${transcript}"`,
-                1
+                1,
               );
             }
           }
-          
+
           return jsonResponse(request, this.config.allowedOrigins, 201, { transcript });
         } catch (error) {
           console.error('Local transcription failed or is busy.');
           const { TranscriptionError } = await import('../integrity/whisper.js');
           return jsonResponse(request, this.config.allowedOrigins, 503, {
             code: 'invalid_state',
-            message: error instanceof TranscriptionError ? error.message : 'Local transcription is unavailable. Retry audio after checking the server.',
+            message:
+              error instanceof TranscriptionError
+                ? error.message
+                : 'Local transcription is unavailable. Retry audio after checking the server.',
           });
         }
       }
@@ -582,21 +648,21 @@ export class ExamRoutes {
         this.boundary.validateUnsafe(request, principal);
         const attemptId = parsePathId<'AttemptId'>(recordingMatch[1] ?? '', 'Attempt ID');
         await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
-        
+
         const body = parseObject(request.body, 'Recording chunk required');
         const chunkBase64 = String(body.chunk ?? '');
         const chunkIndex = Number(body.index ?? 0);
-        
+
         // Convert base64 to Buffer
         const buffer = Buffer.from(chunkBase64, 'base64');
-        
+
         // Upload to MS Graph
         await uploadRecordingChunk(
           this.config,
           principal.user.id, // Using studentId as exam folder prefix
           String(attemptId),
           chunkIndex,
-          buffer
+          buffer,
         );
 
         return jsonResponse(request, this.config.allowedOrigins, 201, { ok: true });

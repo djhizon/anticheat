@@ -18,7 +18,12 @@ afterEach(async () => {
 it('runs a similarity check for the selected question and labels students by email', async () => {
   const api: InstructorApi = {
     listVersions: vi.fn(async () => [
-      { id: 'v1', title: 'Networking', versionNumber: 1, questions: [{ id: 'q1', prompt: 'Explain TCP.', type: 'short_answer' }] },
+      {
+        id: 'v1',
+        title: 'Networking',
+        versionNumber: 1,
+        questions: [{ id: 'q1', prompt: 'Explain TCP.', type: 'short_answer' }],
+      },
     ]),
     runSimilarity: vi.fn(async () => ({
       report: {
@@ -34,7 +39,9 @@ it('runs a similarity check for the selected question and labels students by ema
     })),
   };
   await act(async () => root.render(<SimilarityDashboard api={api} />));
-  const button = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('Run similarity'))!;
+  const button = [...container.querySelectorAll('button')].find((b) =>
+    b.textContent?.includes('Run similarity'),
+  )!;
   await act(async () => button.click());
 
   expect(api.runSimilarity).toHaveBeenCalledWith('v1', 'q1');
@@ -46,8 +53,17 @@ it('runs a similarity check for the selected question and labels students by ema
 
 it('shows a clear error when the check cannot run', async () => {
   const api: InstructorApi = {
-    listVersions: async () => [{ id: 'v1', title: 'T', versionNumber: 1, questions: [{ id: 'q1', prompt: 'P', type: 'short_answer' }] }],
-    runSimilarity: async () => { throw new Error('Check that GEMINI_API_KEYS is configured.'); },
+    listVersions: async () => [
+      {
+        id: 'v1',
+        title: 'T',
+        versionNumber: 1,
+        questions: [{ id: 'q1', prompt: 'P', type: 'short_answer' }],
+      },
+    ],
+    runSimilarity: async () => {
+      throw new Error('Check that GEMINI_API_KEYS is configured.');
+    },
   };
   await act(async () => root.render(<SimilarityDashboard api={api} />));
   await act(async () => [...container.querySelectorAll('button')].at(-1)!.click());

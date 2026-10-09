@@ -1,7 +1,4 @@
-import type {
-  InstructorExamVersion,
-  SimilarityRunResponse,
-} from '@exam-anti-cheat/contracts/exam';
+import type { InstructorExamVersion, SimilarityRunResponse } from '@exam-anti-cheat/contracts/exam';
 
 import type { FetchLike } from '../auth/api.js';
 import type { CsrfTokenProvider } from '../exam/api.js';
@@ -33,7 +30,9 @@ export function createInstructorApi(
     if (method === 'POST') headers['x-csrf-token'] = await csrfTokenProvider();
     const response = await fetchImpl(path, { method, headers, credentials: 'include' });
     if (!response.ok) {
-      throw new InstructorApiError(problemMessages[response.status] ?? 'The request could not be completed.');
+      throw new InstructorApiError(
+        problemMessages[response.status] ?? 'The request could not be completed.',
+      );
     }
     return response.json();
   }
@@ -41,7 +40,8 @@ export function createInstructorApi(
   return {
     async listVersions() {
       const body = await request('/exam/instructor/versions', 'GET');
-      if (!isRecord(body) || !Array.isArray(body.versions)) throw new InstructorApiError('Unexpected response.');
+      if (!isRecord(body) || !Array.isArray(body.versions))
+        throw new InstructorApiError('Unexpected response.');
       return body.versions as InstructorExamVersion[];
     },
     async runSimilarity(versionId, questionId) {
@@ -49,7 +49,12 @@ export function createInstructorApi(
         `/exam/instructor/versions/${encodeURIComponent(versionId)}/questions/${encodeURIComponent(questionId)}/similarity`,
         'POST',
       );
-      if (!isRecord(body) || !isRecord(body.report) || !Array.isArray(body.report.pairs) || !isRecord(body.students)) {
+      if (
+        !isRecord(body) ||
+        !isRecord(body.report) ||
+        !Array.isArray(body.report.pairs) ||
+        !isRecord(body.students)
+      ) {
         throw new InstructorApiError('Unexpected response.');
       }
       return body as unknown as SimilarityRunResponse;

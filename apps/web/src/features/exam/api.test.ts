@@ -65,11 +65,21 @@ describe('browser exam API boundary', () => {
     };
     const api = createExamApi('', async () => 'csrf-fixture', fetchImpl);
     await expect(api.requirePhonePresence('attempt')).resolves.toHaveProperty('code');
-    expect((calls[0]?.init?.headers as Record<string, string>)['x-csrf-token']).toBe('csrf-fixture');
+    expect((calls[0]?.init?.headers as Record<string, string>)['x-csrf-token']).toBe(
+      'csrf-fixture',
+    );
     const controller = new AbortController();
-    await expect(api.getPhonePresence('attempt', controller.signal)).resolves.toEqual({ required: true, active: true, remainingMs: 6000 });
+    await expect(api.getPhonePresence('attempt', controller.signal)).resolves.toEqual({
+      required: true,
+      active: true,
+      remainingMs: 6000,
+    });
     expect(calls[1]?.init?.signal).toBe(controller.signal);
-    const bad = createExamApi('', async () => 'csrf', async () => jsonResponse({ required: false }));
+    const bad = createExamApi(
+      '',
+      async () => 'csrf',
+      async () => jsonResponse({ required: false }),
+    );
     await expect(bad.getPhonePresence('attempt')).rejects.toBeInstanceOf(ExamApiError);
   });
 
@@ -105,9 +115,7 @@ describe('browser exam API boundary', () => {
     expect(String(calls[0]?.input)).toBe('/api/exam/generate');
     expect(calls[0]?.init?.method).toBe('POST');
     expect(calls[0]?.init?.credentials).toBe('include');
-    expect((calls[0]?.init?.headers as Record<string, string>)['x-csrf-token']).toBe(
-      'csrf-token',
-    );
+    expect((calls[0]?.init?.headers as Record<string, string>)['x-csrf-token']).toBe('csrf-token');
   });
 
   it('maps server failures to safe problems', async () => {

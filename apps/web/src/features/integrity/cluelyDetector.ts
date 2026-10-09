@@ -22,12 +22,15 @@ export function createOverlayDetector(onViolation: () => void): () => void {
     for (let i = 0; i < iframes.length; i++) {
       const iframe = iframes[i];
       if (!iframe) continue;
-      
+
       const style = window.getComputedStyle(iframe);
       // Cheating extensions often inject transparent full-screen iframes
-      const isTransparent = style.opacity === '0' || style.visibility === 'hidden' || style.display === 'none';
-      const coversScreen = iframe.clientWidth > window.innerWidth * 0.8 && iframe.clientHeight > window.innerHeight * 0.8;
-      
+      const isTransparent =
+        style.opacity === '0' || style.visibility === 'hidden' || style.display === 'none';
+      const coversScreen =
+        iframe.clientWidth > window.innerWidth * 0.8 &&
+        iframe.clientHeight > window.innerHeight * 0.8;
+
       if (isTransparent && coversScreen && style.pointerEvents !== 'none') {
         onViolation();
         break;

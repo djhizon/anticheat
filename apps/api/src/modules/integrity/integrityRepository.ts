@@ -25,15 +25,46 @@ export interface InstructorVersionRow {
   readonly id: string;
   readonly title: string;
   readonly versionNumber: number;
-  readonly questions: Array<{ readonly id: string; readonly prompt: string; readonly type: string }>;
+  readonly questions: Array<{
+    readonly id: string;
+    readonly prompt: string;
+    readonly type: string;
+  }>;
 }
 
 export class IntegrityRepository {
   getTransparencyEvents(attemptId: string) {
-    const apps = this.db.prepare(`SELECT created_at, foreground_app, display_count FROM app_events WHERE attempt_id = ? AND (display_count > 1 OR foreground_app != '')`).all(attemptId) as unknown as Array<{ created_at: string; foreground_app: string; display_count: number }>;
-    const liveness = this.db.prepare(`SELECT created_at, layer, result, details_json FROM liveness_events WHERE attempt_id = ? AND result = 'fail'`).all(attemptId) as unknown as Array<{ created_at: string; layer: number; result: string; details_json: string }>;
-    const gaze = this.db.prepare(`SELECT created_at, duration_ms FROM gaze_events WHERE attempt_id = ? AND duration_ms > 3000`).all(attemptId) as unknown as Array<{ created_at: string; duration_ms: number }>;
-    const voice = this.db.prepare(`SELECT created_at, duration_ms, peak_db FROM voice_events WHERE attempt_id = ?`).all(attemptId) as unknown as Array<{ created_at: string; duration_ms: number; peak_db: number }>;
+    const apps = this.db
+      .prepare(
+        `SELECT created_at, foreground_app, display_count FROM app_events WHERE attempt_id = ? AND (display_count > 1 OR foreground_app != '')`,
+      )
+      .all(attemptId) as unknown as Array<{
+      created_at: string;
+      foreground_app: string;
+      display_count: number;
+    }>;
+    const liveness = this.db
+      .prepare(
+        `SELECT created_at, layer, result, details_json FROM liveness_events WHERE attempt_id = ? AND result = 'fail'`,
+      )
+      .all(attemptId) as unknown as Array<{
+      created_at: string;
+      layer: number;
+      result: string;
+      details_json: string;
+    }>;
+    const gaze = this.db
+      .prepare(
+        `SELECT created_at, duration_ms FROM gaze_events WHERE attempt_id = ? AND duration_ms > 3000`,
+      )
+      .all(attemptId) as unknown as Array<{ created_at: string; duration_ms: number }>;
+    const voice = this.db
+      .prepare(`SELECT created_at, duration_ms, peak_db FROM voice_events WHERE attempt_id = ?`)
+      .all(attemptId) as unknown as Array<{
+      created_at: string;
+      duration_ms: number;
+      peak_db: number;
+    }>;
     return { apps, liveness, gaze, voice };
   }
 
@@ -45,11 +76,7 @@ export class IntegrityRepository {
 
   // ── Answer Revisions ────────────────────────────────────────────────────────
 
-  insertAnswerRevision(
-    attemptId: string,
-    questionVersionId: string,
-    valueText: string,
-  ): void {
+  insertAnswerRevision(attemptId: string, questionVersionId: string, valueText: string): void {
     const wordCount = valueText.trim() === '' ? 0 : valueText.trim().split(/\s+/).length;
     this.db
       .prepare(
@@ -165,16 +192,13 @@ export class IntegrityRepository {
   }
 
   getLivenessChallenge(nonce: string): LivenessChallengeRow | null {
-    const row = this.db
-      .prepare(`SELECT * FROM liveness_challenges WHERE nonce = ?`)
-      .get(nonce) as LivenessChallengeRow | undefined;
+    const row = this.db.prepare(`SELECT * FROM liveness_challenges WHERE nonce = ?`).get(nonce) as
+      LivenessChallengeRow | undefined;
     return row ?? null;
   }
 
   markLivenessChallengeUsed(nonce: string): void {
-    this.db
-      .prepare(`UPDATE liveness_challenges SET used = 1 WHERE nonce = ?`)
-      .run(nonce);
+    this.db.prepare(`UPDATE liveness_challenges SET used = 1 WHERE nonce = ?`).run(nonce);
   }
 
   // ── Instructor: similarity review ────────────────────────────────────────────
@@ -191,18 +215,23 @@ export class IntegrityRepository {
           ORDER BY v.published_at DESC, v.id, evq.position`,
       )
       .all() as Array<{
-        version_id: string;
-        title: string;
-        version_number: number;
-        question_id: string;
-        prompt: string;
-        question_type: string;
-      }>;
+      version_id: string;
+      title: string;
+      version_number: number;
+      question_id: string;
+      prompt: string;
+      question_type: string;
+    }>;
     const versions = new Map<string, InstructorVersionRow>();
     for (const row of rows) {
       let version = versions.get(row.version_id);
       if (version === undefined) {
-        version = { id: row.version_id, title: row.title, versionNumber: row.version_number, questions: [] };
+        version = {
+          id: row.version_id,
+          title: row.title,
+          versionNumber: row.version_number,
+          questions: [],
+        };
         versions.set(row.version_id, version);
       }
       version.questions.push({ id: row.question_id, prompt: row.prompt, type: row.question_type });
@@ -225,7 +254,11 @@ export class IntegrityRepository {
           WHERE s.exam_version_id = ? AND a.question_version_id = ?
           ORDER BY u.email`,
       )
-      .all(examVersionId, questionVersionId) as Array<{ student_id: string; email: string; answer_json: string }>;
+      .all(examVersionId, questionVersionId) as Array<{
+      student_id: string;
+      email: string;
+      answer_json: string;
+    }>;
     return rows.flatMap((row) => {
       const value: unknown = JSON.parse(row.answer_json);
       return typeof value === 'string' && value.trim() !== ''
@@ -248,9 +281,8 @@ export class IntegrityRepository {
   }
 
   getPhoneEnrollmentByToken(token: string): PhoneEnrollmentRow | null {
-    const row = this.db
-      .prepare(`SELECT * FROM phone_enrollments WHERE token = ?`)
-      .get(token) as PhoneEnrollmentRow | undefined;
+    const row = this.db.prepare(`SELECT * FROM phone_enrollments WHERE token = ?`).get(token) as
+      PhoneEnrollmentRow | undefined;
     return row ?? null;
   }
 

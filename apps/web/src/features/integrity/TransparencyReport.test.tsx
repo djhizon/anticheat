@@ -16,8 +16,18 @@ afterEach(async () => {
 
 it('lists every recorded event for the attempt', async () => {
   const load = vi.fn(async () => [
-    { timestamp: '2026-09-15T00:00:01.000Z', type: 'HARDWARE' as const, severity: 'high' as const, description: 'Multiple displays detected (2)' },
-    { timestamp: '2026-09-15T00:00:02.000Z', type: 'GAZE' as const, severity: 'low' as const, description: 'Looked away from screen for 4s' },
+    {
+      timestamp: '2026-09-15T00:00:01.000Z',
+      type: 'HARDWARE' as const,
+      severity: 'high' as const,
+      description: 'Multiple displays detected (2)',
+    },
+    {
+      timestamp: '2026-09-15T00:00:02.000Z',
+      type: 'GAZE' as const,
+      severity: 'low' as const,
+      description: 'Looked away from screen for 4s',
+    },
   ]);
   await act(async () => root.render(<TransparencyReport attemptId="attempt-1" load={load} />));
   expect(load).toHaveBeenCalledWith('attempt-1');
@@ -28,8 +38,14 @@ it('lists every recorded event for the attempt', async () => {
 });
 
 it('reassures the student when nothing was flagged and reports load failures', async () => {
-  await act(async () => root.render(<TransparencyReport attemptId="clean" load={async () => []} />));
+  await act(async () =>
+    root.render(<TransparencyReport attemptId="clean" load={async () => []} />),
+  );
   expect(container.textContent).toContain('Nothing was flagged');
-  await act(async () => root.render(<TransparencyReport attemptId="broken" load={() => Promise.reject(new Error('x'))} />));
+  await act(async () =>
+    root.render(
+      <TransparencyReport attemptId="broken" load={() => Promise.reject(new Error('x'))} />,
+    ),
+  );
   expect(container.querySelector('[role="alert"]')?.textContent).toContain('could not be loaded');
 });

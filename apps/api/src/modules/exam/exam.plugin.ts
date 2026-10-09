@@ -56,14 +56,17 @@ export function createExamPlugin(
     });
     console.log(
       `[exam-plugin] Gemini ready — ${aiCheckKeys.length} key(s) for AI-check/liveness, ` +
-      `${Math.min(5, allKeys.length)} key(s) for question generation`,
+        `${Math.min(5, allKeys.length)} key(s) for question generation`,
     );
   } else {
     console.warn(
       '[exam-plugin] No GEMINI_API_KEYS configured — AI checks disabled; integrity monitoring and native phone presence remain available.',
     );
   }
-  const integrity: IntegrityService | null = new IntegrityService(new IntegrityRepository(database), gemini);
+  const integrity: IntegrityService | null = new IntegrityService(
+    new IntegrityRepository(database),
+    gemini,
+  );
 
   const routes = new ExamRoutes(
     service,
