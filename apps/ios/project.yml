@@ -38,6 +38,16 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.djhizon.examcompanion.pairing
             CFBundleURLSchemes: [examcompanion]
+  ExamCompanionUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: ExamCompanion
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.djhizon.examcompanion.uitests
 schemes:
   ExamCompanion:
     build:
@@ -45,3 +55,6 @@ schemes:
         ExamCompanion: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets: [ExamCompanionUITests]

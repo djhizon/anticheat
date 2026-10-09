@@ -46,6 +46,7 @@ struct CompanionView: View {
                             TextField("examcompanion://pair?…", text: $pastedLink)
                                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                             Button("Use pairing link") {
+                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                                 controller.acceptLink(pastedLink); pastedLink = ""; consent = false; insecureDemo = false
                             }
                         }
@@ -53,6 +54,7 @@ struct CompanionView: View {
                     Text("The exam deadline keeps running. Keep the phone charged. An incoming call or Control Center may briefly make the app inactive.").font(.footnote)
                 }.padding(24)
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Exam Companion")
             .onAppear { controller.setActive(phase == .active) }
             .modifier(PhaseChange(phase: phase) { controller.setActive($0 == .active) })

@@ -227,6 +227,20 @@ Swift package tests exercise pure policy/parsing on the Mac, not a simulator.
 The unsigned build cannot be installed as-is. Existing unrelated web typecheck
 errors and MediaPipe build warnings remain outside this pack.
 
+Optional Simulator UI smoke test (developer check only, not acceptance; it
+covers the unpaired state, an invalid link, an unreachable host and the "camera
+unavailable" message, never presence timing or the camera):
+
+```sh
+cd apps/ios
+xcodegen generate --spec project.yml
+xcodebuild test -project ExamCompanion.xcodeproj -scheme ExamCompanion -destination 'platform=iOS Simulator,name=iPhone SE (3rd generation)' CODE_SIGNING_ALLOWED=NO
+```
+
+Set `TEST_RUNNER_SCREENSHOT_DIR=<dir>` to save screenshots. The paired
+desk-camera test is skipped unless `TEST_RUNNER_MOCK_ORIGIN` is set to a mock
+laptop origin on a private IPv4 address (the app rejects loopback origins).
+
 On the XR, check each case with synthetic data:
 
 1. Pair, keep the app open, and verify laptop answering is enabled.

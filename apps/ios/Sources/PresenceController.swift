@@ -67,7 +67,7 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
             stopAndForget()
             pending = link
             status = "Confirm the laptop address, then connect."
-        } catch { status = "Invalid pairing link. Use a fresh QR from your laptop; Release builds require HTTPS." }
+        } catch { status = "That pairing link didn't work. Scan a fresh QR code from the exam on your laptop and try again." }
     }
 
     func setActive(_ active: Bool) {
