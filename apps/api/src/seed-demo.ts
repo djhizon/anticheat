@@ -1,6 +1,6 @@
 /* global console, process */
 
-import type { ExamVersionId } from '@exam-anti-cheat/contracts/exam';
+import type { AssignmentId, ExamVersionId } from '@exam-anti-cheat/contracts/exam';
 
 import { loadConfig } from './config.js';
 import { loadLocalEnv } from './env.js';
@@ -16,6 +16,47 @@ const demoPassword = process.env.DEMO_STUDENT_PASSWORD ?? 'Demo exam password 20
 const instructorEmail = process.env.DEMO_INSTRUCTOR_EMAIL ?? 'demo.instructor@example.test';
 const instructorPassword = process.env.DEMO_INSTRUCTOR_PASSWORD ?? 'Demo instructor password 2026!';
 const demoSlug = 'pack8-ai-exam';
+const classmatePassword = process.env.DEMO_CLASSMATE_PASSWORD ?? 'Demo classmate password 2026!';
+const classmateEmails = [1, 2, 3, 4].map((n) => `classmate${n}@example.test`);
+
+type ClassmateAnswers = {
+  readonly shortAnswer: (prompt: string) => string;
+  readonly identification: (index: number) => string;
+};
+
+function topicOf(prompt: string): string {
+  const trimmed = prompt.trim().replace(/[.?!:\s]+$/u, '');
+  return trimmed.charAt(0).toLowerCase() + trimmed.slice(1);
+}
+
+// Index 0/1: near-identical (copy with minor edits); 2: AI-sounding; 3: casual human with a typo.
+const classmateAnswers: readonly ClassmateAnswers[] = [
+  {
+    shortAnswer: (prompt) =>
+      `Regarding "${topicOf(prompt)}", the key point is that the approach has to match how the data is stored and shared. You pick the technique that fits the requirements, apply it consistently, and check the result, which keeps the system both secure and efficient.`,
+    identification: (i) =>
+      ['Quicksort', 'Hash table', 'Binary search', 'Stack'][i % 4] ?? 'Quicksort',
+  },
+  {
+    shortAnswer: (prompt) =>
+      `Regarding "${topicOf(prompt)}", the key point is that the approach must match how the data is stored and shared. You choose the technique that fits the requirements, apply it consistently, and verify the result, which keeps the system secure and efficient.`,
+    identification: (i) =>
+      ['Quick sort', 'Hash table', 'Binary search', 'Stack'][i % 4] ?? 'Quick sort',
+  },
+  {
+    shortAnswer: (prompt) =>
+      `In conclusion, it is important to note that ${topicOf(prompt)} represents a multifaceted concept with several key considerations. Firstly, it plays a crucial role in ensuring robust and scalable systems. Furthermore, it is essential to leverage best practices to ensure optimal outcomes. Overall, a comprehensive understanding of this topic is vital for any practitioner.`,
+    identification: (i) =>
+      ['Quicksort algorithm', 'Hash table', 'Binary search', 'Stack'][i % 4] ??
+      'Quicksort algorithm',
+  },
+  {
+    shortAnswer: (prompt) =>
+      `not 100% sure but i think ${topicOf(prompt)} is basicly about using the right method for the job and not mixing up user input with the actual logic. thats what we did in lab`,
+    identification: (i) =>
+      ['quicksrot', 'hashtable', 'binary serch', 'stack'][i % 4] ?? 'quicksrot',
+  },
+];
 
 function readString(value: unknown, message: string): string {
   if (typeof value !== 'string' || value === '') {
@@ -35,7 +76,13 @@ async function seedDemo(): Promise<void> {
   const auth = createAuthPlugin(config);
   console.log('🗑  Wiping old exam data…');
   const wipeStatements = [
-    `DELETE FROM exam_attempt_mutations`,
+    // Reset only in-progress attempts first (e.g. the demo student's); terminal attempts are immutable.
+    `DELETE FROM attempt_mutations WHERE attempt_id IN (SELECT id FROM exam_attempts WHERE status = 'in_progress')`,
+    `DELETE FROM attempt_answers WHERE attempt_id IN (SELECT id FROM exam_attempts WHERE status = 'in_progress')`,
+    `DELETE FROM exam_attempts WHERE status = 'in_progress'`,
+    `DELETE FROM attempt_mutations`,
+    `DELETE FROM attempt_answers`,
+    `DELETE FROM phone_presence`,
     `DELETE FROM answer_revisions`,
     `DELETE FROM audio_sessions`,
     `DELETE FROM app_events`,
@@ -49,6 +96,7 @@ async function seedDemo(): Promise<void> {
     `DELETE FROM exam_assignments`,
     `DELETE FROM question_versions`,
     `DELETE FROM exam_versions`,
+    `DELETE FROM exam_version_questions`,
     `DELETE FROM exam_questions`,
     `DELETE FROM exams`,
   ];
@@ -56,7 +104,8 @@ async function seedDemo(): Promise<void> {
     try {
       auth.database.prepare(sql).run();
     } catch {
-      // Table may not exist yet on a fresh DB — that's fine
+      // Table may not exist yet, or rows are protected by DB immutability triggers
+      // (submitted classmate attempts and the published demo exam are kept and reused).
     }
   }
 
@@ -148,8 +197,65 @@ async function seedDemo(): Promise<void> {
       await exam.service.assignExam({ examVersionId, studentId: student.id });
     }
 
+    // ── Synthetic classmates with submitted attempts (similarity / AI-check demo) ──
+    for (const [index, email] of classmateEmails.entries()) {
+      let classmate = auth.repository.findUserByEmail(email);
+      if (classmate === null) {
+        await auth.service.register({ email, password: classmatePassword });
+        classmate = auth.repository.findUserByEmail(email);
+      }
+      if (classmate === null || classmate.role !== 'student') {
+        throw new Error('A demo classmate account could not be prepared.');
+      }
+      const existingClassmateAssignment = auth.database
+        .prepare(
+          `SELECT a.id AS id, t.status AS status FROM exam_assignments a
+           LEFT JOIN exam_attempts t ON t.assignment_id = a.id
+           WHERE a.exam_version_id = ? AND a.student_id = ?`,
+        )
+        .get(examVersionId, classmate.id);
+      if (existingClassmateAssignment?.status === 'submitted') {
+        continue; // Already seeded on a previous run; submitted attempts are immutable.
+      }
+      const assignmentId =
+        existingClassmateAssignment === undefined
+          ? await exam.service.assignExam({ examVersionId, studentId: classmate.id })
+          : (readString(
+              existingClassmateAssignment.id,
+              'The classmate assignment is invalid.',
+            ) as AssignmentId);
+      const { delivery } = await exam.service.startAttempt(assignmentId, classmate.id);
+      const attemptId = delivery.attempt.id;
+      const script = classmateAnswers[index];
+      if (script === undefined) {
+        throw new Error('Missing classmate answer script.');
+      }
+      let identificationIndex = 0;
+      const answers: Record<string, string | null> = {};
+      for (const question of delivery.questions) {
+        if (question.type === 'short_answer') {
+          answers[question.id] = script.shortAnswer(question.prompt);
+        } else if (question.type === 'identification') {
+          answers[question.id] = script.identification(identificationIndex);
+          identificationIndex += 1;
+        } else {
+          answers[question.id] = null;
+        }
+      }
+      const saved = await exam.service.saveAnswers(attemptId, classmate.id, {
+        revision: delivery.answers.revision,
+        idempotencyKey: `seed-save-${String(attemptId)}-1`,
+        answers,
+      });
+      await exam.service.submitAttemptWithAnswers(attemptId, classmate.id, {
+        expectedRevision: saved.revision,
+        idempotencyKey: `seed-submit-${String(attemptId)}-1`,
+      });
+    }
+
     console.log('');
     console.log('──────────────────────────────────────────');
+    console.log(`✅  Classmates:    ${classmateEmails.join(', ')} / ${classmatePassword}`);
     console.log(`✅  Demo student:  ${demoEmail}`);
     console.log(`✅  Demo password: ${demoPassword}`);
     console.log(`✅  Instructor:    ${instructorEmail} / ${instructorPassword}`);
