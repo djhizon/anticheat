@@ -279,18 +279,23 @@ export class IntegrityService {
     const checkedAt = new Date().toISOString();
     if (answers.length === 0) return { questionId, checkedAt, results: [], truncated: false };
     const gemini = this.requireGemini();
+    // Three at a time: ~3x faster than sequential while staying gentle on rate limits.
+    const queue = answers.slice(0, limit);
     const results: AiCheckResult[] = [];
-    for (const answer of answers.slice(0, limit)) {
-      const report = await checkForAiGeneration(gemini, question.prompt, answer.text);
-      results.push({
-        studentId: answer.studentId,
-        email: answer.email,
-        score: report.score,
-        flags: report.flags,
-        summary: report.summary,
-        available: report.available,
-      });
-    }
+    const worker = async () => {
+      for (let answer = queue.shift(); answer; answer = queue.shift()) {
+        const report = await checkForAiGeneration(gemini, question.prompt, answer.text);
+        results.push({
+          studentId: answer.studentId,
+          email: answer.email,
+          score: report.score,
+          flags: report.flags,
+          summary: report.summary,
+          available: report.available,
+        });
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
     results.sort((a, b) => b.score - a.score);
     return { questionId, checkedAt, results, truncated: answers.length > limit };
   }

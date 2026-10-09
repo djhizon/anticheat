@@ -7,8 +7,8 @@ export interface GeminiConfig {
   readonly keys: readonly string[];
   readonly model: string;
   readonly embeddingModel: string;
-  /** Used when the primary model stays overloaded after retries. */
-  readonly fallbackModel?: string;
+  /** Tried in order when the primary is overloaded after retries or retired (404). */
+  readonly fallbackModels?: readonly string[];
 }
 
 export interface GeminiPart {
@@ -51,7 +51,13 @@ export interface GeminiEmbedResponse {
 
 const RETRYABLE_STATUS = new Set([429, 500, 503]);
 export const DEFAULT_EMBEDDING_MODEL = 'gemini-embedding-001';
-const DEFAULT_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || 'gemini-2.5-flash';
+const DEFAULT_FALLBACK_MODELS = (
+  process.env.GEMINI_FALLBACK_MODELS || 'gemini-3.8-flash,gemini-3.5-flash'
+)
+  .split(',')
+  .map((model) => model.trim())
+  .filter(Boolean);
+const SWITCH_MODEL = /Gemini API error (404|429|500|503)/u;
 
 export class GeminiRotatingClient {
   private index = 0;
@@ -114,22 +120,28 @@ export class GeminiRotatingClient {
       },
     };
 
-    let response: GeminiGenerateResponse;
-    try {
-      response = (await this.fetchGemini(
-        `models/${this.config.model}:generateContent`,
-        request,
-      )) as GeminiGenerateResponse;
-    } catch (error) {
-      const fallback = this.config.fallbackModel ?? DEFAULT_FALLBACK_MODEL;
-      const overloaded =
-        error instanceof Error && /Gemini API error (429|500|503)/u.test(error.message);
-      if (!overloaded || fallback === this.config.model) throw error;
-      response = (await this.fetchGemini(
-        `models/${fallback}:generateContent`,
-        request,
-      )) as GeminiGenerateResponse;
+    const models = [
+      this.config.model,
+      ...(this.config.fallbackModels ?? DEFAULT_FALLBACK_MODELS).filter(
+        (model) => model !== this.config.model,
+      ),
+    ];
+    let response: GeminiGenerateResponse | null = null;
+    let lastError: unknown = null;
+    for (const model of models) {
+      try {
+        response = (await this.fetchGemini(
+          `models/${model}:generateContent`,
+          request,
+        )) as GeminiGenerateResponse;
+        break;
+      } catch (error) {
+        lastError = error;
+        // Only overloads and retired models move on to the next model.
+        if (!(error instanceof Error && SWITCH_MODEL.test(error.message))) throw error;
+      }
     }
+    if (response === null) throw lastError;
 
     const text = response.candidates[0]?.content?.parts[0]?.text;
     if (!text) throw new Error('Gemini returned an empty response.');

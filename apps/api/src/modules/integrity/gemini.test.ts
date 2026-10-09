@@ -40,18 +40,22 @@ it('does not retry client errors such as a retired model', async () => {
   expect(fetchMock).toHaveBeenCalledOnce();
 });
 
-it('falls back to a second model when the primary stays overloaded', async () => {
+it('walks the fallback chain past overloaded and retired models', async () => {
   vi.useFakeTimers();
   const ok = { candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }] };
   const fetchMock = vi.fn(async (url: string) =>
-    url.includes('models/primary:') ? reply(503) : reply(200, ok),
+    url.includes('models/primary:')
+      ? reply(503)
+      : url.includes('models/retired:')
+        ? reply(404)
+        : reply(200, ok),
   );
   vi.stubGlobal('fetch', fetchMock);
   const client = new GeminiRotatingClient({
     keys: ['k1'],
     model: 'primary',
     embeddingModel: 'e',
-    fallbackModel: 'backup',
+    fallbackModels: ['retired', 'backup'],
   });
   const pending = client.generateContent('hi');
   await vi.runAllTimersAsync();
