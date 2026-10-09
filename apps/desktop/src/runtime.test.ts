@@ -122,6 +122,7 @@ describe('runtime paths and environment', () => {
       WHISPER_MODEL_PATH: '/res/whisper/ggml-small.en-q5_1.bin',
       LOCAL_VISION: 'true',
       LOCAL_VISION_MODEL_DIR: '/res/vision-models',
+      RECORDING_UPLOAD: 'off',
     });
     expect(env.FFMPEG_BIN).toBeUndefined();
     expect(env.NODE_ENV).toBeUndefined();

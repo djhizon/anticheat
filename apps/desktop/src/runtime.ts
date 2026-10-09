@@ -139,6 +139,11 @@ export function buildServerEnv(
   // The on-device wearables detector is a desktop-app feature: the API only serves it to
   // loopback clients, and the model file is bundled (or prepared with `vision:prepare --local`).
   env.LOCAL_VISION = 'true'; // The API accepts only 'true' or 'false'.
+  // Without OneDrive (Microsoft Graph) settings, recordings stay on this Mac and students are told
+  // so; an explicit RECORDING_UPLOAD in the environment still wins.
+  if (!env.RECORDING_UPLOAD && !(env.MS_TENANT_ID && env.MS_CLIENT_ID && env.MS_CLIENT_SECRET)) {
+    env.RECORDING_UPLOAD = 'off';
+  }
   env.LOCAL_VISION_MODEL_DIR = paths.visionModelDir;
   return env;
 }
