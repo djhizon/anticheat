@@ -13,6 +13,7 @@ import { LivenessModal } from '../integrity/LivenessModal.js';
 import { embedWatermark } from '../integrity/watermark.js';
 import { shouldKick } from '../integrity/tabGuard.js';
 import { TransparencyReport } from '../integrity/TransparencyReport.js';
+import { desktopWatcherBridge, startDesktopWatcher } from '../integrity/desktopWatcher.js';
 
 const AudioPanel = React.lazy(() => import('../integrity/AudioPanel.js').then((m) => ({ default: m.AudioPanel })));
 const CameraIntegrityPanel = React.lazy(() => import('../integrity/CameraIntegrityPanel.js').then((m) => ({ default: m.CameraIntegrityPanel })));
@@ -243,6 +244,15 @@ export function StudentExamPage({
     
     return () => clearInterval(interval);
   }, [currentDelivery?.attempt.id, currentDelivery?.attempt.status, examApi, onViolation]);
+
+  // Desktop lockdown shell: forward foreground-app and display changes through
+  // the authenticated events endpoint for the transparency report.
+  useEffect(() => {
+    const bridge = desktopWatcherBridge();
+    if (!bridge || !examApi || !currentDelivery || currentDelivery.attempt.status !== 'in_progress') return;
+    const attemptId = currentDelivery.attempt.id;
+    return startDesktopWatcher(bridge, attemptId, (event) => examApi.patchEvents(attemptId, event));
+  }, [currentDelivery?.attempt.id, currentDelivery?.attempt.status, examApi]);
 
   // Explicit, local-only recording; never start expensive capture with the exam.
 
