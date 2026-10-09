@@ -1804,3 +1804,13 @@ describe('exam delivery boundary', () => {
     return request;
   }
 });
+
+it('accepts the final telemetry flush shortly after submit, but not later', async () => {
+  const { acceptsTelemetry } = await import('./exam.routes.js');
+  const submittedAt = '2026-10-10T00:00:00.000Z';
+  const at = (ms: number) => Date.parse(submittedAt) + ms;
+  expect(acceptsTelemetry({ status: 'in_progress', submittedAt: null })).toBe(true);
+  expect(acceptsTelemetry({ status: 'submitted', submittedAt }, at(5_000))).toBe(true);
+  expect(acceptsTelemetry({ status: 'submitted', submittedAt }, at(61_000))).toBe(false);
+  expect(acceptsTelemetry({ status: 'expired', submittedAt }, at(1_000))).toBe(false);
+});

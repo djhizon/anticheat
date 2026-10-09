@@ -551,7 +551,7 @@ export class ExamRoutes {
           attemptId as AttemptId,
           principal.user.id,
         );
-        if (delivery.attempt.status !== 'in_progress') {
+        if (!acceptsTelemetry(delivery.attempt)) {
           throw new DomainError(
             'conflict',
             'Telemetry is only accepted while the attempt is in progress.',
@@ -1023,4 +1023,18 @@ export class ExamRoutes {
       body: null,
     };
   }
+}
+
+/** Grace window for the final telemetry flush the browser sends as the exam page closes. */
+export const TELEMETRY_GRACE_MS = 60_000;
+
+/** In progress, or submitted within the grace window (events recorded before submit). */
+export function acceptsTelemetry(
+  attempt: { readonly status: string; readonly submittedAt: string | null },
+  now: number = Date.now(),
+): boolean {
+  if (attempt.status === 'in_progress') return true;
+  if (attempt.status !== 'submitted' || attempt.submittedAt === null) return false;
+  const age = now - Date.parse(attempt.submittedAt);
+  return age >= 0 && age <= TELEMETRY_GRACE_MS;
 }

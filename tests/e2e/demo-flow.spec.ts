@@ -36,7 +36,7 @@ const benignRequests: readonly RegExp[] = [
   /net::ERR_ABORTED/,
   /\.(task|tflite|wasm|bin)(\?|$)/i,
   /\/exam\/attempts\/[^/]+\/audio/,
-  /\/exam\/instructor\/versions\/[^/]+\/questions\/[^/]+\/(ai-check|similarity) -> 500/,
+  /\/exam\/instructor\/versions\/[^/]+\/questions\/[^/]+\/(ai-check|similarity) -> 503/,
   /\/liveness-challenge -> 403/,
   /\/exam\/attempts\/[^/]+\/(liveness-verify|vision-check)/,
 ];
