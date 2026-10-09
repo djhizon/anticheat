@@ -194,6 +194,35 @@ function trustedAppFrame(event: FrameEvent): boolean {
   );
 }
 
+/** Why the last getDisplayMedia request was refused (fixed codes; also written to the log). */
+export type ScreenCaptureRefusal =
+  | 'busy'
+  | 'window'
+  | 'frame'
+  | 'origin'
+  | 'gesture'
+  | 'no-video'
+  | 'audio'
+  | 'permission'
+  | 'sources-failed'
+  | 'no-sources'
+  | 'cancelled'
+  | 'failed';
+let lastScreenCaptureRefusal: ScreenCaptureRefusal | null = null;
+// Electron 44 accepts `null` as the denial (→ NotAllowedError); its typings still say Streams.
+const DENY_DISPLAY_MEDIA = null as unknown as Electron.Streams;
+
+/** macOS Screen Recording (TCC) status; 'unknown' where the API is unavailable. */
+export function screenCapturePermissionStatus(): string {
+  try {
+    if (process.platform !== 'darwin') return 'unknown';
+    if (typeof systemPreferences.getMediaAccessStatus !== 'function') return 'unknown';
+    return systemPreferences.getMediaAccessStatus('screen');
+  } catch {
+    return 'unknown';
+  }
+}
+
 function validAttemptId(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 200;
 }
@@ -579,9 +608,19 @@ export async function createWindow(): Promise<void> {
     moviesDir: app.getPath('videos'),
     log: diagnostic,
   });
+  //
+  // Refusals answer `null` (Electron's documented denial; an empty `{}` with video requested is
+  // "no video stream was provided" since Electron 44). Verified on 44.4.1: either way the page
+  // only sees AbortError "Invalid capture constraints", so the reason is logged here and handed
+  // to the page through 'get-screen-capture-diagnosis'.
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+    const deny = (reason: ScreenCaptureRefusal) => {
+      lastScreenCaptureRefusal = reason;
+      diagnostic('screen-capture-refused', reason);
+      callback(DENY_DISPLAY_MEDIA);
+    };
     if (screenPickerOpen) {
-      callback({});
+      deny('busy');
       return;
     }
     screenPickerOpen = true;
@@ -597,26 +636,54 @@ export async function createWindow(): Promise<void> {
         /* Requesting frame may have closed. */
       }
     };
-    const trusted = () =>
-      !window.isDestroyed() &&
-      mainWindow === window &&
-      generation === navigationGeneration &&
-      request.frame !== null &&
-      request.frame === window.webContents.mainFrame &&
-      isAppUrl(request.frame.url) &&
-      request.securityOrigin === new URL(WEB_URL).origin &&
-      request.userGesture &&
-      request.videoRequested &&
-      !request.audioRequested;
+    const refuse = (reason: ScreenCaptureRefusal) => {
+      if (settled) return;
+      settled = true;
+      screenPickerOpen = false;
+      try {
+        deny(reason);
+      } catch {
+        /* Requesting frame may have closed. */
+      }
+    };
+    const untrusted = (): ScreenCaptureRefusal | null => {
+      if (window.isDestroyed() || mainWindow !== window || generation !== navigationGeneration)
+        return 'window';
+      if (request.frame === null || request.frame !== window.webContents.mainFrame) return 'frame';
+      // Electron reports securityOrigin as a URL spec ("http://127.0.0.1:5173/", trailing
+      // slash), so compare parsed origins, never raw strings.
+      if (!isAppUrl(request.frame.url) || !isAppOrigin(request.securityOrigin)) return 'origin';
+      if (!request.userGesture) return 'gesture';
+      if (!request.videoRequested) return 'no-video';
+      if (request.audioRequested) return 'audio';
+      return null;
+    };
     void (async () => {
       try {
-        if (!trusted()) return finish({});
-        const sources = await desktopCapturer.getSources({
-          types: ['screen'],
-          thumbnailSize: { width: 0, height: 0 },
-          fetchWindowIcons: false,
-        });
-        if (!trusted() || sources.length === 0) return finish({});
+        const reason = untrusted();
+        if (reason !== null) return refuse(reason);
+        // macOS: a stale grant (the ad-hoc signature changed with a rebuild) still shows the
+        // app as enabled in System Settings while TCC reports "denied". Enumerating sources
+        // then yields nothing. "not-determined" must go on: enumerating triggers the prompt.
+        const permission = screenCapturePermissionStatus();
+        diagnostic('screen-capture-permission', permission);
+        if (permission === 'denied' || permission === 'restricted') return refuse('permission');
+        let sources: Electron.DesktopCapturerSource[];
+        try {
+          sources = await desktopCapturer.getSources({
+            types: ['screen'],
+            thumbnailSize: { width: 0, height: 0 },
+            fetchWindowIcons: false,
+          });
+        } catch {
+          return refuse('sources-failed');
+        }
+        const afterSources = untrusted();
+        if (afterSources !== null) return refuse(afterSources);
+        if (sources.length === 0)
+          return refuse(
+            screenCapturePermissionStatus() === 'granted' ? 'no-sources' : 'permission',
+          );
         let primaryId: string | null = null;
         try {
           primaryId = String(screen.getPrimaryDisplay().id);
@@ -626,7 +693,11 @@ export async function createWindow(): Promise<void> {
         const primary = primaryId
           ? sources.find((source) => source.display_id === primaryId)
           : undefined;
-        if (primary) return finish({ video: primary }); // No system/loopback audio.
+        if (primary) {
+          lastScreenCaptureRefusal = null;
+          diagnostic('screen-capture-granted', 'primary');
+          return finish({ video: primary }); // No system/loopback audio.
+        }
         const choice = await dialog.showMessageBox(window, {
           type: 'question',
           title: 'Exam screen recording',
@@ -642,10 +713,14 @@ export async function createWindow(): Promise<void> {
           noLink: true,
         });
         const selected = sources[choice.response - 1];
-        if (!trusted() || !selected) return finish({});
+        const afterPicker = untrusted();
+        if (afterPicker !== null) return refuse(afterPicker);
+        if (!selected) return refuse('cancelled');
+        lastScreenCaptureRefusal = null;
+        diagnostic('screen-capture-granted', 'picked');
         finish({ video: selected }); // No system/loopback audio.
       } catch {
-        finish({});
+        refuse('failed');
       }
     })();
   });
@@ -692,6 +767,12 @@ ipcMain.on('stop-watcher', (event) => {
   void phoneLan.stop(); // The exam ended: close the phone's LAN listener.
 });
 
+// Lets the setup page explain a refused screen capture (the page itself only sees a generic
+// DOMException from getDisplayMedia). Fixed codes only: no URLs, names or answers.
+ipcMain.handle('get-screen-capture-diagnosis', (event) => {
+  if (!trustedAppFrame(event)) throw new Error('Untrusted application request.');
+  return { permission: screenCapturePermissionStatus(), lastRefusal: lastScreenCaptureRefusal };
+});
 ipcMain.handle('get-display-count', (event) => {
   if (!trustedAppFrame(event)) throw new Error('Untrusted application request.');
   return getDisplayCount();

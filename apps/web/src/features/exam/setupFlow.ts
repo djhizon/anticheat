@@ -1,4 +1,5 @@
 /** Pure logic for the pre-exam setup stepper: ordering, gating and refresh-safe progress. */
+import { MAC_SCREEN_RECORDING_RESET_STEPS } from '../integrity/screenCaptureGuidance.js';
 
 export const SETUP_STEPS = [
   { id: 'consent', label: 'Consent' },
@@ -186,12 +187,9 @@ export function permissionFixSteps(
 ): string[] {
   const label = kind === 'camera' ? 'Camera' : kind === 'microphone' ? 'Microphone' : 'Screen';
   if (kind === 'screen') {
-    if (/Electron/i.test(userAgent))
-      return [
-        'Open System Settings → Privacy & Security → Screen & System Audio Recording.',
-        'Turn on the switch next to this exam app, then fully quit and reopen the app.',
-        'Sign back in and return to this setup.',
-      ];
+    // The Mac app is ad-hoc signed: a rebuild invalidates an earlier grant even though the
+    // switch still shows as on, so the entry must be removed and added again (or reset).
+    if (/Electron/i.test(userAgent)) return [...MAC_SCREEN_RECORDING_RESET_STEPS];
     if (/Mac/i.test(userAgent))
       return [
         'Open System Settings → Privacy & Security → Screen & System Audio Recording.',

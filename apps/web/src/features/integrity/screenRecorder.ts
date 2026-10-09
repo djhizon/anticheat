@@ -14,6 +14,10 @@ import {
   type RecordingProfile,
 } from './networkProbe.js';
 import { RecordingUploadQueue, type QueueItem } from './recordingUploadQueue.js';
+import {
+  describeDesktopCaptureFailure,
+  readScreenCaptureDiagnosis,
+} from './screenCaptureGuidance.js';
 
 export const CLOUD_SEGMENT_MS = 10_000;
 export const LOCAL_SEGMENT_MS = 60_000;
@@ -435,9 +439,17 @@ export function createScreenRecorder(
         );
       try {
         // Ask for the screen first (needs the student's click), then adapt to the network.
+        // Nothing may be awaited before this call: it must run inside the click's activation.
         screen = await navigator.mediaDevices.getDisplayMedia(displayMediaRequest(desktop));
       } catch (error) {
         const name = error instanceof Error ? error.name : '';
+        if (desktop) {
+          const explained = describeDesktopCaptureFailure(
+            error,
+            await readScreenCaptureDiagnosis(),
+          );
+          if (explained !== null) throw new Error(explained);
+        }
         if (name === 'NotSupportedError')
           throw new Error(
             'Screen capture is not configured in this desktop build. Quit it and launch the rebuilt recording-fix app.',

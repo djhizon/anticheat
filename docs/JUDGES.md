@@ -54,6 +54,13 @@ xattr -dr com.apple.quarantine "/Applications/ExamGuard.app"
 - **Camera**: identity and presence checks during an exam.
 - **Microphone**: audio monitoring of the testing environment.
 - **Screen Recording**: only if you choose to start screen recording; it is not requested otherwise.
+  The app is ad-hoc signed, so after installing a rebuilt `ExamGuard.app` an earlier grant no
+  longer matches (the switch still shows as on, but the setup step reports that macOS is not
+  letting the app record). Fix: quit ExamGuard, run `tccutil reset ScreenCapture com.examguard.desktop`
+  in Terminal (or remove ExamGuard with "–" in System Settings → Privacy & Security → Screen &
+  System Audio Recording and add `/Applications/ExamGuard.app` again with "+"), reopen the app and
+  allow it when macOS asks. The refusal reason is also written to `desktop-health.log`
+  (`screen-capture-permission` / `screen-capture-refused`).
 
 - **Local Network / incoming connections**: only when you pair an iPhone. The app then opens a small
   listener on your Mac's Wi-Fi address (port 3443) that serves only the phone's check-in endpoints

@@ -7,6 +7,11 @@ contextBridge.exposeInMainWorld('electronExam', {
   },
   stopWatcher: () => ipcRenderer.send('stop-watcher'),
   getDisplayCount: () => ipcRenderer.invoke('get-display-count') as Promise<number>,
+  getScreenCaptureDiagnosis: () =>
+    ipcRenderer.invoke('get-screen-capture-diagnosis') as Promise<{
+      permission: string;
+      lastRefusal: string | null;
+    }>,
   getForegroundApp: () => ipcRenderer.invoke('get-foreground-app') as Promise<string>,
   getEnvironmentRisk: () =>
     ipcRenderer.invoke('get-environment-risk') as Promise<{

@@ -342,6 +342,36 @@ it('asks for the whole screen and refuses a shared window or browser tab', async
   expect(request.selfBrowserSurface).toBe('exclude');
 });
 
+it('calls getDisplayMedia synchronously from start() (inside the click activation)', async () => {
+  const recorder = createScreenRecorder('a', undefined, () => {}, { desktop: true });
+  const pending = recorder.start();
+  expect(vi.mocked(navigator.mediaDevices.getDisplayMedia)).toHaveBeenCalledTimes(1);
+  await pending;
+  recorder.stop();
+});
+
+it('explains a refused desktop capture with the macOS Screen Recording reset steps', async () => {
+  const refused = Object.assign(new Error('Invalid capture constraints'), {
+    name: 'NotAllowedError',
+  });
+  vi.mocked(navigator.mediaDevices.getDisplayMedia).mockRejectedValueOnce(refused);
+  Object.assign(window, {
+    electronExam: {
+      getScreenCaptureDiagnosis: async () => ({ permission: 'denied', lastRefusal: 'permission' }),
+    },
+  });
+  try {
+    const recorder = createScreenRecorder('a', undefined, () => {}, { desktop: true });
+    await expect(recorder.start()).rejects.toThrow(/macOS is not letting this app record/u);
+    // A browser keeps its own wording for the same DOMException.
+    vi.mocked(navigator.mediaDevices.getDisplayMedia).mockRejectedValueOnce(refused);
+    const web = createScreenRecorder('a', undefined, () => {}, { desktop: false });
+    await expect(web.start()).rejects.toThrow(/cancelled or denied/u);
+  } finally {
+    Reflect.deleteProperty(window, 'electronExam');
+  }
+});
+
 it('never sends size or frame-rate capture constraints (the desktop app rejects them)', async () => {
   expect(displayMediaRequest(true)).toEqual({ video: true, audio: false });
   const browser = displayMediaRequest(false) as { video: Record<string, unknown> };

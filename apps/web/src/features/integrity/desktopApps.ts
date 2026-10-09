@@ -21,6 +21,8 @@ export interface DesktopAppsBridge {
   /** Native check of the selected camera (by label); may be absent in older builds. */
   getCameraAttestation?(label: string): Promise<unknown>;
   getDisplayCount(): Promise<number>;
+  /** Why the last screen capture was refused and the macOS Screen Recording status. */
+  getScreenCaptureDiagnosis?(): Promise<unknown>;
   getEnvironmentRisk?(): Promise<{ virtualMachine: string | null; captureDisplays: string[] }>;
   listAppTargets(): Promise<unknown>;
   closeAppTarget(id: string, mode: 'quit' | 'force'): Promise<{ status: string; message: string }>;

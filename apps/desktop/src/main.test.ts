@@ -90,7 +90,8 @@ vi.mock('electron', () => ({
   dialog: { showMessageBox: mocks.showMessageBox, showErrorBox: mocks.showErrorBox },
 }));
 
-import { screen } from 'electron';
+import { appendFileSync } from 'fs';
+import { screen, systemPreferences } from 'electron';
 import {
   createWindow,
   isAppUrl,
@@ -127,7 +128,8 @@ describe('native window recovery', () => {
     mocks.windows[0].webContents.mainFrame = frame;
     return {
       frame,
-      securityOrigin: 'http://127.0.0.1:5173',
+      // Electron passes the origin as a URL spec with a trailing slash (verified on 44.4.1).
+      securityOrigin: 'http://127.0.0.1:5173/',
       userGesture: true,
       videoRequested: true,
       audioRequested: false,
@@ -167,11 +169,16 @@ describe('native window recovery', () => {
     await flush();
     expect(mocks.showMessageBox).not.toHaveBeenCalled();
     expect(callback).toHaveBeenCalledExactlyOnceWith({ video: primary });
+    // The bare origin form must be accepted as well (parsed comparison, not string equality).
+    const bare = vi.fn();
+    handler({ ...displayRequest(), securityOrigin: 'http://127.0.0.1:5173' }, bare);
+    await flush();
+    expect(bare).toHaveBeenCalledExactlyOnceWith({ video: primary });
     for (const change of [{ userGesture: false }, { audioRequested: true }, { frame: null }]) {
       const denied = vi.fn();
       handler({ ...displayRequest(), ...change }, denied);
       await flush();
-      expect(denied).toHaveBeenCalledExactlyOnceWith({});
+      expect(denied).toHaveBeenCalledExactlyOnceWith(null);
     }
     delete (screen as unknown as Record<string, unknown>).getPrimaryDisplay;
   });
@@ -190,7 +197,98 @@ describe('native window recovery', () => {
       const callback = vi.fn();
       handler({ ...displayRequest(), ...change }, callback);
       await flush();
-      expect(callback).toHaveBeenCalledExactlyOnceWith({});
+      expect(callback).toHaveBeenCalledExactlyOnceWith(null);
+    }
+  });
+  it('logs one fixed refusal code per reason and reports it to the trusted page', async () => {
+    await createWindow();
+    mocks.getSources.mockResolvedValue([{ id: 'screen:1', name: 'Display' }]);
+    mocks.showMessageBox.mockResolvedValue({ response: 0 });
+    const handler = mocks.displayHandler.mock.calls[0]![0];
+    const diagnosis = mocks.handlers.get('get-screen-capture-diagnosis')!;
+    const event = () => {
+      const webContents = mocks.windows[0].webContents;
+      return { sender: webContents, senderFrame: webContents.mainFrame };
+    };
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ userGesture: false }, 'gesture'],
+      [{ audioRequested: true }, 'audio'],
+      [{ videoRequested: false }, 'no-video'],
+      [{ frame: null }, 'frame'],
+      [{ securityOrigin: 'https://other.test' }, 'origin'],
+      [{}, 'cancelled'],
+    ];
+    for (const [change, reason] of cases) {
+      vi.mocked(appendFileSync).mockClear();
+      const callback = vi.fn();
+      handler({ ...displayRequest(), ...change }, callback);
+      await flush();
+      expect(callback).toHaveBeenCalledExactlyOnceWith(null);
+      const lines = vi.mocked(appendFileSync).mock.calls.map((call) => String(call[1]));
+      expect(
+        lines.some((line) => line.includes(`"screen-capture-refused","detail":"${reason}"`)),
+      ).toBe(true);
+      expect(diagnosis(event())).toEqual({ permission: 'unknown', lastRefusal: reason });
+    }
+    // Enumeration failures and empty enumerations are refused with their own codes.
+    mocks.getSources.mockRejectedValueOnce(new Error('tcc'));
+    const failed = vi.fn();
+    handler(displayRequest(), failed);
+    await flush();
+    expect(failed).toHaveBeenCalledExactlyOnceWith(null);
+    expect(diagnosis(event())).toMatchObject({ lastRefusal: 'sources-failed' });
+    mocks.getSources.mockResolvedValueOnce([]);
+    const empty = vi.fn();
+    handler(displayRequest(), empty);
+    await flush();
+    expect(empty).toHaveBeenCalledExactlyOnceWith(null);
+    expect(diagnosis(event())).toMatchObject({ lastRefusal: 'permission' });
+    expect(() => diagnosis({ sender: {}, senderFrame: null })).toThrow('Untrusted');
+  });
+  it('refuses before enumerating when macOS reports Screen Recording as denied', async () => {
+    await createWindow();
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    const prefs = systemPreferences as unknown as Record<string, unknown>;
+    try {
+      const handler = mocks.displayHandler.mock.calls[0]![0];
+      for (const status of ['denied', 'restricted']) {
+        prefs.getMediaAccessStatus = vi.fn(() => status);
+        mocks.getSources.mockClear();
+        const callback = vi.fn();
+        handler(displayRequest(), callback);
+        await flush();
+        expect(callback).toHaveBeenCalledExactlyOnceWith(null);
+        expect(mocks.getSources).not.toHaveBeenCalled();
+        expect(
+          vi
+            .mocked(appendFileSync)
+            .mock.calls.map((call) => String(call[1]))
+            .some((line) => line.includes(`"screen-capture-permission","detail":"${status}"`)),
+        ).toBe(true);
+        const webContents = mocks.windows[0].webContents;
+        expect(
+          mocks.handlers.get('get-screen-capture-diagnosis')!({
+            sender: webContents,
+            senderFrame: webContents.mainFrame,
+          }),
+        ).toEqual({ permission: status, lastRefusal: 'permission' });
+      }
+      // First run: "not-determined" must still enumerate so macOS shows its prompt.
+      prefs.getMediaAccessStatus = vi.fn(() => 'not-determined');
+      const source = { id: 'screen:1', name: 'Display', display_id: '7' };
+      mocks.getSources.mockResolvedValue([source]);
+      (screen as unknown as { getPrimaryDisplay: () => { id: number } }).getPrimaryDisplay =
+        () => ({ id: 7 });
+      const granted = vi.fn();
+      handler(displayRequest(), granted);
+      await flush();
+      expect(mocks.getSources).toHaveBeenCalledTimes(1);
+      expect(granted).toHaveBeenCalledExactlyOnceWith({ video: source });
+    } finally {
+      delete prefs.getMediaAccessStatus;
+      delete (screen as unknown as Record<string, unknown>).getPrimaryDisplay;
+      Object.defineProperty(process, 'platform', platform);
     }
   });
   it('rejects overlapping requests without releasing the first picker lock', async () => {
@@ -212,7 +310,7 @@ describe('native window recovery', () => {
     for (let i = 0; i < 2; i++) {
       const denied = vi.fn();
       handler(request, denied);
-      expect(denied).toHaveBeenCalledExactlyOnceWith({});
+      expect(denied).toHaveBeenCalledExactlyOnceWith(null);
     }
     expect(mocks.getSources).toHaveBeenCalledTimes(1);
     resolve({ response: 1 });
@@ -223,7 +321,7 @@ describe('native window recovery', () => {
     await flush();
     resolve({ response: 0 });
     await flush();
-    expect(next).toHaveBeenCalledExactlyOnceWith({});
+    expect(next).toHaveBeenCalledExactlyOnceWith(null);
   });
   it('rejects selection after navigation while the picker is open', async () => {
     await createWindow();
@@ -247,7 +345,7 @@ describe('native window recovery', () => {
     );
     resolve({ response: 1 });
     await flush();
-    expect(callback).toHaveBeenCalledExactlyOnceWith({});
+    expect(callback).toHaveBeenCalledExactlyOnceWith(null);
   });
   it('refuses app-control calls from other windows, subframes and unexpected URLs', async () => {
     await createWindow();

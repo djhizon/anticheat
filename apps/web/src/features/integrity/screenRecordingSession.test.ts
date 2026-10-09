@@ -26,6 +26,14 @@ beforeEach(() => {
 });
 afterEach(() => setScreenRecorderFactoryForTests(null));
 
+it('hands the click straight to the recorder: start() runs before any await (user gesture)', async () => {
+  // getDisplayMedia only works inside the click's transient activation, so no microtask may
+  // run between the click and the recorder's start().
+  const pending = startScreenRecording('a1');
+  expect(start).toHaveBeenCalledTimes(1);
+  await pending;
+});
+
 it('runs once started and reports an unexpected end', async () => {
   await startScreenRecording('a1');
   expect(screenRecordingState()).toMatchObject({ phase: 'running', attemptId: 'a1' });

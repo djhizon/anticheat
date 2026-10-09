@@ -287,7 +287,17 @@ it('keeps Next disabled on the screen step until whole-screen recording runs', a
   expect(container.textContent).toContain('Entire screen');
   expect(button('Next').disabled).toBe(true);
 
-  await act(async () => button('Start screen recording').click());
+  // The click must reach the recorder synchronously (getDisplayMedia needs the activation).
+  let startedDuringClick = false;
+  const startBefore = rec.start;
+  rec.start = (attemptId) => {
+    startedDuringClick = true;
+    return startBefore(attemptId);
+  };
+  await act(async () => {
+    button('Start screen recording').click();
+    expect(startedDuringClick).toBe(true);
+  });
   expect(container.querySelector('[role=alert]')?.textContent).toContain(
     'You shared a window or a browser tab',
   );
