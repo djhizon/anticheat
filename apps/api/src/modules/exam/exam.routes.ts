@@ -117,6 +117,7 @@ function isExamPath(path: string): boolean {
   return (
     path === '/exam/assignments' ||
     path === '/exam/phone-heartbeat' ||
+    path === '/exam/speedtest' ||
     ['/exam/phone-presence/claim', '/exam/phone-presence/challenge', '/exam/phone-presence/heartbeat'].includes(path) ||
     phonePresencePattern.test(path) ||
     path === '/exam/generate' ||
@@ -130,7 +131,11 @@ function isExamPath(path: string): boolean {
     livVerifyPattern.test(path) ||
     eventsPattern.test(path) ||
     enrollPhonePattern.test(path) || phoneStatusPattern.test(path) ||
-    revisionsPattern.test(path)
+    revisionsPattern.test(path) ||
+    recordingPattern.test(path) ||
+    visionPattern.test(path) ||
+    telemetryPattern.test(path) ||
+    transpPattern.test(path)
   );
 }
 

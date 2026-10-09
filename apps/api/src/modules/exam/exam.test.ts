@@ -580,6 +580,19 @@ describe('exam delivery boundary', () => {
     expect((await routes.handle(studentRequest(owner, 'GET', `${base}/revisions?questionId=q`))).status).toBe(200);
   });
 
+  it('answers CORS preflight for every browser-called exam route', async () => {
+    const paths = ['/exam/speedtest', ...['recording', 'vision-check', 'telemetry', 'transparency', 'events', 'ai-check']
+      .map((route) => `/exam/attempts/attempt-1/${route}`)];
+    for (const path of paths) {
+      const preflight = await exam.routes.handle({
+        method: 'OPTIONS',
+        path,
+        headers: { origin, 'access-control-request-method': 'POST', 'access-control-request-headers': 'content-type, x-csrf-token' },
+      });
+      expect({ path, status: preflight.status }).toEqual({ path, status: 204 });
+    }
+  });
+
   it('checks audio ownership before inference and reports inference failures instead of empty success', async () => {
     const owner = await registerStudent('audio@example.test');
     const other = await registerStudent('other@example.test');
