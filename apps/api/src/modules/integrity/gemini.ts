@@ -7,6 +7,8 @@ export interface GeminiConfig {
   readonly keys: readonly string[];
   readonly model: string;
   readonly embeddingModel: string;
+  /** Used when the primary model stays overloaded after retries. */
+  readonly fallbackModel?: string;
 }
 
 export interface GeminiPart {
@@ -49,6 +51,7 @@ export interface GeminiEmbedResponse {
 
 const RETRYABLE_STATUS = new Set([429, 500, 503]);
 export const DEFAULT_EMBEDDING_MODEL = 'gemini-embedding-001';
+const DEFAULT_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || 'gemini-2.5-flash';
 
 export class GeminiRotatingClient {
   private index = 0;
@@ -109,10 +112,22 @@ export class GeminiRotatingClient {
       },
     };
 
-    const response = (await this.fetchGemini(
-      `models/${this.config.model}:generateContent`,
-      request,
-    )) as GeminiGenerateResponse;
+    let response: GeminiGenerateResponse;
+    try {
+      response = (await this.fetchGemini(
+        `models/${this.config.model}:generateContent`,
+        request,
+      )) as GeminiGenerateResponse;
+    } catch (error) {
+      const fallback = this.config.fallbackModel ?? DEFAULT_FALLBACK_MODEL;
+      const overloaded =
+        error instanceof Error && /Gemini API error (429|500|503)/u.test(error.message);
+      if (!overloaded || fallback === this.config.model) throw error;
+      response = (await this.fetchGemini(
+        `models/${fallback}:generateContent`,
+        request,
+      )) as GeminiGenerateResponse;
+    }
 
     const text = response.candidates[0]?.content?.parts[0]?.text;
     if (!text) throw new Error('Gemini returned an empty response.');
