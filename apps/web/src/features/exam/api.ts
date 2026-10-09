@@ -27,6 +27,25 @@ export class ExamApiError extends Error {
 
 export type CsrfTokenProvider = () => Promise<string>;
 
+export interface LivenessChallenge {
+  readonly nonce: string;
+  readonly type: string;
+  readonly data: Readonly<Record<string, unknown>>;
+  readonly expiresAt: string;
+}
+
+export interface LivenessVerifyResult {
+  readonly passed: boolean;
+  readonly layer: number;
+  readonly detail: string;
+}
+
+export interface PhoneEnrollment {
+  readonly token: string;
+  readonly qrData: string;
+  readonly expiresAt: string;
+}
+
 const safeProblems: Readonly<Record<number, ExamProblem>> = {
   400: { code: 'validation_failed', message: 'The exam request was invalid.' },
   401: { code: 'unauthorized', message: 'Authentication is required.' },
@@ -230,11 +249,11 @@ export interface ExamApi {
   getAttempt(attemptId: string): Promise<ExamDeliveryProjection>;
   saveAnswers(attemptId: string, request: ExamAnswerSaveRequest): Promise<ExamAnswerSaveResponse>;
   submitAttempt(attemptId: string, request: ExamSubmitRequest): Promise<ExamSubmitResponse>;
-  postLivenessChallenge(attemptId: string): Promise<any>;
-  postLivenessVerify(attemptId: string, body: any): Promise<any>;
-  postAudio(attemptId: string, audioBase64: string, durationMs: number, signal?: AbortSignal): Promise<any>;
-  postEnrollPhone(attemptId: string): Promise<any>;
-  patchEvents(attemptId: string, body: any): Promise<any>;
+  postLivenessChallenge(attemptId: string): Promise<LivenessChallenge>;
+  postLivenessVerify(attemptId: string, body: Record<string, unknown>): Promise<LivenessVerifyResult>;
+  postAudio(attemptId: string, audioBase64: string, durationMs: number, signal?: AbortSignal): Promise<{ readonly transcript?: unknown }>;
+  postEnrollPhone(attemptId: string): Promise<PhoneEnrollment>;
+  patchEvents(attemptId: string, body: Record<string, unknown>): Promise<unknown>;
   speedtest(dummyData: string): Promise<void>;
   uploadRecordingChunk(attemptId: string, index: number, chunkBase64: string): Promise<void>;
   getTransparencyReport?(attemptId: string): Promise<readonly TransparencyEvent[]>;
@@ -354,15 +373,23 @@ export class BrowserExamApi implements ExamApi {
     };
   }
 
-  async postLivenessChallenge(attemptId: string): Promise<any> {
-    return this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/liveness-challenge`, 'POST', undefined, true);
+  async postLivenessChallenge(attemptId: string): Promise<LivenessChallenge> {
+    const body = await this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/liveness-challenge`, 'POST', undefined, true);
+    if (!isRecord(body) || !isString(body.nonce) || !isString(body.type) || !isRecord(body.data) || !isString(body.expiresAt)) {
+      throw new ExamApiError(fallbackProblem);
+    }
+    return { nonce: body.nonce, type: body.type, data: body.data, expiresAt: body.expiresAt };
   }
 
-  async postLivenessVerify(attemptId: string, body: any): Promise<any> {
-    return this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/liveness-verify`, 'POST', body, true);
+  async postLivenessVerify(attemptId: string, request: Record<string, unknown>): Promise<LivenessVerifyResult> {
+    const body = await this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/liveness-verify`, 'POST', request, true);
+    if (!isRecord(body) || typeof body.passed !== 'boolean' || typeof body.layer !== 'number' || !isString(body.detail)) {
+      throw new ExamApiError(fallbackProblem);
+    }
+    return { passed: body.passed, layer: body.layer, detail: body.detail };
   }
 
-  async postAudio(attemptId: string, audioBase64: string, durationMs: number, signal?: AbortSignal): Promise<any> {
+  async postAudio(attemptId: string, audioBase64: string, durationMs: number, signal?: AbortSignal): Promise<{ readonly transcript?: unknown }> {
     const controller = new AbortController();
     const cancel = () => controller.abort();
     signal?.addEventListener('abort', cancel, { once: true });
@@ -422,11 +449,15 @@ export class BrowserExamApi implements ExamApi {
     return { code: body.code, expiresAt: body.expiresAt };
   }
 
-  async postEnrollPhone(attemptId: string): Promise<any> {
-    return this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/enroll-phone`, 'POST', undefined, true);
+  async postEnrollPhone(attemptId: string): Promise<PhoneEnrollment> {
+    const body = await this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/enroll-phone`, 'POST', undefined, true);
+    if (!isRecord(body) || !isString(body.token) || !isString(body.qrData) || !isString(body.expiresAt)) {
+      throw new ExamApiError(fallbackProblem);
+    }
+    return { token: body.token, qrData: body.qrData, expiresAt: body.expiresAt };
   }
 
-  async patchEvents(attemptId: string, body: any): Promise<any> {
+  async patchEvents(attemptId: string, body: Record<string, unknown>): Promise<unknown> {
     // Note: patch is not naturally supported by request method, so we make a direct call
     const token = await this.csrfTokenProvider();
     const response = await this.fetchImpl(`${this.baseUrl}/exam/attempts/${encodeURIComponent(attemptId)}/events`, {
@@ -440,16 +471,16 @@ export class BrowserExamApi implements ExamApi {
   }
 
   async speedtest(dummyData: string): Promise<void> {
-    await this.request('/exam/speedtest', 'POST', { data: dummyData } as any, true);
+    await this.request('/exam/speedtest', 'POST', { data: dummyData }, true);
   }
 
   
-  async uploadTelemetry(attemptId: string, payload: any): Promise<void> {
+  async uploadTelemetry(attemptId: string, payload: unknown): Promise<void> {
     await this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/telemetry`, 'POST', payload, true);
   }
 
   async uploadRecordingChunk(attemptId: string, index: number, chunkBase64: string): Promise<void> {
-    await this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/recording`, 'POST', { index, chunk: chunkBase64 } as any, true);
+    await this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/recording`, 'POST', { index, chunk: chunkBase64 }, true);
   }
 
   async getTransparencyReport(attemptId: string): Promise<readonly TransparencyEvent[]> {

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   clearCache: vi.fn(async () => {}),
   showMessageBox: vi.fn(async () => ({ response: 1 })),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- loose Electron BrowserWindow test doubles
   windows: [] as any[],
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   execSync: vi.fn(),

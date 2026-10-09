@@ -63,8 +63,6 @@ export function createCameraSession(
   let disposed = false;
   let generation = 0;
   let attemptId = '';
-  let wallStart = 0;
-  let monoStart = 0;
   let initialDeadline = 0;
   let abort: AbortController | null = null;
   let engine: CameraEngine | null = null;
@@ -164,8 +162,6 @@ export function createCameraSession(
     const token = ++generation;
     attemptId = attempt.id;
     initialDeadline = attempt.deadline;
-    wallStart = env.wallNow();
-    monoStart = env.monotonicNow();
     abort = new AbortController();
     state = {
       ...emptyCamera(),

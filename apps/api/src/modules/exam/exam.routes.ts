@@ -47,7 +47,6 @@ const telemetryPattern = /^\/exam\/attempts\/([^/]+)\/telemetry$/u;
 const transpPattern = /^\/exam\/attempts\/([^/]+)\/transparency$/u;
 const enrollPhonePattern = /^\/exam\/attempts\/([^/]+)\/enroll-phone$/u;
 const phoneStatusPattern = /^\/exam\/attempts\/([^/]+)\/phone-status$/u;
-const phoneHeartbeatPattern = /^\/exam\/phone-heartbeat$/u;
 const revisionsPattern = /^\/exam\/attempts\/([^/]+)\/revisions$/u;
 const recordingPattern = /^\/exam\/attempts\/([^/]+)\/recording$/u;
 const speedtestPattern = /^\/exam\/speedtest$/u;

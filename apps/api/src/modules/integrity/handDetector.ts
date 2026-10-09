@@ -21,8 +21,7 @@ export async function verifyGestureLocally(imageBase64: string, expectedGesture:
     const tensor = tf.node.decodeImage(buffer, 3);
     const det = await getDetector();
     
-    // We need to cast the tensor to the right interface if types are strict
-    const hands = await det.estimateHands(tensor as any);
+    const hands = await det.estimateHands(tensor as Parameters<typeof det.estimateHands>[0]);
     tensor.dispose();
 
     if (hands.length === 0) {

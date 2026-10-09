@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import type { ExamApi } from '../exam/api.js';
+import type { ExamApi, LivenessChallenge } from '../exam/api.js';
 
 interface LivenessModalProps {
   readonly attemptId: string;
@@ -10,7 +10,7 @@ interface LivenessModalProps {
 
 export function LivenessModal({ attemptId, examApi, videoEl, onComplete }: LivenessModalProps) {
   const [loading, setLoading] = useState(true);
-  const [challenge, setChallenge] = useState<any>(null);
+  const [challenge, setChallenge] = useState<LivenessChallenge | null>(null);
   const [timeLeft, setTimeLeft] = useState(30);
   const [submitting, setSubmitting] = useState(false);
   const [resultMsg, setResultMsg] = useState<string | null>(null);
@@ -43,7 +43,7 @@ export function LivenessModal({ attemptId, examApi, videoEl, onComplete }: Liven
     };
   }, [attemptId, examApi]);
 
-  const handleCapture = async (activeChallenge: any = challenge) => {
+  const handleCapture = async (activeChallenge: LivenessChallenge | null = challenge) => {
     if (!videoEl || !activeChallenge) return;
     if (timerRef.current) clearInterval(timerRef.current);
     setSubmitting(true);
@@ -147,7 +147,7 @@ export function LivenessModal({ attemptId, examApi, videoEl, onComplete }: Liven
               {challenge.type === 'gesture' && (
                 <>
                   <p style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>Perform this gesture to the camera:</p>
-                  <p style={{ fontSize: '1.5rem', textTransform: 'uppercase' }}>{challenge.data.gesture.replace('_', ' ')}</p>
+                  <p style={{ fontSize: '1.5rem', textTransform: 'uppercase' }}>{String(challenge.data.gesture ?? '').replace('_', ' ')}</p>
                 </>
               )}
               {challenge.type === 'flash' && (

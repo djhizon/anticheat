@@ -1,5 +1,4 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { GeminiRotatingClient } from './gemini.js';
 
 export const CHALLENGE_TTL_MS = 90_000;
 export const FLASH_BRIGHTNESS_THRESHOLD = 8.0;

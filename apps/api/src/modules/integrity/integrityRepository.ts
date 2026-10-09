@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 
@@ -30,10 +30,10 @@ export interface InstructorVersionRow {
 
 export class IntegrityRepository {
   getTransparencyEvents(attemptId: string) {
-    const apps = this.db.prepare(`SELECT created_at, foreground_app, display_count FROM app_events WHERE attempt_id = ? AND (display_count > 1 OR foreground_app != '')`).all(attemptId) as any[];
-    const liveness = this.db.prepare(`SELECT created_at, layer, result, details_json FROM liveness_events WHERE attempt_id = ? AND result = 'fail'`).all(attemptId) as any[];
-    const gaze = this.db.prepare(`SELECT created_at, duration_ms FROM gaze_events WHERE attempt_id = ? AND duration_ms > 3000`).all(attemptId) as any[];
-    const voice = this.db.prepare(`SELECT created_at, duration_ms, peak_db FROM voice_events WHERE attempt_id = ?`).all(attemptId) as any[];
+    const apps = this.db.prepare(`SELECT created_at, foreground_app, display_count FROM app_events WHERE attempt_id = ? AND (display_count > 1 OR foreground_app != '')`).all(attemptId) as unknown as Array<{ created_at: string; foreground_app: string; display_count: number }>;
+    const liveness = this.db.prepare(`SELECT created_at, layer, result, details_json FROM liveness_events WHERE attempt_id = ? AND result = 'fail'`).all(attemptId) as unknown as Array<{ created_at: string; layer: number; result: string; details_json: string }>;
+    const gaze = this.db.prepare(`SELECT created_at, duration_ms FROM gaze_events WHERE attempt_id = ? AND duration_ms > 3000`).all(attemptId) as unknown as Array<{ created_at: string; duration_ms: number }>;
+    const voice = this.db.prepare(`SELECT created_at, duration_ms, peak_db FROM voice_events WHERE attempt_id = ?`).all(attemptId) as unknown as Array<{ created_at: string; duration_ms: number; peak_db: number }>;
     return { apps, liveness, gaze, voice };
   }
 

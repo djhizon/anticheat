@@ -101,7 +101,7 @@ describe('desktop preflight recovery', () => {
     expect(buttons.filter(label => label === 'Quit normally')).toHaveLength(1);
     expect(buttons.filter(label => label === 'Force Quit…')).toHaveLength(1);
     await act(async () => click('Force Quit…'));
-    expect((window as any).electronExam.closeAppTarget).toHaveBeenCalledWith('Notes', 'force');
+    expect((window as unknown as { electronExam: { closeAppTarget: unknown } }).electronExam.closeAppTarget).toHaveBeenCalledWith('Notes', 'force');
     expect(container.textContent).toContain('Cancelled');
   });
 });

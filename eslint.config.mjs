@@ -14,6 +14,8 @@ export default [
       'playwright-report/**',
       'test-results/**',
       'apps/web/public/vision/**',
+      'apps/api/vendor/**',
+      'apps/desktop/out*/**',
     ],
   },
   {
@@ -25,6 +27,18 @@ export default [
     files: ['**/*.ts', '**/*.tsx'],
     rules: {
       'no-console': 'off',
+      // `_name` marks an intentionally unused parameter; ignored catch bindings are fine.
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none' },
+      ],
+    },
+  },
+  {
+    // Node build scripts written as CommonJS.
+    files: ['**/*.cjs'],
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
     },
   },
 ];

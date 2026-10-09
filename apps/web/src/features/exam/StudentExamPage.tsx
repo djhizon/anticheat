@@ -1,5 +1,5 @@
 import { createKeystrokeDynamics } from '../integrity/keystrokeDynamics.js';
-import React, { Suspense, useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import React, { Suspense, useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import type {
   ExamAnswerSaveResponse,
   ExamAnswerValue,
@@ -14,6 +14,12 @@ import { embedWatermark } from '../integrity/watermark.js';
 import { shouldKick } from '../integrity/tabGuard.js';
 import { TransparencyReport } from '../integrity/TransparencyReport.js';
 import { desktopWatcherBridge, startDesktopWatcher } from '../integrity/desktopWatcher.js';
+
+/** Optional per-question time limit (focused mode); not every question has one. */
+function timeLimitOf(question: object): number | undefined {
+  const limit = (question as { timeLimitSeconds?: unknown }).timeLimitSeconds;
+  return typeof limit === 'number' && limit > 0 ? limit : undefined;
+}
 
 const AudioPanel = React.lazy(() => import('../integrity/AudioPanel.js').then((m) => ({ default: m.AudioPanel })));
 const CameraIntegrityPanel = React.lazy(() => import('../integrity/CameraIntegrityPanel.js').then((m) => ({ default: m.CameraIntegrityPanel })));
@@ -50,7 +56,6 @@ export function StudentExamPage({
   const [revision, setRevision] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('Not saved');
   const [submitting, setSubmitting] = useState(false);
-  const [submissionReceipt, setSubmissionReceipt] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [receiptMessage, setReceiptMessage] = useState<string | null>(null);
   const [questionTimeLeft, setQuestionTimeLeft] = useState<Record<string, number>>({});
@@ -67,7 +72,7 @@ export function StudentExamPage({
   const [showLivenessModal, setShowLivenessModal] = useState(false);
   const [recordScreen, setRecordScreen] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState('Screen recording off — local-only demo.');
-  const [focusedMode, setFocusedMode] = useState(true);
+  const [focusedMode] = useState(true);
   const phonePresence = usePhonePresence(currentDelivery?.attempt.id, currentDelivery?.attempt.status === 'in_progress', examApi);
   const phoneBlockedRef = useRef(phonePresence.blocked);
   phoneBlockedRef.current = phonePresence.blocked;
@@ -168,9 +173,10 @@ export function StudentExamPage({
     
     // Initialize question timers
     const initialTimeouts: Record<string, number> = {};
-    currentDelivery.questions.forEach((q: any) => {
-      if (q.timeLimitSeconds && !questionTimeLeft[q.id]) {
-        initialTimeouts[q.id] = q.timeLimitSeconds;
+    currentDelivery.questions.forEach((q) => {
+      const limit = timeLimitOf(q);
+      if (limit !== undefined && !questionTimeLeft[q.id]) {
+        initialTimeouts[q.id] = limit;
       }
     });
     if (Object.keys(initialTimeouts).length > 0) {
@@ -182,11 +188,12 @@ export function StudentExamPage({
   useEffect(() => {
     if (!focusedMode || !currentDelivery || currentDelivery.attempt.status !== 'in_progress' || examPaused) return;
     const q = currentDelivery.questions[currentQuestionIndex];
-    if (!q || !(q as any).timeLimitSeconds) return;
+    const limit = q === undefined ? undefined : timeLimitOf(q);
+    if (!q || limit === undefined) return;
 
     const timer = setInterval(() => {
       setQuestionTimeLeft(prev => {
-        const left = prev[q.id] ?? (q as any).timeLimitSeconds;
+        const left = prev[q.id] ?? limit;
         if (left <= 1) {
           clearInterval(timer);
           // auto advance
@@ -294,7 +301,7 @@ export function StudentExamPage({
     let oscillator: OscillatorNode | null = null;
     
     try {
-      audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioCtx = new (window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)();
       oscillator = audioCtx.createOscillator();
       oscillator.type = 'sine';
       oscillator.frequency.value = 19000; // 19kHz (inaudible but phones can hear it)
@@ -432,7 +439,7 @@ export function StudentExamPage({
     }
   }
 
-  function handleKeyUp(e: React.KeyboardEvent) {
+  function handleKeyUp(_event: React.KeyboardEvent) {
     lastKeyUp.current = Date.now();
   }
 
@@ -495,7 +502,7 @@ export function StudentExamPage({
     isActive: boolean,
   ): React.ReactElement {
     const value = answers[question.id] ?? null;
-    const timeOut = (question as any).timeLimitSeconds && questionTimeLeft[question.id] === 0;
+    const timeOut = timeLimitOf(question) !== undefined && questionTimeLeft[question.id] === 0;
     const disabled = !isActive || submitting || examApi === undefined || examPaused || phonePresence.blocked || timeOut;
 
     if (question.type === 'multiple_choice') {
@@ -895,7 +902,7 @@ export function StudentExamPage({
           attemptId={visibleDelivery.attempt.id} 
           examApi={examApi} 
           videoEl={document.querySelector('video')} 
-          onComplete={(success) => {
+          onComplete={() => {
             setShowLivenessModal(false);
             setExamPaused(false);
             setCurrentQuestionIndex(i => i + 1);

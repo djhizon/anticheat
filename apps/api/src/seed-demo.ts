@@ -5,6 +5,7 @@ import type { ExamVersionId } from '@exam-anti-cheat/contracts/exam';
 import { loadConfig } from './config.js';
 import { createAuthPlugin } from './modules/auth/auth.plugin.js';
 import { createExamPlugin } from './modules/exam/exam.plugin.js';
+import type { SeedQuestionInput } from './modules/exam/exam.service.js';
 import { generateExamQuestions } from './modules/integrity/questionGenerator.js';
 
 const demoEmail = process.env.DEMO_STUDENT_EMAIL ?? 'demo.student@example.test';
@@ -77,7 +78,7 @@ async function seedDemo(): Promise<void> {
 
     // ── Generate questions with Gemini ───────────────────────────────────────
     let generatedResult: Awaited<ReturnType<typeof generateExamQuestions>>;
-    let questions: readonly any[] = [];
+    let questions: readonly SeedQuestionInput[] = [];
     let examDuration = 3600;
 
     if (config.geminiKeys.length > 0) {
@@ -95,11 +96,11 @@ async function seedDemo(): Promise<void> {
         console.log(`✅  Generated ${questions.length} questions (Est time: ${examDuration}s)`);
       } catch (err) {
         console.warn('⚠️  Gemini generation failed, falling back to static questions:', err instanceof Error ? err.message : err);
-        questions = FALLBACK_QUESTIONS as readonly any[];
+        questions = FALLBACK_QUESTIONS;
       }
     } else {
       console.log('ℹ️  No GEMINI_API_KEYS — using static fallback questions');
-      questions = FALLBACK_QUESTIONS as readonly any[];
+      questions = FALLBACK_QUESTIONS;
     }
 
     // ── Seed the exam ────────────────────────────────────────────────────────

@@ -7,8 +7,6 @@ import {
   generateChallenge,
   selectChallengeType,
   verifyFlashChallenge,
-  verifyGestureChallenge,
-  
   type ChallengeType,
   type GeneratedChallenge,
 } from './liveness.js';

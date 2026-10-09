@@ -11,7 +11,6 @@ const APP_WATCH_INTERVAL_MS = 2000;
 
 let mainWindow: BrowserWindow | null = null;
 let watcherInterval: ReturnType<typeof setInterval> | null = null;
-let currentAttemptId: string | null = null;
 let appController: ReturnType<typeof createAppController> | null = null;
 
 function trustedAppFrame(event: Electron.IpcMainInvokeEvent): boolean {
@@ -48,7 +47,6 @@ function getDisplayCount(): number {
 }
 
 function startWatcher(attemptId: string): void {
-  currentAttemptId = attemptId;
   if (watcherInterval) clearInterval(watcherInterval);
   watcherInterval = setInterval(() => {
     const app = getForegroundApp();
@@ -64,7 +62,6 @@ function stopWatcher(): void {
     clearInterval(watcherInterval);
     watcherInterval = null;
   }
-  currentAttemptId = null;
 }
 
 // ── IPC Handlers ─────────────────────────────────────────────────────────────

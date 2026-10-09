@@ -206,7 +206,7 @@ function StudentWorkspace({
     setExamLoading(true);
 
     // ── Install tab guard BEFORE loading the exam (use assignment ID) ────
-    const { createTabGuard, shouldKick } = await import('./features/integrity/tabGuard.js');
+    const { createTabGuard } = await import('./features/integrity/tabGuard.js');
     setViolations([]);
     const guard = createTabGuard(assignment.id, (v) => {
       setViolations((prev) => {
