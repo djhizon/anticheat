@@ -2012,7 +2012,8 @@ dd {
 
 .brightness-banner {
   position: fixed;
-  top: 16px;
+  /* Bottom edge, so it never covers the exam top bar (Verify I'm here, Require iPhone). */
+  bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
   background: #fef08a;

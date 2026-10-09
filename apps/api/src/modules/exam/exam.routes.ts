@@ -15,7 +15,11 @@ import type {
 import { headerValue, type AuthRequest, type AuthRequestBoundary } from '../auth/auth.plugin.js';
 import { isAllowedOrigin } from '../auth/csrf.js';
 import { ExamService } from './exam.service.js';
-import { LivenessRateLimitError, type IntegrityService } from '../integrity/integrityService.js';
+import {
+  GeminiUnavailableError,
+  LivenessRateLimitError,
+  type IntegrityService,
+} from '../integrity/integrityService.js';
 import {
   RecordingConflictError,
   isRecordingUploadConfigured,
@@ -569,11 +573,13 @@ export class ExamRoutes {
       if (method === 'POST' && similarityMatch !== null && this.integrity !== null) {
         const principal = this.requireInstructor(request);
         this.boundary.validateUnsafe(request, principal);
-        const result = await this.integrity.runSimilarity(
-          parsePathId<'ExamVersionId'>(similarityMatch[1] ?? '', 'Exam version ID'),
-          parsePathId<'QuestionVersionId'>(similarityMatch[2] ?? '', 'Question ID'),
+        const integrity = this.integrity;
+        return this.withGemini(request, () =>
+          integrity.runSimilarity(
+            parsePathId<'ExamVersionId'>(similarityMatch[1] ?? '', 'Exam version ID'),
+            parsePathId<'QuestionVersionId'>(similarityMatch[2] ?? '', 'Question ID'),
+          ),
         );
-        return jsonResponse(request, this.config.allowedOrigins, 200, result);
       }
 
       // ── Backend vision availability, so the browser only sends frames when on ─
@@ -643,11 +649,13 @@ export class ExamRoutes {
       if (method === 'POST' && instructorAiCheckMatch !== null && this.integrity !== null) {
         const principal = this.requireInstructor(request);
         this.boundary.validateUnsafe(request, principal);
-        const result = await this.integrity.runAiCheckForQuestion(
-          parsePathId<'ExamVersionId'>(instructorAiCheckMatch[1] ?? '', 'Exam version ID'),
-          parsePathId<'QuestionVersionId'>(instructorAiCheckMatch[2] ?? '', 'Question ID'),
+        const integrity = this.integrity;
+        return this.withGemini(request, () =>
+          integrity.runAiCheckForQuestion(
+            parsePathId<'ExamVersionId'>(instructorAiCheckMatch[1] ?? '', 'Exam version ID'),
+            parsePathId<'QuestionVersionId'>(instructorAiCheckMatch[2] ?? '', 'Question ID'),
+          ),
         );
-        return jsonResponse(request, this.config.allowedOrigins, 200, result);
       }
 
       // ── Pack 8: Phone enrollment ──────────────────────────────────────────
@@ -882,6 +890,24 @@ export class ExamRoutes {
     if (allowed) hits.push(nowMs);
     this.speedtestHits.set(studentId, hits);
     return allowed;
+  }
+
+  /** Run a Gemini-backed check; a server without Gemini keys answers 503, not 500. */
+  private async withGemini(
+    request: AuthRequest,
+    run: () => Promise<unknown>,
+  ): Promise<ExamResponse> {
+    try {
+      return jsonResponse(request, this.config.allowedOrigins, 200, await run());
+    } catch (error) {
+      if (error instanceof GeminiUnavailableError) {
+        return jsonResponse(request, this.config.allowedOrigins, 503, {
+          code: 'invalid_state',
+          message: error.message,
+        });
+      }
+      throw error;
+    }
   }
 
   private requireInstructor(request: AuthRequest) {

@@ -15,7 +15,11 @@ import { type TokenGenerator } from '../auth/session.js';
 import { createExamPlugin, type ExamPlugin } from './exam.plugin.js';
 import { MAX_EXTRA_TIME_SECONDS, type SeedPublishedExamResult } from './exam.service.js';
 import { ExamRoutes } from './exam.routes.js';
-import { IntegrityService, LivenessRateLimitError } from '../integrity/integrityService.js';
+import {
+  GeminiUnavailableError,
+  IntegrityService,
+  LivenessRateLimitError,
+} from '../integrity/integrityService.js';
 import { IntegrityRepository } from '../integrity/integrityRepository.js';
 import type { GeminiRotatingClient } from '../integrity/gemini.js';
 import { transcribeAudio } from '../integrity/whisper.js';
@@ -1324,6 +1328,34 @@ describe('exam delivery boundary', () => {
     for (let i = 0; i < 7; i += 1) statuses.push((await probe('x')).status);
     expect(statuses.filter((status) => status === 200)).toHaveLength(4);
     expect(statuses.filter((status) => status === 429)).toHaveLength(3);
+  });
+
+  it('answers 503 when Gemini-backed instructor checks have no keys configured', async () => {
+    const instructor = await registerStudent('nogemini@example.test');
+    auth.database
+      .prepare(`UPDATE users SET role = 'instructor' WHERE id = ?`)
+      .run(instructor.userId);
+    const integrity = {
+      runSimilarity: vi.fn(async () => {
+        throw new GeminiUnavailableError();
+      }),
+      runAiCheckForQuestion: vi.fn(async () => {
+        throw new GeminiUnavailableError();
+      }),
+    };
+    const routes = new ExamRoutes(
+      exam.service,
+      auth.boundary,
+      config,
+      integrity as unknown as IntegrityService,
+    );
+    for (const check of ['similarity', 'ai-check']) {
+      const response = await routes.handle(
+        studentRequest(instructor, 'POST', `/exam/instructor/versions/v1/questions/q1/${check}`),
+      );
+      expect(response.status).toBe(503);
+      expect(response.body).toMatchObject({ message: expect.stringContaining('GEMINI_API_KEYS') });
+    }
   });
 
   it('checks audio ownership before inference and reports inference failures instead of empty success', async () => {

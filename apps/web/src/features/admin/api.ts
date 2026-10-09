@@ -19,7 +19,8 @@ const problemMessages: Readonly<Record<number, string>> = {
   401: 'Your session has ended. Sign in again.',
   403: 'Only instructor accounts can review similarity.',
   404: 'That exam question could not be found.',
-  500: 'The similarity check could not run. Check that GEMINI_API_KEYS is configured.',
+  500: 'This check could not run. Check that GEMINI_API_KEYS is configured.',
+  503: 'This check needs Gemini, which is not configured on this server (GEMINI_API_KEYS).',
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

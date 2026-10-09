@@ -49,6 +49,14 @@ export const LIVENESS_LAYERS = [1, 2, 3, 4] as const;
 export const LIVENESS_CHALLENGE_LIMIT = 6;
 export const LIVENESS_CHALLENGE_WINDOW_MS = 10 * 60_000;
 
+/** Thrown when a Gemini-backed check runs on a server without GEMINI_API_KEYS. */
+export class GeminiUnavailableError extends DomainError {
+  constructor() {
+    super('invalid_state', 'AI checks need GEMINI_API_KEYS to be configured.');
+    this.name = 'GeminiUnavailableError';
+  }
+}
+
 export class LivenessRateLimitError extends Error {
   constructor() {
     super('Too many liveness checks requested. Wait a few minutes and try again.');
@@ -157,7 +165,7 @@ export class IntegrityService {
 
   private requireGemini(): GeminiRotatingClient {
     if (this.gemini === null) {
-      throw new DomainError('invalid_state', 'AI checks need GEMINI_API_KEYS to be configured.');
+      throw new GeminiUnavailableError();
     }
     return this.gemini;
   }
