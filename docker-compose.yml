@@ -1,0 +1,51 @@
+# `docker compose up --build` then open http://localhost:8080
+# See docs/DOCKER.md.
+services:
+  app:
+    build:
+      context: .
+      target: runtime
+    image: exam-anti-cheat:local
+    ports:
+      - '8080:8080'
+    env_file:
+      - path: .env.local
+        required: false
+    environment:
+      ALLOWED_ORIGINS: http://localhost:8080,http://127.0.0.1:8080
+      SITE_URL: http://localhost:8080
+      PORT: '8080'
+      HOST: 0.0.0.0
+    volumes:
+      - exam-data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:8080/auth/csrf']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # Optional server-side OWL-ViT object detection (multi-GB image, not built by default):
+  #   docker compose --profile vision up --build app-vision
+  app-vision:
+    profiles: ['vision']
+    build:
+      context: .
+      target: vision
+    image: exam-anti-cheat:vision
+    ports:
+      - '8080:8080'
+    env_file:
+      - path: .env.local
+        required: false
+    environment:
+      ALLOWED_ORIGINS: http://localhost:8080,http://127.0.0.1:8080
+      SITE_URL: http://localhost:8080
+      PORT: '8080'
+      HOST: 0.0.0.0
+    volumes:
+      - exam-data:/data
+
+volumes:
+  exam-data:

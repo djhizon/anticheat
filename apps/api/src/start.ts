@@ -1,8 +1,11 @@
+import { resolve } from 'node:path';
+
 import { loadLocalEnv } from './env.js';
 import { createApiServer } from './server.js';
 
 loadLocalEnv();
-const application = createApiServer();
+const webRoot = process.env.SERVE_WEB_DIST?.trim();
+const application = createApiServer(undefined, webRoot ? { webRoot: resolve(webRoot) } : {});
 let shuttingDown = false;
 
 const shutdown = (): void => {
@@ -24,7 +27,7 @@ const shutdown = (): void => {
 process.once('SIGINT', shutdown);
 process.once('SIGTERM', shutdown);
 
-void application.start().then(
+void application.start(undefined, process.env.HOST?.trim() || undefined).then(
   (address) => {
     console.log(`exam-anti-cheat API listening on http://${address.address}:${address.port}`);
   },

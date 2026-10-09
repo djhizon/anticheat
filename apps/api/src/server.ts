@@ -18,6 +18,7 @@ import { createAuthPlugin, type AuthPlugin, type AuthRequest } from './modules/a
 import type { AuthResponse } from './modules/auth/auth.routes.js';
 import { createExamPlugin, type ExamPlugin } from './modules/exam/exam.plugin.js';
 import type { ExamResponse } from './modules/exam/exam.routes.js';
+import { createStaticWebHandler, type StaticWebHandler } from './staticWeb.js';
 
 export const MAX_REQUEST_BODY_BYTES = 15 * 1024 * 1024; // 15MB to allow video chunk uploads
 export const MAX_BODY_DRAIN_MS = 1000;
@@ -222,7 +223,11 @@ async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   app: ApiApplication,
+  staticWeb?: StaticWebHandler,
 ): Promise<void> {
+  if (staticWeb !== undefined && (await staticWeb(request, response))) {
+    return;
+  }
   let result: RouteResponse;
   try {
     const body = await readJsonBody(request);
@@ -257,11 +262,21 @@ export interface ApiApplication {
   stop(): Promise<void>;
 }
 
-export function createApiServer(config: ApiConfig = loadConfig()): ApiApplication {
+export interface ApiServerOptions {
+  /** Directory of the built web app (apps/web/dist) to serve from the same port. */
+  readonly webRoot?: string;
+}
+
+export function createApiServer(
+  config: ApiConfig = loadConfig(),
+  options: ApiServerOptions = {},
+): ApiApplication {
+  const staticWeb =
+    options.webRoot === undefined ? undefined : createStaticWebHandler(options.webRoot);
   const auth = createAuthPlugin(config);
   const exam = createExamPlugin(auth.database, auth.boundary, config);
   const server = createHttpServer((request, response) => {
-    void handleRequest(request, response, application).catch((error: unknown) => {
+    void handleRequest(request, response, application, staticWeb).catch((error: unknown) => {
       sendResponse(response, problemResponse(request, config, error));
     });
   });

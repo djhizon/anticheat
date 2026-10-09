@@ -88,6 +88,8 @@ apps/ios             native iPhone presence companion
 
 ## Run it
 
+No Node setup? `docker compose up --build`, then open http://localhost:8080 (see [docs/DOCKER.md](docs/DOCKER.md)).
+
 Requires Node ≥ 24.7 (see `.nvmrc`). From a fresh clone:
 
 ```bash
@@ -103,8 +105,8 @@ prints the demo accounts and opens the browser. Ctrl+C stops everything.
 - `npm run doctor` runs the environment checks only.
 - `npm run demo -- --reset` moves the old demo database to a timestamped backup and re-seeds.
 - `npm run demo -- --share` starts the ngrok share flow instead; `--no-open` skips the browser.
-- Gemini (`GEMINI_API_KEYS`), Supabase (`SUPABASE_*`) and Microsoft sign-in are all
-  optional; they enable AI exam generation, email auth flows and Microsoft login.
+- Gemini (`GEMINI_API_KEYS`), Supabase (`SUPABASE_*`) and Microsoft Graph (`MS_*`) are all
+  optional; they enable AI exam generation, email account flows, and email sending plus cloud recording.
 - Whisper transcription needs `cmake` and `git`; the demo asks once (default no).
 
 ### Manual setup
