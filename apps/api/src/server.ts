@@ -18,6 +18,7 @@ import { createAuthPlugin, type AuthPlugin, type AuthRequest } from './modules/a
 import type { AuthResponse } from './modules/auth/auth.routes.js';
 import { createExamPlugin, type ExamPlugin } from './modules/exam/exam.plugin.js';
 import type { ExamResponse } from './modules/exam/exam.routes.js';
+import { stopSharedVisionClient } from './modules/integrity/backendVision.js';
 import { createStaticWebHandler, type StaticWebHandler } from './staticWeb.js';
 
 export const MAX_REQUEST_BODY_BYTES = 15 * 1024 * 1024; // 15MB to allow video chunk uploads
@@ -372,6 +373,7 @@ export function createApiServer(
             clearTimeout(shutdownTimer);
           }
           activeSockets.clear();
+          stopSharedVisionClient();
 
           try {
             auth.close();

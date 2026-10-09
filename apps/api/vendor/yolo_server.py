@@ -1,17 +1,24 @@
+"""Local zero-shot vision server (runs OWL-ViT; the yolo_server.py filename is historical).
+
+Reads one JSON line per request ({"image_base64": ...}) on stdin and writes one JSON
+line per response on stdout, serially. Prints READY on stderr once the model has
+loaded. Any startup failure prints one line to stderr and exits non-zero.
+"""
 import sys
 import json
 import base64
 from io import BytesIO
-from PIL import Image
 
 try:
+    from PIL import Image
     # Use OWL-ViT for zero-shot text-based detection, allowing us to query "earbuds" natively!
     from transformers import pipeline
     print("Loading OWL-ViT massive vision model...", file=sys.stderr)
     detector = pipeline(model="google/owlvit-base-patch32", task="zero-shot-object-detection")
     print("READY", file=sys.stderr)
-except ImportError:
-    print("Transformers not installed. Run: pip install transformers Pillow torch", file=sys.stderr)
+except Exception as e:
+    print(f"Vision server startup failed: {type(e).__name__}: {" ".join(str(e).split())}. "
+          "Run: pip install transformers Pillow torch", file=sys.stderr)
     sys.exit(1)
 
 CANDIDATE_LABELS = [

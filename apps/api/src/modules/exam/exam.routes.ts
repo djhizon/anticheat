@@ -65,7 +65,7 @@ const RECORDING_BURST = 5;
 /** Vision check: OWL-ViT costs ~8 s per frame, so 1 per 10 s sustained, burst of 2, per student. */
 const VISION_REFILL_MS = 10_000;
 const VISION_BURST = 2;
-/** A 640 px JPEG is well under 200 KB; 1M base64 chars (~750 KB) is a generous cap. */
+/** A 640 px JPEG is well under 200 KB; 1M base64 chars (~730 KB) is a generous cap. */
 const MAX_VISION_BASE64_CHARS = 1_000_000;
 /** Speed probe: 6 per minute per student, body capped at ~1.5 MB. */
 const SPEEDTEST_MAX_PER_WINDOW = 6;
@@ -619,7 +619,7 @@ export class ExamRoutes {
         ) {
           throw new DomainError(
             'validation_failed',
-            'A base64 camera frame under 750 KB is required.',
+            'A base64 camera frame of at most 1,000,000 base64 characters (about 730 KB) is required.',
           );
         }
         const result = await this.visionDetector(image);

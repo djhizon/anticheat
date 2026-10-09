@@ -5,9 +5,10 @@ import { fileURLToPath } from 'node:url';
 /**
  * Bridge to the Python OWL-ViT/YOLO server (`vendor/yolo_server.py`).
  *
- * The server answers one JSON line per request line, strictly in order, so
- * requests are kept in a FIFO queue and each response settles the oldest
- * pending request. Overlapping callers no longer clobber each other.
+ * The server answers one JSON line per request line, strictly in order and
+ * serially (~8 s per frame), so requests wait in a FIFO queue and only the
+ * head is written to the child; its response settles it and sends the next.
+ * Each request's timeout starts when it is actually sent, not when queued.
  */
 
 export interface VisionDetection {
@@ -28,6 +29,7 @@ interface Pending {
   readonly resolve: (value: VisionResult) => void;
   readonly reject: (reason: Error) => void;
   readonly payload: string;
+  sent: boolean;
   /** Started only once the request is actually sent to a ready server. */
   timer: ReturnType<typeof setTimeout> | null;
 }
@@ -68,11 +70,12 @@ export class VisionClient {
         resolve,
         reject,
         payload: `${JSON.stringify({ image_base64: imageBase64 })}\n`,
+        sent: false,
         timer: null,
       };
       this.pending.push(request);
       // Until the model reports READY, requests wait unsent and untimed.
-      if (this.ready) this.send(request);
+      this.pump();
     });
   }
 
@@ -104,8 +107,12 @@ export class VisionClient {
       if (!this.ready && this.process === child && /^READY$/mu.test(text)) {
         this.ready = true;
         if (this.startupTimer) clearTimeout(this.startupTimer);
-        for (const request of this.pending) this.send(request);
+        this.pump();
       }
+    });
+    child.stdin?.on('error', () => {
+      // EPIPE etc: the child is gone or going; fail in-flight work and restart on next detect.
+      if (this.process === child) this.fail(new Error('Vision server pipe failed.'));
     });
     child.on('exit', () => {
       if (this.process === child) this.fail(new Error('Vision server exited.'));
@@ -116,12 +123,24 @@ export class VisionClient {
     return child;
   }
 
+  /** Writes the head request if the server is ready and nothing is in flight. */
+  private pump(): void {
+    const head = this.pending[0];
+    if (!this.ready || !head || head.sent) return;
+    this.send(head);
+  }
+
   private send(request: Pending): void {
+    request.sent = true;
     request.timer = setTimeout(() => {
       // A timed-out request leaves the response stream out of step, so restart.
       this.fail(new Error('Vision request timed out.'));
     }, this.timeoutMs);
-    this.process?.stdin?.write(request.payload);
+    try {
+      this.process?.stdin?.write(request.payload);
+    } catch {
+      this.fail(new Error('Vision server pipe failed.'));
+    }
   }
 
   private settle(line: string): void {
@@ -133,6 +152,7 @@ export class VisionClient {
     } catch {
       next.reject(new Error('Vision server returned malformed output.'));
     }
+    this.pump();
   }
 
   private fail(error: Error): void {
@@ -153,4 +173,10 @@ let shared: VisionClient | null = null;
 export function detectObjectsRemotely(imageBase64: string): Promise<VisionResult> {
   shared ??= new VisionClient();
   return shared.detect(imageBase64);
+}
+
+/** Stops the shared Python child (if any) so it exits with the API. */
+export function stopSharedVisionClient(): void {
+  shared?.stop();
+  shared = null;
 }
