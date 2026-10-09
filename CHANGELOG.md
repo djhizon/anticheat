@@ -16,3 +16,4 @@ known issues are documented in [docs/AUDIT.md](docs/AUDIT.md).
 - **Fix #1** — phone status lookup queried a non-existent `integrity_phone_enrollments` table and crashed; now uses `phone_enrollments` (with regression test).
 - **Fix #2** — vision bridge split stdout on a literal `\n` and wrote one to the Python server, so no request/response ever parsed; now uses real newlines and buffers partial lines.
 - **Fix #3 (security)** — `PATCH /exam/attempts/:id/events` accepted unauthenticated requests, so anyone could inject fake app events for any attempt. It now requires a student session, CSRF token and attempt ownership; the Electron watcher forwards snapshots through the authenticated renderer instead of posting from the main process.
+- **Fix #4 (security)** — the AI-check endpoint ran Gemini on any client-supplied text without checking attempt ownership. It now takes a `questionId`, verifies the attempt belongs to the caller and checks only their saved answer.

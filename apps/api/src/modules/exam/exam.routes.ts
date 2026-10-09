@@ -380,10 +380,17 @@ export class ExamRoutes {
         const principal = this.requireStudent(request);
         this.boundary.validateUnsafe(request, principal);
         const body = parseObject(request.body, 'AI check body required');
-        const report = await this.integrity.runAiCheck(
-          String(body.question ?? ''),
-          String(body.answer ?? ''),
+        // Only check the caller's own saved answer; never arbitrary client-supplied text.
+        const delivery = await this.service.getAttemptDelivery(
+          parsePathId<'AttemptId'>(aiCheckMatch[1] ?? '', 'Attempt ID') as AttemptId,
+          principal.user.id,
         );
+        const question = delivery.questions.find((candidate) => candidate.id === body.questionId);
+        const answer = question === undefined ? undefined : delivery.answers.answers[question.id];
+        if (question === undefined || typeof answer !== 'string' || answer.trim() === '') {
+          throw new DomainError('validation_failed', 'A saved text answer is required for an AI check.');
+        }
+        const report = await this.integrity.runAiCheck(question.prompt, answer);
         return jsonResponse(request, this.config.allowedOrigins, 200, report);
       }
 

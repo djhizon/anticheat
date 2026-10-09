@@ -535,6 +535,33 @@ describe('exam delivery boundary', () => {
     expect(integrity.recordAppEvent).toHaveBeenCalledWith(attemptId, 'Discord', 2);
   });
 
+  it('runs AI checks only on the caller\'s own saved answers', async () => {
+    const owner = await registerStudent('aicheck@example.test');
+    const other = await registerStudent('other@example.test');
+    const seeded = await seedExam();
+    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: owner.userId });
+    const started = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const delivery = (started.body as ExamDeliveryResponse).delivery;
+    const attemptId = delivery.attempt.id;
+    const shortAnswer = delivery.questions.find((question) => question.type === 'short_answer')!;
+    const integrity = { runAiCheck: vi.fn(async () => ({ score: 0.1, flags: [], summary: 'ok', checkedAt: 'now' })) };
+    const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity as unknown as IntegrityService);
+    const path = `/exam/attempts/${attemptId}/ai-check`;
+
+    expect((await routes.handle(studentRequest(other, 'POST', path, { questionId: shortAnswer.id }))).status).toBe(404);
+    expect((await routes.handle(studentRequest(owner, 'POST', path, { question: 'q', answer: 'arbitrary text' }))).status).toBe(400);
+    expect((await routes.handle(studentRequest(owner, 'POST', path, { questionId: shortAnswer.id }))).status).toBe(400);
+    expect(integrity.runAiCheck).not.toHaveBeenCalled();
+
+    const saved = await exam.routes.handle(studentRequest(owner, 'PUT', `/exam/attempts/${attemptId}/answers`, {
+      revision: 0, idempotencyKey: 'ai-check-save-key-1', answers: Object.fromEntries(delivery.questions.map((question) => [question.id, question.id === shortAnswer.id ? 'my own words' : null])),
+    }));
+    expect(saved.status).toBe(200);
+    const checked = await routes.handle(studentRequest(owner, 'POST', path, { questionId: shortAnswer.id, answer: 'ignored' }));
+    expect(checked.status).toBe(200);
+    expect(integrity.runAiCheck).toHaveBeenCalledWith(shortAnswer.prompt, 'my own words');
+  });
+
   it('checks audio ownership before inference and reports inference failures instead of empty success', async () => {
     const owner = await registerStudent('audio@example.test');
     const other = await registerStudent('other@example.test');
