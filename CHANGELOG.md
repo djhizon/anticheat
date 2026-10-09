@@ -34,3 +34,4 @@ known issues are documented in [docs/AUDIT.md](docs/AUDIT.md).
 - **Code quality** — `npm run lint` went from 66 errors to 0: dead variables and imports removed, `any` replaced with real types (validated liveness/phone API responses, typed transparency rows), and the `_unused` convention adopted in the ESLint config.
 - **Formatting** — applied Prettier to the 60 files that had drifted (formatting only, no behavior change), so `npm run validate` (format + lint + typecheck + tests) passes end to end.
 - **CI** — GitHub Actions runs `npm run validate` on every push and pull request.
+- **Docs** — README rewritten around the consent-first story, demo accounts (student + instructor), optional features and the incremental commit trail.
