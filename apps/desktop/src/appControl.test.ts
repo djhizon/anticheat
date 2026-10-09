@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createAppController, type NativeApp } from './appControl.js';
+import { createAppController, readDemoExemptions, type NativeApp } from './appControl.js';
 
 const sample = (): NativeApp => ({
   identity: {
@@ -118,5 +118,19 @@ describe('native app-close authority (simulated applications only)', () => {
     answer(true);
     expect((await pending).status).toBe('error');
     expect(actions()).toEqual([]);
+  });
+});
+
+describe('demo exemption policy', () => {
+  it('returns the helper-reported names and tolerates failures', async () => {
+    expect(
+      await readDemoExemptions(async () => ({ exemptions: ['Terminal', 'ChatGPT', 3] })),
+    ).toEqual(['Terminal', 'ChatGPT']);
+    expect(await readDemoExemptions(async () => ({}))).toEqual([]);
+    expect(
+      await readDemoExemptions(async () => {
+        throw new Error('x');
+      }),
+    ).toEqual([]);
   });
 });

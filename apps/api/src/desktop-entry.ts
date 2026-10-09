@@ -77,6 +77,9 @@ export function isAllowedApiHost(
   );
 }
 
+/** Each server gets this long to stop gracefully before it is forced. */
+export const SERVER_STOP_TIMEOUT_MS = 3000;
+
 /** Marker header so the Electron shell can tell a stale copy of this server from another program. */
 export const SERVER_MARKER_HEADER = 'x-eac-server';
 export const SERVER_MARKER_VALUE = 'desktop';
@@ -271,8 +274,33 @@ export async function startDesktopServer(options: DesktopServerOptions): Promise
     webPort,
     seeding,
     stop: async () => {
-      await close(web);
-      await application.stop();
+      // Each listener gets a bounded time to close; after that the process is torn down anyway.
+      const started = Date.now();
+      const bounded = (label: string, operation: Promise<unknown>): Promise<void> =>
+        new Promise<void>((resolveStop) => {
+          const timer = setTimeout(() => {
+            console.warn(
+              `${label} did not stop within ${String(SERVER_STOP_TIMEOUT_MS)} ms; forcing.`,
+            );
+            if (label === 'web') web.closeAllConnections();
+            resolveStop();
+          }, SERVER_STOP_TIMEOUT_MS);
+          operation
+            .then(
+              () => undefined,
+              (error: unknown) =>
+                console.warn(
+                  `${label} stop failed:`,
+                  error instanceof Error ? error.message : error,
+                ),
+            )
+            .finally(() => {
+              clearTimeout(timer);
+              resolveStop();
+            });
+        });
+      await Promise.all([bounded('web', close(web)), bounded('api', application.stop())]);
+      console.log(`Desktop servers stopped in ${String(Date.now() - started)} ms.`);
     },
   };
 }

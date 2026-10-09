@@ -4,7 +4,7 @@ export function PhonePlacementCard() {
   const phone = { x: 232, y: 66 };
   const aim = Math.atan2(118 - phone.y, 110 - phone.x);
   const half = (28 * Math.PI) / 180;
-  const reach = 150;
+  const reach = 120;
   const edge = (a: number) =>
     `${(phone.x + reach * Math.cos(a)).toFixed(1)} ${(phone.y + reach * Math.sin(a)).toFixed(1)}`;
   const cone = `M ${phone.x} ${phone.y} L ${edge(aim - half)} A ${reach} ${reach} 0 0 0 ${edge(aim + half)} Z`;
@@ -38,7 +38,13 @@ export function PhonePlacementCard() {
           stroke="#8a6a44"
           strokeWidth="2"
         />
-        <path d={cone} fill="#3b82f6" fillOpacity="0.28" />
+        <defs>
+          <clipPath id="phone-desk-clip">
+            <rect x="4" y="4" width="252" height="162" rx="10" />
+          </clipPath>
+        </defs>
+        {/* Clipped to the desk so the view cone never spills outside the drawing. */}
+        <path d={cone} fill="#3b82f6" fillOpacity="0.28" clipPath="url(#phone-desk-clip)" />
         <rect x="70" y="52" width="80" height="6" rx="2" fill="#a1a1aa" />
         <rect x="70" y="60" width="80" height="26" rx="4" fill="#71717a" />
         <circle cx="110" cy="132" r="12" fill="#fb923c" />

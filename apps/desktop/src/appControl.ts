@@ -28,11 +28,16 @@ export interface ActionResult {
   status: 'requested' | 'refused' | 'cancelled' | 'error';
   message: string;
 }
-export type HelperCall = (action: 'list' | CloseMode, target?: AppIdentity) => Promise<unknown>;
+export type HelperCall = (
+  action: 'list' | 'policy' | CloseMode,
+  target?: AppIdentity,
+) => Promise<unknown>;
 
 export function createHelperCall(
   executable: string,
   isDemo: () => boolean = () => false,
+  /** True only for unpackaged development builds: the helper then also protects launcher ancestors. */
+  isDevelopment: () => boolean = () => false,
 ): HelperCall {
   return (action, target) =>
     new Promise((resolve, reject) => {
@@ -60,9 +65,24 @@ export function createHelperCall(
           hostPid: process.pid,
           hostExecutable: process.execPath,
           demo: isDemo(),
+          development: isDevelopment(),
         }),
       );
     });
+}
+
+/** Names of the apps the helper exempts in demo mode (the real list it enforces); [] on failure. */
+export async function readDemoExemptions(call: HelperCall): Promise<string[]> {
+  try {
+    const reply = await call('policy');
+    const value =
+      reply && typeof reply === 'object' && 'exemptions' in reply ? reply.exemptions : null;
+    return Array.isArray(value)
+      ? value.filter((n): n is string => typeof n === 'string' && n.length > 0 && n.length <= 64)
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 const identityKey = (i: AppIdentity): string =>

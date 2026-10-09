@@ -99,6 +99,7 @@ export function CameraIntegrityPanel({
     api,
     gaze: freshGaze,
   });
+  const ended = !attempt.active;
   const live = snapshot.phase === 'live';
   const running = snapshot.phase !== 'off';
   const readings = live && snapshot.faces !== null;
@@ -238,22 +239,26 @@ export function CameraIntegrityPanel({
 
   return (
     <section className="cam-panel" aria-label="Camera checks">
-      <p role="status">{snapshot.reason}</p>
-      <div className="cam-controls">
-        <button
-          type="button"
-          disabled={!attempt.active}
-          onClick={() =>
-            running ? controller.current?.stop() : void controller.current?.start(true)
-          }
-        >
-          {running ? 'Stop camera checks' : 'Start camera checks'}
-        </button>
-      </div>
-      <p className="muted">
-        Camera checks start automatically when the exam opens (you can stop and restart them) and
-        run a few times per second on this device. Missing models are not treated as clear results.
-      </p>
+      {ended ? null : (
+        <>
+          <p role="status">{snapshot.reason}</p>
+          <div className="cam-controls">
+            <button
+              type="button"
+              onClick={() =>
+                running ? controller.current?.stop() : void controller.current?.start(true)
+              }
+            >
+              {running ? 'Stop camera checks' : 'Start camera checks'}
+            </button>
+          </div>
+          <p className="muted">
+            Camera checks start automatically when the exam opens (you can stop and restart them)
+            and run a few times per second on this device. Missing models are not treated as clear
+            results.
+          </p>
+        </>
+      )}
       <div className="cam-preview">
         <video
           ref={video}
@@ -263,10 +268,12 @@ export function CameraIntegrityPanel({
           style={{ display: live ? 'block' : 'none' }}
         />
         {!live && (
-          <p>
+          <p className="cam-preview-note">
             {running
               ? 'Preparing camera checks… You can continue navigating questions.'
-              : 'Camera off'}
+              : ended
+                ? 'Monitoring ended'
+                : 'Camera off'}
           </p>
         )}
         {live && <span className="cam-badge cam-badge--live">Camera active</span>}
@@ -320,23 +327,27 @@ export function CameraIntegrityPanel({
                         ? 'Not observed'
                         : 'Waiting for result'}
               </p>
-              <p>
-                Earbuds:{' '}
-                {snapshot.earbuds === null
-                  ? 'Not checked — browser model not installed'
-                  : snapshot.earbuds
-                    ? 'Detected'
-                    : 'Not observed'}
-              </p>
-              <p>
-                Smart glasses:{' '}
-                {snapshot.smartGlasses === null
-                  ? 'Not checked — browser model not installed'
-                  : snapshot.smartGlasses
-                    ? 'Detected'
-                    : 'Not observed'}
-              </p>
-              <p>Wired earphones / headphones: not checked — no browser model installed</p>
+              {/* Accessory rows appear only when something can actually check them. */}
+              {(serverVision || snapshot.earbuds !== null) && (
+                <p>
+                  Earbuds:{' '}
+                  {snapshot.earbuds === null
+                    ? 'Not available in this version'
+                    : snapshot.earbuds
+                      ? 'Detected'
+                      : 'Not observed'}
+                </p>
+              )}
+              {(serverVision || snapshot.smartGlasses !== null) && (
+                <p>
+                  Smart glasses:{' '}
+                  {snapshot.smartGlasses === null
+                    ? 'Not available in this version'
+                    : snapshot.smartGlasses
+                      ? 'Detected'
+                      : 'Not observed'}
+                </p>
+              )}
             </>
           )}
         </div>

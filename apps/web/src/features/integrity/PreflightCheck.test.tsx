@@ -135,12 +135,15 @@ describe('desktop preflight recovery', () => {
     expect(passed).not.toHaveBeenCalled();
   });
   it('exempts Terminal and ChatGPT with no close buttons and keeps the reminder visible', async () => {
+    const info = { exemptApps: ['Terminal', 'ChatGPT'], packaged: false };
     await render(async () => [target('Terminal', true), target('ChatGPT', true)], undefined, {
       getRunMode: async () => 'demo',
+      getDemoInfo: async () => info,
     });
     expect(passed).toHaveBeenCalledTimes(1);
     await act(async () => root.render(<DevelopmentExemptions />));
     expect(container.textContent).toContain('Demo mode: Terminal and ChatGPT are exempt');
+    expect(container.textContent).toContain('Keep the local server terminal running');
     expect(container.querySelector('button')).toBeNull();
     expect(container.querySelector('aside.demo-exemptions-strip')).not.toBeNull();
     expect(container.querySelector('aside')?.getAttribute('style')).toBeNull();
@@ -148,6 +151,30 @@ describe('desktop preflight recovery', () => {
     await act(async () => root.unmount());
     root = createRoot(container);
     expect(document.documentElement.style.getPropertyValue('--demo-bottom-offset')).toBe('');
+  });
+  it('lists the real exemptions and drops the terminal sentence in a packaged app', async () => {
+    const info = { exemptApps: ['Terminal', 'ChatGPT', 'Codex'], packaged: true };
+    await render(async () => [target('Exam', true)], undefined, {
+      getRunMode: async () => 'demo',
+      getDemoInfo: async () => info,
+    });
+    await act(async () => root.render(<DevelopmentExemptions />));
+    expect(container.textContent).toContain('Terminal, ChatGPT and Codex are exempt');
+    expect(container.textContent).not.toContain('terminal running');
+  });
+  it('uses a neutral demo heading and a secondary Sign out button', async () => {
+    await render(async () => [target('Notes'), target('Exam', true)], undefined, {
+      getRunMode: async () => 'demo',
+    });
+    expect(container.querySelector('h2')?.textContent).toBe(
+      'Pre-exam check — demo mode, nothing will be closed',
+    );
+    expect(container.textContent).not.toContain('⚠️');
+    const signOut = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Sign out',
+    );
+    expect(signOut?.className).toContain('preflight-secondary');
+    expect(container.querySelector('ul.preflight-list')).not.toBeNull();
   });
   it('shows the exemptions banner only in demo mode', async () => {
     await render(async () => [target('Exam', true)], undefined, {

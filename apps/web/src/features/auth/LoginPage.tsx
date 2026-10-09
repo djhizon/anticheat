@@ -124,7 +124,9 @@ export function LoginPage(): React.ReactElement {
 
       <section className="auth-card" aria-labelledby="auth-form-title">
         <div className="auth-card-header">
-          <p className="eyebrow">Student portal</p>
+          <p className="eyebrow">
+            {isForgot ? 'Reset password' : isSignUp ? 'Create account' : 'Sign in'}
+          </p>
           <h2 id="auth-form-title">
             {isForgot ? 'Reset your password' : isSignUp ? 'Create your account' : 'Welcome back'}
           </h2>

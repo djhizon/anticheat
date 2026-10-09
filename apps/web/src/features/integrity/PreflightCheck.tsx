@@ -171,62 +171,31 @@ export function PreflightCheck({
 
   if (!isElectron || loading) {
     return (
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          height: '100vh',
-          background: '#000',
-          color: '#fff',
-        }}
-      >
-        <h2 role="status">Performing Pre-flight Environment Checks...</h2>
-        <button type="button" onClick={onCancel}>
-          Sign out
-        </button>
+      <div className="preflight-overlay" style={{ alignItems: 'center' }}>
+        <div className="preflight-card" style={{ background: 'transparent', border: 'none' }}>
+          <h2 role="status">Performing Pre-flight Environment Checks...</h2>
+          <div className="preflight-actions">
+            <button type="button" className="preflight-secondary" onClick={onCancel}>
+              Sign out
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: 'rgba(0,0,0,0.95)',
-        color: '#fff',
-        zIndex: 99999,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <div
-        style={{
-          background: '#1e1e1e',
-          padding: '3rem',
-          borderRadius: '12px',
-          border: '1px solid #333',
-          maxWidth: '600px',
-          width: '100%',
-          textAlign: 'center',
-        }}
-      >
-        <h2 style={{ color: '#ff6b6b' }}>⚠️ Security Gate ⚠️</h2>
+    <div className="preflight-overlay">
+      <div className="preflight-card">
+        <h2>{demo ? 'Pre-exam check — demo mode, nothing will be closed' : 'Security Gate'}</h2>
         {error !== null && <p role="alert">{error}</p>}
         {demo ? (
-          <p style={{ fontSize: '1.1rem', margin: '1rem 0 2rem' }}>
-            Demo mode: these findings are shown for information only. Nothing is closed or blocked.
+          <p style={{ fontSize: '1.05rem', margin: '0.5rem 0 1rem' }}>
+            These findings are shown for information only. Nothing is closed or blocked.
           </p>
         ) : (
           <>
-            <p style={{ fontSize: '1.1rem', margin: '1rem 0 2rem' }}>
+            <p style={{ fontSize: '1.05rem', margin: '0.5rem 0 1rem' }}>
               Save your work, then request a normal quit. If an app stays open, re-check after 3
               seconds to enable a separately confirmed Force Quit. Force Quit can lose unsaved work.
             </p>
@@ -248,40 +217,20 @@ export function PreflightCheck({
         )}
         {extraDisplays && <p role="alert">{RISK_MAP.EXTERNAL_MONITOR}</p>}
 
-        <ul
-          style={{
-            listStyle: 'none',
-            padding: 0,
-            margin: '0 0 2rem 0',
-            textAlign: 'left',
-            maxHeight: '300px',
-            overflowY: 'auto',
-          }}
-        >
+        <ul className="preflight-list">
           {runningApps.map((app) => (
-            <li
-              key={app.id}
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: '1rem',
-                background: '#2a2a2a',
-                marginBottom: '0.5rem',
-                borderRadius: '8px',
-              }}
-            >
+            <li key={app.id}>
               <div>
-                <strong style={{ display: 'block', fontSize: '1.1rem' }}>
+                <strong style={{ display: 'block', fontSize: '1.05rem' }}>
                   {app.name}
                   {app.exempt ? ' — Exempt' : app.protected ? ' — Protected' : ''}
                 </strong>
-                <span style={{ color: '#aaa', fontSize: '0.9rem' }}>
+                <span>
                   {app.reason || RISK_MAP[app.name] || 'Application must be closed before the exam'}
                 </span>
               </div>
               {!demo && !app.protected && !app.exempt && (
-                <div>
+                <div style={{ display: 'flex', flexShrink: 0 }}>
                   <button
                     type="button"
                     disabled={closing}
@@ -304,30 +253,23 @@ export function PreflightCheck({
           ))}
         </ul>
 
-        <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
-          <button type="button" onClick={onCancel}>
+        <div className="preflight-actions">
+          <button type="button" className="preflight-secondary" onClick={onCancel}>
             Sign out
+          </button>
+          <button
+            type="button"
+            className={demo ? 'preflight-secondary' : undefined}
+            disabled={closing}
+            onClick={handleRefresh}
+          >
+            Re-check Environment
           </button>
           {demo && (
             <button type="button" onClick={() => onPassedRef.current()}>
               Continue (demo mode)
             </button>
           )}
-          <button
-            disabled={closing}
-            onClick={handleRefresh}
-            style={{
-              background: '#444',
-              color: 'white',
-              border: 'none',
-              padding: '0.75rem 2rem',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '1.1rem',
-            }}
-          >
-            Re-check Environment
-          </button>
         </div>
       </div>
     </div>

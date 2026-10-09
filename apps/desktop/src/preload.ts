@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld('electronExam', {
     }>,
   captureScreenSnapshot: () =>
     ipcRenderer.invoke('capture-screen-snapshot') as Promise<string | null>,
+  getDemoInfo: () =>
+    ipcRenderer.invoke('get-demo-info') as Promise<{ exemptApps: string[]; packaged: boolean }>,
+  startPhoneLan: () =>
+    ipcRenderer.invoke('start-phone-lan') as Promise<{ origin: string | null; error?: string }>,
   getRunMode: () => ipcRenderer.invoke('get-run-mode') as Promise<'demo' | 'strict'>,
   listAppTargets: () => ipcRenderer.invoke('list-app-targets'),
   closeAppTarget: (id: string, mode: 'quit' | 'force') =>

@@ -14,9 +14,10 @@ import {
 } from 'electron';
 
 import { execFile, execSync } from 'child_process';
+import * as os from 'os';
 import * as path from 'path';
 import { appendFileSync, existsSync, statSync, writeFileSync } from 'fs';
-import { createAppController, createHelperCall } from './appControl';
+import { createAppController, createHelperCall, readDemoExemptions } from './appControl';
 import { classifyDisplays, detectVirtualMachine } from './environment';
 import { defaultRunMode, mayCloseApps, planModeSwitch, type RunMode } from './mode';
 import {
@@ -25,6 +26,7 @@ import {
   type LockdownBrowserWindow,
 } from './lockdownWindow';
 import { registerDisplayBrightness } from './displayBrightness';
+import { createPhoneLan } from './phoneLan';
 import { captureScreenSnapshot } from './screenSnapshot';
 import { persistRunMode, readJudgeBuild, readRunMode, writeRunMode } from './settings';
 import {
@@ -46,6 +48,23 @@ let judgeBuild = false;
 let runMode: RunMode = defaultRunMode(false);
 let appController: ReturnType<typeof createAppController> | null = null;
 let runtime: RuntimeHandle | null = null;
+
+// Native helper (strict-mode app list). Unpackaged builds are "development": the helper also
+// protects the terminal/IDE that launched them; packaged builds protect only their own processes.
+const helperCall = createHelperCall(
+  app.isPackaged
+    ? path.join(process.resourcesPath, 'app-control')
+    : path.join(__dirname, '../native-bin/app-control'),
+  () => runMode === 'demo',
+  () => !app.isPackaged,
+);
+
+// LAN listener for iPhone pairing; opened only when the student asks for pairing.
+const phoneLan = createPhoneLan({
+  apiPort: 3000,
+  getInterfaces: () => os.networkInterfaces(),
+  log: (event, detail) => diagnostic(event, detail),
+});
 
 // Exam-window lockdown (fullscreen/kiosk, minimize and close blocking) while an attempt runs.
 const lockdown = createLockdown({
@@ -248,6 +267,19 @@ ipcMain.handle('list-app-targets', (event) => {
   if (!trustedAppFrame(event) || !appController) throw new Error('Untrusted application request.');
   return appController.list();
 });
+// What the demo-mode notices say: the apps the helper really exempts, and whether this is a
+// development (unpackaged) run where a local server terminal exists.
+ipcMain.handle('get-demo-info', (event) => {
+  if (!trustedAppFrame(event)) throw new Error('Untrusted application request.');
+  return readDemoExemptions(helperCall).then((exemptApps) => ({
+    exemptApps,
+    packaged: app.isPackaged,
+  }));
+});
+ipcMain.handle('start-phone-lan', (event) => {
+  if (!trustedAppFrame(event)) throw new Error('Untrusted application request.');
+  return phoneLan.start();
+});
 ipcMain.handle('get-run-mode', (event) => {
   if (!trustedAppFrame(event)) throw new Error('Untrusted application request.');
   return runMode;
@@ -399,12 +431,7 @@ export async function createWindow(): Promise<void> {
   const window = mainWindow;
   let navigationGeneration = 0;
   appController = createAppController({
-    call: createHelperCall(
-      app.isPackaged
-        ? path.join(process.resourcesPath, 'app-control')
-        : path.join(__dirname, '../native-bin/app-control'),
-      () => runMode === 'demo',
-    ),
+    call: helperCall,
     confirm: async (name, mode) => {
       if (window.isDestroyed()) return false;
       const response = await dialog.showMessageBox(window, {
@@ -598,6 +625,7 @@ export async function createWindow(): Promise<void> {
     void displayBrightness.restore();
     mainWindow = null;
     stopWatcher();
+    void phoneLan.stop();
   });
 }
 
@@ -612,6 +640,7 @@ ipcMain.on('stop-watcher', (event) => {
   stopWatcher();
   lockdown.exit();
   void displayBrightness.restore();
+  void phoneLan.stop(); // The exam ended: close the phone's LAN listener.
 });
 
 ipcMain.handle('get-display-count', (event) => {
@@ -699,11 +728,18 @@ export function reportStartupFailure(error: unknown): void {
 void app.whenReady().then(startApp).catch(reportStartupFailure);
 
 let stoppingRuntime = false;
+const QUIT_BUDGET_MS = 4000;
 app.on('before-quit', (event) => {
-  if (!runtime || stoppingRuntime) return;
+  if (stoppingRuntime) return;
+  if (!runtime && !phoneLan.isActive()) return;
   stoppingRuntime = true;
   event.preventDefault();
-  void runtime.stop().finally(() => {
+  // Shutdown is bounded: the servers get a few seconds, then the app quits regardless.
+  const started = Date.now();
+  const budget = new Promise<void>((resolve) => setTimeout(resolve, QUIT_BUDGET_MS).unref());
+  const stopping = Promise.allSettled([runtime?.stop(), phoneLan.stop()]);
+  void Promise.race([stopping, budget]).finally(() => {
+    diagnostic('shutdown-ms', Date.now() - started);
     runtime = null;
     app.quit();
   });

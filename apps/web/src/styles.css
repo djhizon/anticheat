@@ -16,6 +16,10 @@
 * {
   box-sizing: border-box;
 }
+:root {
+  /* Viewport height left over once the fixed demo notices are reserved (0 offsets outside demo). */
+  --viewport-free: calc(100vh - var(--demo-top-offset, 0px) - var(--demo-bottom-offset, 0px));
+}
 body {
   background: radial-gradient(circle at 8% 8%, rgb(143 182 255 / 20%), transparent 28rem), #f4f7fb;
   margin: 0;
@@ -25,7 +29,7 @@ body {
   padding-bottom: var(--demo-bottom-offset, 0px);
 }
 #root {
-  min-height: calc(100vh - var(--demo-top-offset, 0px) - var(--demo-bottom-offset, 0px));
+  min-height: var(--viewport-free, 100vh);
 }
 .demo-mode-banner,
 .demo-exemptions-strip {
@@ -79,7 +83,7 @@ button:disabled {
   flex-direction: column;
   gap: 16px;
   justify-content: center;
-  min-height: 100vh;
+  min-height: var(--viewport-free, 100vh);
 }
 .loading-orb {
   animation: pulse 1.4s ease-in-out infinite;
@@ -102,7 +106,7 @@ button:disabled {
   grid-template-columns: minmax(0, 1fr) minmax(360px, 0.82fr);
   margin: 0 auto;
   max-width: 1120px;
-  min-height: 100vh;
+  min-height: var(--viewport-free, 100vh);
   padding: 40px 24px;
 }
 .auth-intro {
@@ -1098,7 +1102,7 @@ dd {
 .exam-shell {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--demo-top-offset, 0px) - var(--demo-bottom-offset, 0px));
+  height: var(--viewport-free, 100vh);
   overflow: hidden;
   background: #f5f6fa;
 }
@@ -2150,10 +2154,25 @@ dd {
   font-size: 0.8rem;
   margin-bottom: 12px;
 }
+.phone-modal {
+  /* Stay clear of the fixed demo notices instead of running underneath them. */
+  padding: calc(var(--demo-top-offset, 0px) + 16px) 16px calc(var(--demo-bottom-offset, 0px) + 16px);
+}
 .phone-setup {
   width: min(520px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px);
+  max-height: calc(var(--viewport-free, 100vh) - 32px);
   overflow: auto;
+}
+.phone-setup .exam-control:disabled {
+  /* Dimmed but still readable on the dark card (the shared 0.5 opacity was too faint). */
+  opacity: 1;
+  background: #3f3f46;
+  border-color: #52525b;
+  color: #d4d4d8;
+}
+.phone-setup .phone-origin-note {
+  color: #d4d4d8;
+  font-size: 0.85rem;
 }
 .phone-setup label {
   display: block;
@@ -2704,4 +2723,103 @@ button.timeline-chip[aria-pressed='false'] {
 .lighting-check ul {
   margin: 6px 0 10px 18px;
   padding: 0;
+}
+/* ── Camera panel after the exam ends ─────────────────────────────────── */
+.cam-ended {
+  background: #1f2937;
+  border-radius: 8px;
+  color: #f9fafb;
+  font-weight: 600;
+  margin: 0;
+  padding: 8px 12px;
+}
+.cam-preview-note {
+  align-items: center;
+  color: #e5e7eb;
+  display: flex;
+  height: 100%;
+  justify-content: center;
+  margin: 0;
+  padding: 12px;
+  text-align: center;
+}
+
+/* ── Desktop security gate ────────────────────────────────────────────── */
+.preflight-overlay {
+  background: rgb(0 0 0 / 95%);
+  bottom: var(--demo-bottom-offset, 0px);
+  color: #fff;
+  display: flex;
+  justify-content: center;
+  left: 0;
+  overflow-y: auto;
+  padding: 24px 16px;
+  position: fixed;
+  right: 0;
+  top: var(--demo-top-offset, 0px);
+  z-index: 99999;
+}
+.preflight-card {
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  margin: auto;
+  max-width: 640px;
+  padding: 28px 32px;
+  text-align: center;
+  width: 100%;
+}
+.preflight-card h2 {
+  margin: 0 0 8px;
+}
+.preflight-list {
+  /* Grows with the window; only scrolls when the viewport really is too short. */
+  list-style: none;
+  margin: 0 0 20px;
+  max-height: calc(var(--viewport-free, 100vh) - 340px);
+  min-height: 120px;
+  overflow-y: auto;
+  padding: 0;
+  text-align: left;
+}
+.preflight-list li {
+  align-items: center;
+  background: #2a2a2a;
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding: 12px 14px;
+}
+.preflight-list li span {
+  color: #b4b4b8;
+  font-size: 0.9rem;
+}
+.preflight-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+}
+.preflight-actions button,
+.preflight-list button {
+  background: #2563eb;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 1rem;
+  padding: 10px 20px;
+  white-space: nowrap;
+}
+.preflight-actions .preflight-secondary,
+.preflight-list button.preflight-secondary {
+  background: transparent;
+  border-color: #71717a;
+  color: #e4e4e7;
+}
+.preflight-list button + button {
+  margin-left: 8px;
 }

@@ -34,11 +34,13 @@ it('keeps an inactive camera off without false readings or a CPU checkbox', asyn
       <CameraIntegrityPanel attempt={{ id: 'a', active: false, deadline: Date.now() + 60000 }} />,
     ),
   );
-  expect(container.textContent).toContain('Start camera checks');
+  // After the attempt ends there is nothing to start: only a readable "Monitoring ended" note.
+  expect(container.textContent).toContain('Monitoring ended');
+  expect(container.textContent).not.toContain('Start camera checks');
   expect(container.textContent).not.toContain('Clear');
   expect(container.textContent).not.toContain('Camera active');
   expect(container.querySelector('input')).toBeNull();
-  expect(container.querySelector('button')!.disabled).toBe(true);
+  expect(container.querySelector('button')).toBeNull();
 });
 const camera = vi.hoisted(() => ({ start: vi.fn(async (_value: boolean) => {}) }));
 vi.mock('./cameraSession.js', async (importOriginal) => {
@@ -114,12 +116,82 @@ it('explains why consent alone cannot enable a QR and never sends invalid enroll
   await act(async () =>
     (container.querySelector('input[type=checkbox]') as HTMLInputElement).click(),
   );
-  expect(container.textContent).toContain('Enter the laptop Wi-Fi address first');
+  expect(container.textContent).toContain("Enter this computer's Wi-Fi address first");
   const create = [...container.querySelectorAll('button')].find((button) =>
     button.textContent?.includes('create QR'),
   )!;
   expect(create.disabled).toBe(true);
   expect(requirePhonePresence).not.toHaveBeenCalled();
+});
+it('in the desktop app uses the LAN origin from the main process and shows no origin field', async () => {
+  const startPhoneLan = vi.fn(async () => ({ origin: 'http://192.168.1.20:3443' }));
+  Object.assign(window, { electronExam: { startPhoneLan } });
+  try {
+    const requirePhonePresence = vi.fn(async () => ({
+      code: 'a'.repeat(43),
+      expiresAt: new Date(Date.now() + 120000).toISOString(),
+    }));
+    await act(async () =>
+      root.render(
+        <NativePhoneModal
+          attemptId="a"
+          api={{ requirePhonePresence } as unknown as ExamApi}
+          onClose={() => {}}
+        />,
+      ),
+    );
+    expect(container.querySelector('input[type=text], input:not([type])')).toBeNull();
+    expect(container.textContent).not.toContain('EXAM_LAN');
+    await act(async () =>
+      (container.querySelector('input[type=checkbox]') as HTMLInputElement).click(),
+    );
+    const create = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('create QR'),
+    )!;
+    expect(create.disabled).toBe(false);
+    expect(startPhoneLan).not.toHaveBeenCalled(); // Nothing opens before pairing is requested.
+    await act(async () => create.click());
+    expect(startPhoneLan).toHaveBeenCalledTimes(1);
+    expect(requirePhonePresence).toHaveBeenCalledTimes(1);
+    expect(
+      (
+        container.querySelector(
+          'textarea[aria-label="Private pairing link"]',
+        ) as HTMLTextAreaElement
+      ).value,
+    ).toContain('origin=http%3A%2F%2F192.168.1.20%3A3443');
+  } finally {
+    Reflect.deleteProperty(window, 'electronExam');
+  }
+});
+it('in the desktop app shows the reason when the LAN listener cannot open', async () => {
+  Object.assign(window, {
+    electronExam: { startPhoneLan: async () => ({ origin: null, error: 'No Wi-Fi found.' }) },
+  });
+  try {
+    const requirePhonePresence = vi.fn();
+    await act(async () =>
+      root.render(
+        <NativePhoneModal
+          attemptId="a"
+          api={{ requirePhonePresence } as unknown as ExamApi}
+          onClose={() => {}}
+        />,
+      ),
+    );
+    await act(async () =>
+      (container.querySelector('input[type=checkbox]') as HTMLInputElement).click(),
+    );
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent?.includes('create QR'))!
+        .click(),
+    );
+    expect(container.textContent).toContain('No Wi-Fi found.');
+    expect(requirePhonePresence).not.toHaveBeenCalled();
+  } finally {
+    Reflect.deleteProperty(window, 'electronExam');
+  }
 });
 it('creates a QR after valid origin and consent', async () => {
   const requirePhonePresence = vi.fn(async () => ({

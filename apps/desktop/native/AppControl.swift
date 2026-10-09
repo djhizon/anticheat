@@ -25,9 +25,12 @@ struct Request: Decodable {
     let target: Identity?
     let demo: Bool?
     let level: Double?
+    /// True only for unpackaged development builds; packaged builds omit it (false).
+    let development: Bool?
 }
 struct Reply: Encodable {
     var apps: [Entry]? = nil
+    var exemptions: [String]? = nil
     var status: String? = nil
     var error: String? = nil
     // Built-in display brightness (brightness-get / brightness-set); 0...1.
@@ -39,9 +42,11 @@ enum Failure: Error { case unavailable }
 
 // Development exemptions apply in demo mode only; strict mode never honours them.
 // Every AI assistant / IDE belongs here (never in the baseline), so Strict can close it.
-let temporaryExemptions: Set<String> = [
-    "com.apple.Terminal", "com.openai.chat", "com.openai.codex", "com.google.antigravity"
+let temporaryExemptionNames: [(id: String, name: String)] = [
+    ("com.apple.Terminal", "Terminal"), ("com.openai.chat", "ChatGPT"),
+    ("com.openai.codex", "Codex"), ("com.google.antigravity", "Antigravity")
 ]
+let temporaryExemptions: Set<String> = Set(temporaryExemptionNames.map { $0.id })
 // System UI only; exempt in every mode.
 let baselineExemptions: Set<String> = [
     "com.apple.finder", "com.apple.dock", "com.apple.systemuiserver",
@@ -87,15 +92,22 @@ func command(_ executable: String, _ args: [String], allowNoMatches: Bool = fals
     return text
 }
 
-func relatedPids(parents: [Int32: Int32], roots: Set<Int32>) -> Set<Int32> {
+/// Pids that may never be offered for closing: the exam's own processes (roots and everything
+/// they started) and, ONLY in development builds, the chain of ancestors (the terminal/IDE that
+/// launched `npm run dev`). A packaged app's ancestors are ordinary user apps (for example an AI
+/// assistant or remote-control tool that opened it) and must stay quittable; system UI such as
+/// Finder/Dock/launchd is protected by bundle id, not by ancestry.
+func relatedPids(parents: [Int32: Int32], roots: Set<Int32>, includeAncestors: Bool) -> Set<Int32> {
     var protected = roots
-    for root in roots {
-        var current = root
-        var visited: Set<Int32> = []
-        while let parent = parents[current], parent > 0, !visited.contains(parent) {
-            protected.insert(parent)
-            visited.insert(parent)
-            current = parent
+    if includeAncestors {
+        for root in roots {
+            var current = root
+            var visited: Set<Int32> = []
+            while let parent = parents[current], parent > 0, !visited.contains(parent) {
+                protected.insert(parent)
+                visited.insert(parent)
+                current = parent
+            }
         }
     }
     // Descend ONLY from designated roots, not shared ancestors like launchd.
@@ -109,7 +121,7 @@ func relatedPids(parents: [Int32: Int32], roots: Set<Int32>) -> Set<Int32> {
     return protected.union(descendants)
 }
 
-func dependencyPids(_ hostPid: Int32) throws -> Set<Int32> {
+func dependencyPids(_ hostPid: Int32, development: Bool) throws -> Set<Int32> {
     let table = try command("/bin/ps", ["-axo", "pid=,ppid="])
     var parents: [Int32: Int32] = [:]
     for line in table.split(separator: "\n") {
@@ -129,7 +141,7 @@ func dependencyPids(_ hostPid: Int32) throws -> Set<Int32> {
         guard !pids.isEmpty, pids.allSatisfy({ parents[$0] != nil }) else { throw Failure.unavailable }
         roots.formUnion(pids)
     }
-    return relatedPids(parents: parents, roots: roots)
+    return relatedPids(parents: parents, roots: roots, includeAncestors: development)
 }
 
 func inventory(_ request: Request) throws -> [Entry] {
@@ -138,7 +150,7 @@ func inventory(_ request: Request) throws -> [Entry] {
           let hostIdentity = identity(host),
           hostIdentity.executablePath == URL(fileURLWithPath: request.hostExecutable).resolvingSymlinksInPath().path
     else { throw Failure.unavailable }
-    let dependencies = try dependencyPids(request.hostPid)
+    let dependencies = try dependencyPids(request.hostPid, development: request.development == true)
     let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular && !$0.isTerminated }
     guard !apps.isEmpty else { throw Failure.unavailable }
     return try apps.map { app in
@@ -265,7 +277,11 @@ func run(_ request: Request) throws -> Reply {
         guard getppid() == request.hostPid else { throw Failure.unavailable }
         return brightnessReply(request)
     }
-    guard ["list", "quit", "force"].contains(request.action) else { throw Failure.unavailable }
+    guard ["list", "quit", "force", "policy"].contains(request.action) else { throw Failure.unavailable }
+    // Pure policy answer (no inventory, no process access): the demo-mode exemption names for the UI.
+    if request.action == "policy" {
+        return Reply(exemptions: request.demo == true ? temporaryExemptionNames.map { $0.name } : [])
+    }
     let apps = try inventory(request)
     if request.action == "list" { return Reply(apps: apps) }
     guard let target = request.target,
@@ -281,9 +297,17 @@ func run(_ request: Request) throws -> Reply {
 if CommandLine.arguments.dropFirst().elementsEqual(["--self-test"]) {
     // Pure fixtures only: no inventory, application quit, or process signalling.
     let parents: [Int32: Int32] = [1: 0, 10: 1, 20: 10, 21: 20, 30: 1, 31: 30, 40: 1]
-    precondition(relatedPids(parents: parents, roots: [20, 30]) == [1, 10, 20, 21, 30, 31])
-    precondition(!relatedPids(parents: parents, roots: [20]).contains(40))
-    precondition(relatedPids(parents: [10: 11, 11: 10], roots: [10]) == [10, 11])
+    // Development builds also protect the ancestors (terminal/IDE) of the exam's roots.
+    precondition(relatedPids(parents: parents, roots: [20, 30], includeAncestors: true) == [1, 10, 20, 21, 30, 31])
+    precondition(!relatedPids(parents: parents, roots: [20], includeAncestors: true).contains(40))
+    // Packaged builds protect only the roots and their descendants: the launching app (10) and
+    // launchd (1) are not related, so an AI/remote-tool launcher stays a normal quittable app.
+    precondition(relatedPids(parents: parents, roots: [20, 30], includeAncestors: false) == [20, 21, 30, 31])
+    precondition(!relatedPids(parents: parents, roots: [20], includeAncestors: false).contains(10))
+    precondition(!relatedPids(parents: parents, roots: [20], includeAncestors: false).contains(1))
+    precondition(relatedPids(parents: [10: 11, 11: 10], roots: [10], includeAncestors: true) == [10, 11])
+    precondition(relatedPids(parents: [10: 11, 11: 10], roots: [10], includeAncestors: false) == [10, 11])
+    precondition(temporaryExemptionNames.count == temporaryExemptions.count)
     precondition(temporaryExemptions.contains("com.apple.Terminal"))
     precondition(temporaryExemptions.contains("com.openai.codex"))
     precondition(!protectedIds.contains("com.apple.Terminal"))
@@ -305,7 +329,7 @@ if CommandLine.arguments.dropFirst().elementsEqual(["--self-test"]) {
 
 // Manual probe (read-only): `app-control --brightness-get` prints the built-in display level.
 if CommandLine.arguments.dropFirst().elementsEqual(["--brightness-get"]) {
-    let reply = brightnessReply(Request(action: "brightness-get", hostPid: getppid(), hostExecutable: "", target: nil, demo: nil, level: nil))
+    let reply = brightnessReply(Request(action: "brightness-get", hostPid: getppid(), hostExecutable: "", target: nil, demo: nil, level: nil, development: nil))
     if let output = try? JSONEncoder().encode(reply) { FileHandle.standardOutput.write(output) }
     exit(0)
 }

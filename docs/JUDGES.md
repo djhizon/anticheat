@@ -55,6 +55,11 @@ xattr -dr com.apple.quarantine "/Applications/Exam Anti-Cheat.app"
 - **Microphone**: audio monitoring of the testing environment.
 - **Screen Recording**: only if you choose to start screen recording; it is not requested otherwise.
 
+- **Local Network / incoming connections**: only when you pair an iPhone. The app then opens a small
+  listener on your Mac's Wi-Fi address (port 3443) that serves only the phone's check-in endpoints
+  (everything else returns 404) and closes it when the exam ends or the app quits. macOS may show an
+  "allow incoming network connections" prompt: choose **Allow**, and keep the iPhone on the same Wi-Fi.
+
 Video and audio are processed locally on your machine. If you decline, the rest of the app still
 opens, but the related checks cannot run.
 

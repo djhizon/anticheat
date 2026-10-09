@@ -196,7 +196,7 @@ async function signInWithRetry(page: Page): Promise<void> {
     // The pre-exam check runs right after sign-in, before the exam list.
     const ok = await page
       .getByRole('heading', { name: 'Your assigned exams' })
-      .or(page.getByRole('heading', { name: /Security Gate|Pre-flight/ }))
+      .or(page.getByRole('heading', { name: /Security Gate|Pre-exam check|Pre-flight/ }))
       .first()
       .waitFor({ timeout: 8_000 })
       .then(

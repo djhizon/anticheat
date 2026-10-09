@@ -306,12 +306,15 @@ export async function startRuntime(deps: RuntimeDeps): Promise<RuntimeHandle | n
     stop: () =>
       new Promise<void>((resolve) => {
         if (started.exited()) return resolve();
+        const stopStarted = Date.now();
         const timer = setTimeout(() => {
+          deps.log(`Server did not exit within ${STOP_GRACE_MS} ms; killing it.`);
           child.kill();
           resolve();
         }, STOP_GRACE_MS);
         child.on('exit', () => {
           clearTimeout(timer);
+          deps.log(`Server stopped in ${Date.now() - stopStarted} ms.`);
           resolve();
         });
         try {

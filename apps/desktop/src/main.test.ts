@@ -492,6 +492,19 @@ describe('native window recovery', () => {
         'Untrusted',
       );
     });
+    it('serves the demo info and phone LAN requests only to the trusted frame', async () => {
+      const event = await trustedEvent();
+      for (const name of ['get-demo-info', 'start-phone-lan'])
+        expect(() => mocks.handlers.get(name)!({ ...event, sender: {} })).toThrow('Untrusted');
+      mocks.execFile.mockImplementation(
+        (_f: string, _a: string[], _o: unknown, cb: (...a: unknown[]) => void) =>
+          cb(null, JSON.stringify({ exemptions: ['Terminal'] })),
+      );
+      expect(await mocks.handlers.get('get-demo-info')!(event)).toEqual({
+        exemptApps: ['Terminal'],
+        packaged: false,
+      });
+    });
     it('confirms both directions, does not persist in non-judge builds, and demo never closes apps', async () => {
       const event = await trustedEvent();
       // Strict -> Demo, cancelled.
