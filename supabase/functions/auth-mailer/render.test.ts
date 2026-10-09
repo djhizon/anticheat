@@ -48,6 +48,27 @@ describe('auth-mailer rendering', () => {
     expect(email?.html).toContain('&#60;x&#62;@example.test');
   });
 
+  it('never re-substitutes placeholders that appear inside inserted values', () => {
+    const [email] = renderEmails({
+      ...payload('reauthentication', { token: '{{ .Email }}' }),
+      user: { email: 'a@example.test', new_email: '{{ .Token }}' },
+    });
+    expect(email?.html).toContain('{{ .Email }}');
+    expect(email?.html).toContain('a@example.test');
+
+    const [recovery] = renderEmails({
+      ...payload('recovery', { token_hash: '{{ .Email }}' }),
+      user: { email: 'victim@example.test' },
+    });
+    expect(recovery?.html).toContain('token_hash=%7B%7B%20.Email%20%7D%7D');
+    expect(recovery?.html).not.toContain('token_hash=victim');
+  });
+
+  it('leaves unknown placeholders untouched', () => {
+    const [email] = renderEmails(payload('recovery'));
+    expect(email?.html).not.toMatch(/\{\{ \.(SiteURL|TokenHash|Token|NewEmail|Email) \}\}/u);
+  });
+
   it('rejects unknown email actions', () => {
     expect(() => renderEmails(payload('carrier_pigeon'))).toThrow('Unsupported');
   });

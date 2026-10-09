@@ -2,10 +2,11 @@
 
 import type { AssignmentId, ExamVersionId } from '@exam-anti-cheat/contracts/exam';
 
-import { loadConfig } from './config.js';
+import { loadConfig, type ApiConfig } from './config.js';
 import { loadLocalEnv } from './env.js';
 import { createAuthPlugin, type AuthPlugin } from './modules/auth/auth.plugin.js';
-import { SupabaseAuthError } from './modules/auth/supabaseAuth.js';
+import { ensureDemoAccount } from './modules/auth/demoAccounts.js';
+import { SupabaseAuthClient } from './modules/auth/supabaseAuth.js';
 import { createExamPlugin } from './modules/exam/exam.plugin.js';
 import type { SeedQuestionInput } from './modules/exam/exam.service.js';
 import { generateExamQuestions } from './modules/integrity/questionGenerator.js';
@@ -72,30 +73,35 @@ function readString(value: unknown, message: string): string {
  * is a LOCAL account, which keeps working offline even while the Supabase provider is active.
  */
 async function ensureAccount(auth: AuthPlugin, email: string, password: string): Promise<void> {
-  const supabase = auth.supabase;
-  if (supabase !== undefined && supabase.hasServiceRole) {
-    let external;
-    try {
-      external = await supabase.adminCreateUser(email, password);
-    } catch (error) {
-      if (!(error instanceof SupabaseAuthError) || error.status !== 422) {
-        throw error;
-      }
-      const found = await supabase.adminFindUserByEmail(email);
-      if (found === null) {
-        throw error;
-      }
-      await supabase.adminUpdateUser(found.id, password);
-      external = found;
-    }
-    auth.service.provisionExternalUser(external, { adoptLocalByEmail: true });
-    return;
-  }
-
-  if (auth.repository.findUserByEmail(email) === null) {
-    await auth.service.register({ email, password });
-  }
+  await ensureDemoAccount(
+    { repository: auth.repository, service: auth.service, admin: adminClient, warn: console.warn },
+    email,
+    password,
+  );
 }
+
+/**
+ * The service-role key is read only here, never by the runtime config, so the API server
+ * process cannot hold it. Placeholder values (`<...>`) count as unset.
+ */
+function createAdminClient(config: ApiConfig): SupabaseAuthClient | undefined {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ?? '';
+  if (
+    key === '' ||
+    key.includes('<') ||
+    config.supabaseUrl === undefined ||
+    config.supabaseAnonKey === undefined
+  ) {
+    return undefined;
+  }
+  return new SupabaseAuthClient({
+    url: config.supabaseUrl,
+    anonKey: config.supabaseAnonKey,
+    serviceRoleKey: key,
+  });
+}
+
+let adminClient: SupabaseAuthClient | undefined;
 
 async function seedDemo(): Promise<void> {
   if ((process.env.NODE_ENV ?? 'development') === 'production') {
@@ -106,6 +112,7 @@ async function seedDemo(): Promise<void> {
 
   // ── Wipe old data so the browser shows fresh content ──────────────────────
   const auth = createAuthPlugin(config);
+  adminClient = createAdminClient(config);
   console.log('🗑  Wiping old exam data…');
   const wipeStatements = [
     // Reset only in-progress attempts first (e.g. the demo student's); terminal attempts are immutable.
@@ -142,11 +149,11 @@ async function seedDemo(): Promise<void> {
   }
 
   try {
-    if (auth.supabase !== undefined && !auth.supabase.hasServiceRole) {
+    if (auth.supabase !== undefined && adminClient === undefined) {
       console.warn(
         '⚠️  Supabase is configured but SUPABASE_SERVICE_ROLE_KEY is missing: creating the demo accounts as LOCAL users (they sign in offline, without email flows).',
       );
-    } else if (auth.supabase !== undefined) {
+    } else if (adminClient !== undefined) {
       console.log('ℹ️  Creating demo accounts in Supabase Auth (pre-confirmed, no emails sent)…');
     }
 

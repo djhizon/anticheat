@@ -47,6 +47,7 @@ const problemReasons: ReadonlySet<string> = new Set<ProblemReason>([
   'rate_limited',
   'supabase_required',
   'provider_unavailable',
+  'reset_required',
 ]);
 
 const reasonStatus: Partial<Record<ProblemReason, number>> = {
@@ -228,7 +229,10 @@ export class AuthRoutes {
 
       if (method === 'POST' && path === '/auth/register') {
         this.boundary.validateUnsafe(request);
-        const result = await this.authService.signUp(parseCredentials(request.body));
+        const result = await this.authService.signUp(
+          parseCredentials(request.body),
+          request.remoteAddress ?? 'unknown',
+        );
         if ('status' in result) {
           return this.respond(request, 202, result);
         }
@@ -245,7 +249,7 @@ export class AuthRoutes {
       }
 
       if (method === 'POST' && path === '/auth/logout') {
-        const principal = this.boundary.requirePrincipal(request);
+        const principal = this.boundary.requirePrincipal(request, { allowResetOnly: true });
         this.boundary.validateUnsafe(request, principal);
         await this.authService.logout(principal);
         return this.respond(request, 204, null, [
@@ -280,7 +284,7 @@ export class AuthRoutes {
       }
 
       if (method === 'POST' && path === '/auth/reset-password') {
-        const principal = this.boundary.requirePrincipal(request);
+        const principal = this.boundary.requirePrincipal(request, { allowResetOnly: true });
         this.boundary.validateUnsafe(request, principal);
         const { password } = parseFields(request.body, ['password']);
         await this.authService.resetPassword(principal, password);
@@ -308,7 +312,7 @@ export class AuthRoutes {
       }
 
       if (method === 'GET' && path === '/auth/me') {
-        const principal = this.boundary.requirePrincipal(request);
+        const principal = this.boundary.requirePrincipal(request, { allowResetOnly: true });
         return this.respond(request, 200, { user: principal.user });
       }
 

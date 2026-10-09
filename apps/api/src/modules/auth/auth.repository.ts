@@ -255,6 +255,29 @@ export class SqliteAuthRepository {
 
     return Number(result.changes) > 0;
   }
+
+  /** Revoke every active session of a user, optionally keeping one. Returns the count. */
+  revokeAllSessionsForUser(
+    userId: UserId,
+    exceptSessionId?: SessionId,
+    revokedAt: string = new Date().toISOString(),
+  ): number {
+    const result =
+      exceptSessionId === undefined
+        ? this.database
+            .prepare(
+              `UPDATE sessions SET revoked_at = ?
+               WHERE user_id = ? AND revoked_at IS NULL`,
+            )
+            .run(revokedAt, userId)
+        : this.database
+            .prepare(
+              `UPDATE sessions SET revoked_at = ?
+               WHERE user_id = ? AND id <> ? AND revoked_at IS NULL`,
+            )
+            .run(revokedAt, userId, exceptSessionId);
+    return Number(result.changes);
+  }
 }
 
 export class SqliteAuditSink implements AuditSink {

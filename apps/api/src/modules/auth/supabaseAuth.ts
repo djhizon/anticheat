@@ -4,6 +4,8 @@
  * and must never be persisted or sent to the browser.
  */
 
+export const SUPABASE_REQUEST_TIMEOUT_MS = 10_000;
+
 export type FetchImpl = (input: string, init?: RequestInit) => Promise<Response>;
 
 export interface SupabaseAuthSettings {
@@ -85,6 +87,7 @@ export class SupabaseAuthClient {
   constructor(
     private readonly settings: SupabaseAuthSettings,
     private readonly fetchImpl: FetchImpl = (input, init) => fetch(input, init),
+    private readonly timeoutMs: number = SUPABASE_REQUEST_TIMEOUT_MS,
   ) {
     this.baseUrl = `${settings.url.replace(/\/+$/u, '')}/auth/v1`;
   }
@@ -240,7 +243,11 @@ export class SupabaseAuthClient {
     if (bearer !== undefined) {
       headers.authorization = `Bearer ${bearer}`;
     }
-    const init: RequestInit = { method: options.method, headers };
+    const init: RequestInit = {
+      method: options.method,
+      headers,
+      signal: AbortSignal.timeout(this.timeoutMs),
+    };
     if (options.body !== undefined) {
       headers['content-type'] = 'application/json';
       init.body = JSON.stringify(options.body);
@@ -249,8 +256,14 @@ export class SupabaseAuthClient {
     let response: Response;
     try {
       response = await this.fetchImpl(url.toString(), init);
-    } catch {
-      throw new SupabaseAuthError(0, 'network_error', 'Supabase Auth is unreachable.');
+    } catch (error) {
+      const timedOut =
+        error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+      throw new SupabaseAuthError(
+        0,
+        timedOut ? 'timeout' : 'network_error',
+        'Supabase Auth is unreachable.',
+      );
     }
 
     const text = await response.text().catch(() => '');

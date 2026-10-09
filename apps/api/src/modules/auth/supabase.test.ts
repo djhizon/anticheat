@@ -338,9 +338,10 @@ describe('Supabase identity provider', () => {
       const other = await anonymous(plugin, '/auth/forgot-password', { email: 'x@example.test' });
       expect(other.status).toBe(202);
       expect(calls.filter((call) => call.url.pathname === '/auth/v1/recover')).toHaveLength(4);
+      // The per-email cap holds even when the request comes from a different client.
       const otherIp = await anonymous(plugin, '/auth/forgot-password', { email }, '10.9.9.9');
       expect(otherIp.status).toBe(202);
-      expect(calls.filter((call) => call.url.pathname === '/auth/v1/recover')).toHaveLength(5);
+      expect(calls.filter((call) => call.url.pathname === '/auth/v1/recover')).toHaveLength(4);
     });
 
     it('requires a CSRF token', async () => {
@@ -478,8 +479,8 @@ describe('Supabase identity provider', () => {
       const late = await authed(plugin, sessionOf(recovery), '/auth/reset-password', {
         password: 'too late',
       });
-      expect(late.status).toBe(403);
-      expect(late.body).toMatchObject({ reason: 'recovery_expired' });
+      // The abandoned recovery session is revoked once its entry expires.
+      expect(late.status).toBe(401);
     });
   });
 

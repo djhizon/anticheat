@@ -45,7 +45,14 @@ export class AuthRequestBoundary {
     >,
   ) {}
 
-  requirePrincipal(request: AuthRequest): AuthenticatedPrincipal {
+  /**
+   * Resolve the session's principal. A session minted by a password-recovery link is reset-only:
+   * it is rejected everywhere unless the route opts in with `allowResetOnly`.
+   */
+  requirePrincipal(
+    request: AuthRequest,
+    options: { readonly allowResetOnly?: boolean } = {},
+  ): AuthenticatedPrincipal {
     const sessionToken = getCookie(
       headerValue(request.headers, 'cookie'),
       this.config.sessionCookieName,
@@ -53,6 +60,12 @@ export class AuthRequestBoundary {
     const principal = this.authService.authenticateSession(sessionToken);
     if (principal === null) {
       throw new DomainError('unauthorized', 'The session is invalid or expired.');
+    }
+
+    if (principal.resetRequired && options.allowResetOnly !== true) {
+      throw new DomainError('forbidden', 'Finish resetting your password first.', {
+        reason: 'reset_required',
+      });
     }
 
     return principal;
@@ -123,11 +136,7 @@ export function createAuthPlugin(
   const supabase =
     config.supabaseUrl !== undefined && config.supabaseAnonKey !== undefined
       ? new SupabaseAuthClient(
-          {
-            url: config.supabaseUrl,
-            anonKey: config.supabaseAnonKey,
-            serviceRoleKey: config.supabaseServiceRoleKey,
-          },
+          { url: config.supabaseUrl, anonKey: config.supabaseAnonKey },
           options.fetchImpl,
         )
       : undefined;

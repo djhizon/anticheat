@@ -42,12 +42,18 @@ function fill(
   template: string,
   values: { site: string; tokenHash: string; token: string; email: string; newEmail: string },
 ): string {
-  return template
-    .replaceAll('{{ .SiteURL }}', values.site)
-    .replaceAll('{{ .TokenHash }}', encodeURIComponent(values.tokenHash))
-    .replaceAll('{{ .Token }}', escapeHtml(values.token))
-    .replaceAll('{{ .NewEmail }}', escapeHtml(values.newEmail))
-    .replaceAll('{{ .Email }}', escapeHtml(values.email));
+  const replacements: Record<string, string> = {
+    SiteURL: values.site,
+    TokenHash: encodeURIComponent(values.tokenHash),
+    Token: escapeHtml(values.token),
+    NewEmail: escapeHtml(values.newEmail),
+    Email: escapeHtml(values.email),
+  };
+  // Single pass: inserted values are never scanned again, so a value that itself looks like
+  // a placeholder cannot be substituted.
+  return template.replace(/\{\{ \.(\w+) \}\}/g, (match, name: string) =>
+    Object.hasOwn(replacements, name) ? (replacements[name] as string) : match,
+  );
 }
 
 /**

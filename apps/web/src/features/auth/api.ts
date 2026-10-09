@@ -39,7 +39,8 @@ export type AuthProblemReason =
   | 'recovery_expired'
   | 'rate_limited'
   | 'supabase_required'
-  | 'provider_unavailable';
+  | 'provider_unavailable'
+  | 'reset_required';
 
 const knownReasons: ReadonlySet<string> = new Set<AuthProblemReason>([
   'email_not_confirmed',
@@ -51,6 +52,7 @@ const knownReasons: ReadonlySet<string> = new Set<AuthProblemReason>([
   'rate_limited',
   'supabase_required',
   'provider_unavailable',
+  'reset_required',
 ]);
 
 export interface AuthProblem {
@@ -94,6 +96,8 @@ export function messageForProblem(error: unknown, fallback: string): string {
       return 'Email features are not available on this server.';
     case 'provider_unavailable':
       return 'The sign-in service is unavailable right now. Please try again shortly.';
+    case 'reset_required':
+      return 'Finish resetting your password first, or sign out.';
     default:
       return fallback;
   }

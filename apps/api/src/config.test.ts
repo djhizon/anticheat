@@ -57,7 +57,7 @@ describe('API configuration', () => {
       });
       expect(config.authProvider).toBe('supabase');
       expect(config.supabaseUrl).toBe('https://abc.supabase.co');
-      expect(config.supabaseServiceRoleKey).toBe('sb_secret_y');
+      expect(config).not.toHaveProperty('supabaseServiceRoleKey');
       expect(config.siteUrl).toBe('https://exam.example.test');
     });
 
@@ -69,7 +69,6 @@ describe('API configuration', () => {
         SUPABASE_SERVICE_ROLE_KEY: '<secret>',
       });
       expect(config.authProvider).toBe('local');
-      expect(config.supabaseServiceRoleKey).toBeUndefined();
     });
 
     it('rejects partial or malformed supabase configuration', () => {

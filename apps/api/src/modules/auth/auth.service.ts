@@ -54,6 +54,8 @@ export interface AuthSessionResult {
 export interface AuthenticatedPrincipal {
   readonly user: AuthUserView;
   readonly session: AuthenticatedSession;
+  /** True while the session only exists to finish a password-recovery reset. */
+  readonly resetRequired: boolean;
 }
 
 export interface AuthServiceDependencies {
@@ -95,10 +97,18 @@ export type ProblemReason =
   | 'recovery_expired'
   | 'rate_limited'
   | 'supabase_required'
-  | 'provider_unavailable';
+  | 'provider_unavailable'
+  | 'reset_required';
 
+/** Per client+email limit for mail-sending endpoints. */
 const FORGOT_LIMIT = 3;
 const FORGOT_WINDOW_MS = 15 * 60 * 1000;
+/** Per email address alone, regardless of the requesting client. */
+const EMAIL_SEND_LIMIT = 3;
+/** Across all clients and addresses, to bound total outbound mail. */
+const GLOBAL_SEND_LIMIT = 30;
+/** Wrong-password attempts allowed per key before a lockout until the window ends. */
+const PASSWORD_FAILURE_LIMIT = 5;
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 
@@ -185,6 +195,10 @@ export class AuthService {
   private readonly idGenerator: TokenGenerator;
   private readonly recovery = new PendingRecoveryStore();
   private readonly forgotLimiter = new AttemptLimiter(FORGOT_LIMIT, FORGOT_WINDOW_MS);
+  private readonly registerLimiter = new AttemptLimiter(FORGOT_LIMIT, FORGOT_WINDOW_MS);
+  private readonly emailSendLimiter = new AttemptLimiter(EMAIL_SEND_LIMIT, FORGOT_WINDOW_MS);
+  private readonly globalSendLimiter = new AttemptLimiter(GLOBAL_SEND_LIMIT, FORGOT_WINDOW_MS, 1);
+  private readonly passwordFailures = new AttemptLimiter(PASSWORD_FAILURE_LIMIT, FORGOT_WINDOW_MS);
 
   constructor(private readonly dependencies: AuthServiceDependencies) {
     this.idGenerator = dependencies.idGenerator ?? new SecureTokenGenerator();
@@ -195,21 +209,36 @@ export class AuthService {
   }
 
   /** Provider-aware sign-up used by the HTTP routes. */
-  async signUp(input: CredentialsInput): Promise<AuthSessionResult | PendingConfirmationResult> {
+  async signUp(
+    input: CredentialsInput,
+    clientKey = 'unknown',
+  ): Promise<AuthSessionResult | PendingConfirmationResult> {
     const supabase = this.dependencies.supabase;
     if (supabase === undefined) {
       return this.register(input);
     }
 
     const email = validateCredentials(input);
-    if (this.dependencies.repository.findUserByEmail(email)?.authProvider === 'local') {
-      throw new DomainError('conflict', 'An account already exists for this email address.');
+    // Every outcome below the validation step looks identical to the caller, so the response
+    // cannot be used to learn whether an address already has an account.
+    const generic: PendingConfirmationResult = { status: 'confirmation_sent' };
+    if (!this.takeEmailSend(this.registerLimiter, clientKey, email)) {
+      return generic;
+    }
+    if (this.dependencies.repository.findUserByEmail(email) !== null) {
+      return generic;
     }
 
     let result;
     try {
       result = await supabase.signUp(email, input.password, this.confirmUrl());
     } catch (error) {
+      if (
+        error instanceof SupabaseAuthError &&
+        (error.code === 'user_already_exists' || error.code === 'email_exists')
+      ) {
+        return generic;
+      }
       throw mapSupabaseError(error);
     }
     if (result.accessToken === undefined || result.user === null) {
@@ -257,6 +286,8 @@ export class AuthService {
 
   async login(input: CredentialsInput, previousSessionToken?: string): Promise<AuthSessionResult> {
     const email = validateCredentials(input);
+    const failureKey = `login|${email}`;
+    this.assertNotThrottled(failureKey);
     const user = this.dependencies.repository.findUserByEmail(email);
     const supabase = this.dependencies.supabase;
     if (supabase !== undefined && (user === null || user.authProvider === 'supabase')) {
@@ -264,14 +295,21 @@ export class AuthService {
       try {
         token = await supabase.signInWithPassword(email, input.password);
       } catch (error) {
-        throw mapSupabaseError(error);
+        const mapped = mapSupabaseError(error);
+        if (mapped instanceof DomainError && mapped.code === 'unauthorized') {
+          this.recordPasswordFailure(failureKey);
+        }
+        throw mapped;
       }
+      this.passwordFailures.reset(failureKey);
       return this.signInExternalUser(token.user, previousSessionToken);
     }
 
     if (user === null || !(await verifyPassword(input.password, user.passwordHash))) {
+      this.recordPasswordFailure(failureKey);
       throw new DomainError('unauthorized', 'The supplied credentials are not valid.');
     }
+    this.passwordFailures.reset(failureKey);
 
     const previousSession = this.dependencies.sessions.authenticate(previousSessionToken);
     const now = this.dependencies.clock.now();
@@ -294,9 +332,7 @@ export class AuthService {
       throw supabaseRequired();
     }
     const email = validateEmail(rawEmail);
-    if (
-      !this.forgotLimiter.take(`${clientKey}|${email}`, this.dependencies.clock.now().getTime())
-    ) {
+    if (!this.takeEmailSend(this.forgotLimiter, clientKey, email)) {
       return;
     }
     try {
@@ -334,6 +370,12 @@ export class AuthService {
       if (existing !== null && existing.email !== verified.user.email) {
         try {
           this.dependencies.repository.updateEmail(existing.id, verified.user.email);
+          // A changed address invalidates every session that was opened under the old one.
+          this.dependencies.repository.revokeAllSessionsForUser(
+            existing.id,
+            undefined,
+            this.dependencies.clock.now().toISOString(),
+          );
         } catch (error) {
           if (isUniqueConstraint(error)) {
             throw new DomainError('conflict', 'An account already exists for this email address.');
@@ -371,6 +413,7 @@ export class AuthService {
       throw mapSupabaseError(error);
     }
     this.recovery.delete(principal.session.sessionId);
+    this.revokeOtherSessions(principal);
   }
 
   async changePassword(
@@ -383,6 +426,8 @@ export class AuthService {
     if (user === null) {
       throw new DomainError('unauthorized', 'The session is no longer active.');
     }
+    const failureKey = `user|${user.id}`;
+    this.assertNotThrottled(failureKey);
 
     if (user.authProvider === 'supabase') {
       const supabase = this.dependencies.supabase;
@@ -395,13 +440,17 @@ export class AuthService {
       } catch (error) {
         throw mapSupabaseError(error);
       }
+      this.revokeOtherSessions(principal);
       return;
     }
 
     if (!(await verifyPassword(input.currentPassword, user.passwordHash))) {
+      this.recordPasswordFailure(failureKey);
       throw reasoned('forbidden', 'The current password is incorrect.', 'invalid_credentials');
     }
+    this.passwordFailures.reset(failureKey);
     this.dependencies.repository.updatePasswordHash(user.id, await hashPassword(input.newPassword));
+    this.revokeOtherSessions(principal);
   }
 
   async changeEmail(
@@ -421,7 +470,12 @@ export class AuthService {
     if (user.authProvider !== 'supabase') {
       throw supabaseRequired();
     }
+    this.assertNotThrottled(`user|${user.id}`);
     const accessToken = await this.reauthenticate(supabase, user, input.currentPassword);
+    // Checked only after the password proved who is asking, and before Supabase is told anything.
+    if (this.dependencies.repository.findUserByEmail(newEmail) !== null) {
+      throw new DomainError('conflict', 'An account already exists for this email address.');
+    }
     try {
       await supabase.updateUser(accessToken, { email: newEmail }, this.confirmUrl());
     } catch (error) {
@@ -476,13 +530,20 @@ export class AuthService {
   }
 
   authenticateSession(sessionToken: string | undefined): AuthenticatedPrincipal | null {
+    this.revokeExpiredRecoverySessions();
     const session = this.dependencies.sessions.authenticate(sessionToken);
     if (session === null) {
       return null;
     }
 
     const user = this.dependencies.repository.findUserById(session.userId);
-    return user === null ? null : { user: this.toUserView(user), session };
+    return user === null
+      ? null
+      : {
+          user: this.toUserView(user),
+          session,
+          resetRequired: this.recovery.has(session.sessionId),
+        };
   }
 
   /**
@@ -527,11 +588,14 @@ export class AuthService {
     currentPassword: string,
   ): Promise<string> {
     try {
-      return (await supabase.signInWithPassword(user.email, currentPassword)).accessToken;
+      const token = await supabase.signInWithPassword(user.email, currentPassword);
+      this.passwordFailures.reset(`user|${user.id}`);
+      return token.accessToken;
     } catch (error) {
       const mapped = mapSupabaseError(error);
       // A wrong current password here is a permission problem, not an expired session.
       if (mapped instanceof DomainError && mapped.code === 'unauthorized') {
+        this.recordPasswordFailure(`user|${user.id}`);
         throw reasoned('forbidden', 'The current password is incorrect.', 'invalid_credentials');
       }
       throw mapped;
@@ -569,6 +633,42 @@ export class AuthService {
       }
       throw error;
     }
+  }
+
+  /** Abandoned password resets lose their session once the recovery entry expires. */
+  private revokeExpiredRecoverySessions(): void {
+    const now = this.dependencies.clock.now();
+    for (const sessionId of this.recovery.takeExpired(now.getTime())) {
+      this.dependencies.sessions.revokeSession(sessionId, now.toISOString());
+    }
+  }
+
+  private revokeOtherSessions(principal: AuthenticatedPrincipal): void {
+    this.dependencies.repository.revokeAllSessionsForUser(
+      principal.user.id,
+      principal.session.sessionId,
+      this.dependencies.clock.now().toISOString(),
+    );
+  }
+
+  /** Per client+email, per email, and global caps for endpoints that send mail. */
+  private takeEmailSend(clientLimiter: AttemptLimiter, clientKey: string, email: string): boolean {
+    const nowMs = this.dependencies.clock.now().getTime();
+    return (
+      clientLimiter.take(`${clientKey}|${email}`, nowMs) &&
+      this.emailSendLimiter.take(email, nowMs) &&
+      this.globalSendLimiter.take('global', nowMs)
+    );
+  }
+
+  private assertNotThrottled(key: string): void {
+    if (this.passwordFailures.isLimited(key, this.dependencies.clock.now().getTime())) {
+      throw reasoned('invalid_state', 'Too many attempts.', 'rate_limited');
+    }
+  }
+
+  private recordPasswordFailure(key: string): void {
+    this.passwordFailures.take(key, this.dependencies.clock.now().getTime());
   }
 
   private confirmUrl(): string {

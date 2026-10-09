@@ -28,7 +28,6 @@ export interface ApiConfig {
   readonly authProvider: 'local' | 'supabase';
   readonly supabaseUrl: string | undefined;
   readonly supabaseAnonKey: string | undefined;
-  readonly supabaseServiceRoleKey: string | undefined;
   /** Public web origin used for links in Supabase emails (`/account/confirm`). */
   readonly siteUrl: string;
 }
@@ -153,7 +152,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
 
   const rawSupabaseUrl = optionalSecret(env.SUPABASE_URL);
   const supabaseAnonKey = optionalSecret(env.SUPABASE_ANON_KEY);
-  const supabaseServiceRoleKey = optionalSecret(env.SUPABASE_SERVICE_ROLE_KEY);
   if ((rawSupabaseUrl === undefined) !== (supabaseAnonKey === undefined)) {
     throw new Error('SUPABASE_URL and SUPABASE_ANON_KEY must be configured together.');
   }
@@ -209,7 +207,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     authProvider: supabaseUrl === undefined ? 'local' : 'supabase',
     supabaseUrl,
     supabaseAnonKey,
-    supabaseServiceRoleKey,
     siteUrl,
   };
 }
