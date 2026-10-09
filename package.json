@@ -16,6 +16,8 @@
   ],
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "demo": "node scripts/demo.mjs",
+    "doctor": "node scripts/demo.mjs --doctor",
     "share": "node scripts/share.mjs",
     "dev:api": "npm run dev --workspace @exam-anti-cheat/api",
     "dev:web": "npm run dev --workspace @exam-anti-cheat/web",
@@ -31,7 +33,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "tsc -p packages/contracts/tsconfig.json && npm run typecheck --workspace @exam-anti-cheat/api && tsc -p apps/api/tsconfig.json && tsc -p apps/web/tsconfig.json",
-    "test": "node --test packages/contracts/src/common.test.ts && vitest run --config vitest.config.ts packages/contracts/src/auth.test.ts packages/contracts/src/exam.test.ts apps/api/src apps/web/src apps/desktop/src scripts/lan-config.test.ts supabase/functions",
+    "test": "node --test packages/contracts/src/common.test.ts && vitest run --config vitest.config.ts packages/contracts/src/auth.test.ts packages/contracts/src/exam.test.ts apps/api/src apps/web/src apps/desktop/src scripts/lan-config.test.ts scripts/demo-lib.test.ts supabase/functions",
     "test:api": "vitest run --config vitest.config.ts apps/api/src",
     "test:web": "npm run test --workspace @exam-anti-cheat/web",
     "test:e2e": "npm run test:e2e --workspace @exam-anti-cheat/api",
