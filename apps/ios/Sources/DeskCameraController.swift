@@ -15,8 +15,8 @@ final class DeskCameraController: NSObject, ObservableObject, AVCaptureVideoData
     @Published private(set) var latest: DeskCameraStatus?
     @Published private(set) var message = "Desk camera is off."
     let session = AVCaptureSession()
-    /// Called on the main queue, at most every `DeskCameraPolicy.analysisInterval`.
-    var onStatus: ((DeskCameraStatus) -> Void)?
+    /// Always invoked on the main actor, at most every `DeskCameraPolicy.analysisInterval`.
+    var onStatus: (@MainActor (DeskCameraStatus) -> Void)?
 
     private let queue = DispatchQueue(label: "desk-camera.analysis")
     private var configured = false
@@ -56,13 +56,22 @@ final class DeskCameraController: NSObject, ObservableObject, AVCaptureVideoData
         session.beginConfiguration()
         defer { session.commitConfiguration() }
         session.sessionPreset = .medium
+        // On any failure, remove what this attempt added so a retry starts clean.
+        var addedInput: AVCaptureInput?
+        var addedOutput: AVCaptureOutput?
+        func rollback() {
+            if let addedOutput { session.removeOutput(addedOutput) }
+            if let addedInput { session.removeInput(addedInput) }
+        }
         guard session.canAddInput(input) else { return false }
         session.addInput(input)
+        addedInput = input
         let output = AVCaptureVideoDataOutput()
         output.alwaysDiscardsLateVideoFrames = true
         output.setSampleBufferDelegate(self, queue: queue)
-        guard session.canAddOutput(output) else { return false }
+        guard session.canAddOutput(output) else { rollback(); return false }
         session.addOutput(output)
+        addedOutput = output
         // Low frame rate: we analyse one frame every ~2 s anyway.
         if (try? device.lockForConfiguration()) != nil {
             device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 5)
@@ -91,7 +100,7 @@ final class DeskCameraController: NSObject, ObservableObject, AVCaptureVideoData
             for (_, p) in (try? hand.recognizedPoints(.all)) ?? [:] where p.confidence > 0.3 { points.append(p.location) }
         }
         let status = DeskCameraPolicy.status(personBoxes: boxes, handPoints: points)
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self, self.running else { return }
             self.latest = status
             self.onStatus?(status)

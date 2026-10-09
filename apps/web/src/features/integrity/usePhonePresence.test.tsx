@@ -49,7 +49,7 @@ it('fails closed on startup and stale status, then resumes on fresh acknowledgem
   }
   expect(vi.getTimerCount()).toBe(0);
 });
-it('allows attempts not enrolled, but blocks unknown state when the server fails', async () => {
+it('never blocks an attempt that does not require a phone, even when polls fail', async () => {
   const getPhonePresence = vi
     .fn()
     .mockResolvedValueOnce({ required: false, active: false, remainingMs: 0 })
@@ -62,9 +62,44 @@ it('allows attempts not enrolled, but blocks unknown state when the server fails
     );
     expect(container.querySelector('button')?.disabled).toBe(false);
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(10000);
     });
-    expect(container.querySelector('button')?.disabled).toBe(true);
+    expect(getPhonePresence.mock.calls.length).toBeGreaterThan(4);
+    expect(container.querySelector('button')?.disabled).toBe(false);
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+it('keeps a required, active phone usable through one transient error but blocks after 3', async () => {
+  const getPhonePresence = vi
+    .fn()
+    .mockResolvedValueOnce({ required: true, active: true, remainingMs: 60000 })
+    .mockRejectedValueOnce(new Error('blip'))
+    .mockResolvedValueOnce({ required: true, active: true, remainingMs: 60000 })
+    .mockRejectedValue(new Error('offline'));
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  const disabled = () => container.querySelector('button')?.disabled;
+  try {
+    await act(async () =>
+      root.render(<Harness api={{ getPhonePresence } as unknown as ExamApi} />),
+    );
+    expect(disabled()).toBe(false);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000); // blip
+    });
+    expect(disabled()).toBe(false);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000); // recovers, failure count resets
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000); // two failures
+    });
+    expect(disabled()).toBe(false);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000); // third consecutive failure
+    });
+    expect(disabled()).toBe(true);
   } finally {
     await act(async () => root.unmount());
   }

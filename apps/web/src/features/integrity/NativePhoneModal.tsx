@@ -20,6 +20,50 @@ export function NativePhoneModal({
   const [now, setNow] = useState(Date.now());
   const [desk, setDesk] = useState<PhonePresenceStatus['deskCamera'] | null>(null);
   const request = useRef<AbortController | null>(null);
+  const dialog = useRef<HTMLDivElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusable = () =>
+      Array.from(
+        dialog.current?.querySelectorAll<HTMLElement>(
+          'a[href],button,input,textarea,select,summary,[tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      ).filter((el) => !(el as HTMLButtonElement).disabled && el.tabIndex >= 0);
+    (focusable()[0] ?? dialog.current)?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const items = focusable();
+      if (!items.length) {
+        event.preventDefault();
+        return;
+      }
+      const first = items[0]!;
+      const last = items[items.length - 1]!;
+      const active = document.activeElement;
+      if (!dialog.current?.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      opener?.focus();
+    };
+  }, []);
   const paired = pairing !== null;
   useEffect(() => {
     if (!paired || typeof api.getPhonePresence !== 'function') return;
@@ -86,6 +130,8 @@ export function NativePhoneModal({
   }
   return (
     <div
+      ref={dialog}
+      tabIndex={-1}
       role="dialog"
       aria-modal="true"
       aria-label="Require iPhone presence"
@@ -138,7 +184,7 @@ export function NativePhoneModal({
           <h3>Optional desk camera</h3>
           <p>
             In the iPhone app you can turn on a desk camera. Stand the phone to the side so its back
-            camera sees your keyboard and screen. The phone itself checks, every few seconds,, how
+            camera sees your keyboard and screen. The phone itself checks, every few seconds, how
             many people are in view, whether hands are near the keyboard and whether the view is
             lined up. Only those simple answers (a number and two yes/no values) are sent to the
             exam. Pictures and video never leave your phone and are not stored. Seeing another

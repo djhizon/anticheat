@@ -13,6 +13,8 @@ export const DESK_CAMERA_STALE_MS = 15000;
 /** The same flag is stored at most once per window so a flickering view cannot spam the report. */
 const DESK_FLAG_COOLDOWN_MS = 30000;
 const MAX_PEOPLE = 20;
+/** Desk state and flag cooldowns for an attempt with no report this long are dropped. */
+const DESK_STATE_IDLE_MS = 10 * 60000;
 const token = () => randomBytes(32).toString('base64url');
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 function secret(value: unknown): string {
@@ -78,7 +80,7 @@ export class PhonePresenceService {
       .run(attemptId, hash(code), Math.min(now + PAIRING_MS, deadline), deadline);
     this.leases.delete(attemptId);
     this.challenges.delete(attemptId);
-    this.desk.delete(attemptId);
+    this.clearDesk(attemptId);
     return {
       code,
       expiresAt: new Date(Math.min(now + PAIRING_MS, deadline)).toISOString(),
@@ -143,7 +145,9 @@ export class PhonePresenceService {
     return { ok: true, remainingMs: challenge.issued + PHONE_LEASE_MS - now };
   }
 
-  /** Optional desk-camera flags from the phone. Flags only; never images. Does not touch the lease. */
+  /** Optional desk-camera flags from the phone. Flags only; never images. Does not touch the lease.
+   * These are cooperative signals authenticated only by the pairing credential: whoever holds
+   * it can send or withhold them. They are leads for a human reviewer, not verdicts. */
   deskCamera(value: unknown, people: unknown, handsVisible: unknown, framingOk: unknown) {
     const row = this.authenticate(value);
     if (
@@ -157,6 +161,7 @@ export class PhonePresenceService {
       throw new DomainError('validation_failed', 'Desk camera status is invalid.');
     }
     const now = this.now();
+    this.pruneDesk(now);
     const previous = this.desk.get(row.attempt_id);
     if (previous && now >= previous.at && now - previous.at < DESK_CAMERA_MIN_GAP_MS) {
       throw new DomainError('conflict', 'Desk camera status sent too often.');
@@ -170,6 +175,25 @@ export class PhonePresenceService {
       this.flag(row.attempt_id, 'desk_camera_left_frame', now);
     }
     return { ok: true };
+  }
+
+  /** Bounded memory: drop idle or ended-attempt desk state and expired flag cooldowns. */
+  private pruneDesk(now: number) {
+    for (const [id, report] of this.desk) {
+      if (now < report.at || now - report.at >= DESK_STATE_IDLE_MS) this.clearDesk(id);
+    }
+    for (const [key, last] of this.deskFlags) {
+      if (now < last || now - last >= DESK_FLAG_COOLDOWN_MS) this.deskFlags.delete(key);
+    }
+  }
+  private clearDesk(attemptId: string) {
+    this.desk.delete(attemptId);
+    const prefix = `${attemptId}:`;
+    for (const key of this.deskFlags.keys()) if (key.startsWith(prefix)) this.deskFlags.delete(key);
+  }
+  /** In-memory state held for an attempt (for tests and diagnostics). */
+  memorySize() {
+    return this.desk.size + this.deskFlags.size;
   }
 
   private flag(attemptId: string, name: string, now: number) {
@@ -197,7 +221,7 @@ export class PhonePresenceService {
       } catch {
         this.leases.delete(attemptId);
         this.challenges.delete(attemptId);
-        this.desk.delete(attemptId);
+        this.clearDesk(attemptId); // attempt ended
       }
     }
     const report = this.desk.get(attemptId);

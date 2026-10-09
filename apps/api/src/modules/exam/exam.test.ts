@@ -1285,7 +1285,10 @@ describe('exam delivery boundary', () => {
     clock.advance(20);
     expect(exam.phonePresence.status(attemptId).deskCamera.on).toBe(false);
     clock.advance(60);
+    expect(exam.phonePresence.memorySize()).toBeGreaterThan(0);
     expect((await send(good)).status).toBe(401); // expired attempt
+    exam.phonePresence.status(attemptId); // observing an ended attempt prunes its desk state
+    expect(exam.phonePresence.memorySize()).toBe(0);
   });
 
   it('gates real answer writes and preserves acknowledged idempotent replay and finalization', async () => {

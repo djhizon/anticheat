@@ -139,6 +139,12 @@ per 30 s, and show in the transparency report as "Flagged behaviour: ...".
 `deskCamera: {on, framingOk, people, handsVisible}`. These are leads for a human
 reviewer, not verdicts; lighting and camera angle cause false alarms.
 
+Desk-camera flags are cooperative signals: they are authenticated only by the
+pairing credential, so whoever holds that credential can send, forge or withhold
+them. Treat them as hints, never proof. Desk state and flag cooldowns are
+dropped when the attempt ends or after 10 minutes without a report, so server
+memory stays bounded.
+
 ## Protocol and safety boundaries
 
 `PhonePresenceService` is independent of the legacy Gemini integrity service.

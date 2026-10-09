@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { ExamApi, PhonePresenceStatus } from '../exam/api.js';
 
+const MAX_CONSECUTIVE_FAILURES = 3;
+
 export function usePhonePresence(
   attemptId: string | undefined,
   enabled: boolean,
@@ -11,9 +13,11 @@ export function usePhonePresence(
     status: PhonePresenceStatus;
     expires: number;
   } | null>(null);
+  const [failures, setFailures] = useState(0);
   const [now, setNow] = useState(() => performance.now());
   useEffect(() => {
     setSnapshot(null);
+    setFailures(0);
     if (!attemptId || !enabled || !api) return;
     let disposed = false;
     let pending: AbortController | null = null;
@@ -25,10 +29,14 @@ export function usePhonePresence(
       const timeout = setTimeout(() => controller.abort(), 3000);
       try {
         const status = await api!.getPhonePresence(attemptId!, controller.signal);
-        if (!disposed)
+        if (!disposed) {
           setSnapshot({ attemptId: attemptId!, status, expires: started + status.remainingMs });
+          setFailures(0);
+        }
       } catch {
-        if (!disposed) setSnapshot(null); // Unknown server state is never permission to answer.
+        // Keep the last known snapshot: a transient error must not block students who never
+        // paired a phone. Required attempts still expire locally and block after repeated failures.
+        if (!disposed) setFailures((n) => n + 1);
       } finally {
         clearTimeout(timeout);
         pending = null;
@@ -46,10 +54,15 @@ export function usePhonePresence(
   }, [attemptId, enabled, api]);
   const current = snapshot?.attemptId === attemptId ? snapshot : null;
   const connected = !!current?.status.active && current.expires > now;
+  const required = current?.status.required ?? null;
+  const unreachable = failures >= MAX_CONSECUTIVE_FAILURES;
   return {
-    blocked: enabled && !!api && (!current || (current.status.required && !connected)),
+    blocked:
+      enabled &&
+      !!api &&
+      (!current || (current.status.required === true && (!connected || unreachable))),
     connected,
-    required: current?.status.required ?? null,
+    required,
     checking: current === null,
     deskCamera: current?.status.deskCamera ?? null,
   };
