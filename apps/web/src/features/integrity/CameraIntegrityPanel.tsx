@@ -9,6 +9,13 @@ import { createEyeGazeTracker } from './eyeGazeTracker.js';
 import type { GazeSample } from './gazeEstimator.js';
 import { GazePanel } from './GazePanel.js';
 import type { ExamApi } from '../exam/api.js';
+import type { Box } from './gazeEstimator.js';
+import { brightnessTip, useBrightnessState } from './desktopBrightness.js';
+import { tuneCameraTrack } from './cameraTuning.js';
+import { isLightBoostOn, setLightBoost, useLightBoost } from './lightBoost.js';
+import { analyseLighting, lightingEventName, type LightingReport } from './lightingAnalysis.js';
+import { createLightingTracker, LIGHTING_SAMPLE_INTERVAL_MS } from './lightingMonitor.js';
+import { sampleVideoLighting } from './lightingSampler.js';
 import {
   captureVisionFrame,
   serverVisionText,
@@ -77,7 +84,11 @@ export function CameraIntegrityPanel({
   const [snapshot, setSnapshot] = useState(emptyCamera);
   const [cameraLabel, setCameraLabel] = useState('');
   const objects = true;
-  const [lowLight, setLowLight] = useState(false);
+  const [lightingBanner, setLightingBanner] = useState<LightingReport | null>(null);
+  const brightness = useBrightnessState();
+  const lightBoost = useLightBoost();
+  /** Latest MediaPipe face box (normalised) and when it arrived; ignored once stale. */
+  const latestFaceBox = useRef<{ box: Box; at: number } | null>(null);
   const [serverVision, setServerVision] = useState(false);
   const [serverStatus, setServerStatus] = useState<ServerVisionStatus>({ state: 'not_checked' });
   useEvidenceCapture({
@@ -98,13 +109,16 @@ export function CameraIntegrityPanel({
       cameraEnvironment(video.current, setCameraLabel, objects),
       () => current.current,
       setSnapshot,
-      (sample) => gazeTracker.push(sample),
+      (sample) => {
+        const box = sample.observation.faceBox;
+        latestFaceBox.current = box ? { box, at: performance.now() } : null;
+        gazeTracker.push(sample);
+      },
     );
     controller.current = session;
     gazeTracker.reset();
     latestGaze.current = null;
     setSnapshot(emptyCamera());
-    setLowLight(false);
     // Auto-start runs once per attempt (never from a retry loop). Capture stays
     // bounded to one outstanding frame so model work cannot accumulate.
     if (autoStart && attempt.active) void session.start(true).catch(() => {});
@@ -166,31 +180,61 @@ export function CameraIntegrityPanel({
     return () => scheduler.stop();
   }, [serverVision, live, attempt.active, attempt.id, api]);
 
+  // Lighting monitor: sample every ~5 s; a face that stays too dark or backlit for 20 s gets a
+  // non-blocking banner (and an informational timeline entry). It never blocks the exam.
   useEffect(() => {
-    if (!live) {
-      setLowLight(false);
+    if (!live || !attempt.active) {
+      setLightingBanner(null);
       return;
     }
-    const canvas = document.createElement('canvas');
-    canvas.width = 80;
-    canvas.height = 60;
-    const context = canvas.getContext('2d');
-    const interval = setInterval(() => {
+    const tracker = createLightingTracker();
+    let tuned = false;
+    let busy = false;
+    let stopped = false;
+    const tick = async (): Promise<void> => {
       const element = video.current;
-      if (!context || !element || element.readyState < 2) return;
+      if (busy || !element || pausedRef.current) return;
+      busy = true;
       try {
-        context.drawImage(element, 0, 0, 80, 60);
-        const pixels = context.getImageData(0, 0, 80, 60).data;
-        let total = 0;
-        for (let i = 0; i < pixels.length; i += 4)
-          total += 0.299 * pixels[i]! + 0.587 * pixels[i + 1]! + 0.114 * pixels[i + 2]!;
-        setLowLight(total / (80 * 60) < 45);
-      } catch {
-        setLowLight(false);
+        const sample = await sampleVideoLighting(element);
+        if (!sample || stopped) return;
+        const faceBox =
+          latestFaceBox.current && performance.now() - latestFaceBox.current.at < 1500
+            ? latestFaceBox.current.box
+            : null;
+        const report = analyseLighting({
+          frames: sample.frames,
+          width: sample.width,
+          height: sample.height,
+          faceBox,
+        });
+        const verdict = tracker.observe(report);
+        setLightingBanner(verdict.banner);
+        if (verdict.banner?.class === 'too_dark' && !isLightBoostOn()) setLightBoost(true);
+        if (verdict.banner && !tuned) {
+          tuned = true;
+          const stream = element.srcObject;
+          if (stream instanceof MediaStream)
+            void tuneCameraTrack(stream.getVideoTracks()[0], { dim: true });
+        }
+        if (verdict.log) {
+          const patch = api?.patchEvents;
+          void patch
+            ?.call(api, current.current.id, { event: lightingEventName(verdict.log.class) })
+            .catch(() => {});
+        }
+      } finally {
+        busy = false;
       }
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [live]);
+    };
+    const interval = setInterval(() => void tick(), LIGHTING_SAMPLE_INTERVAL_MS);
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+      setLightingBanner(null);
+      setLightBoost(false);
+    };
+  }, [live, attempt.active, api]);
 
   return (
     <section className="cam-panel" aria-label="Camera checks">
@@ -229,11 +273,20 @@ export function CameraIntegrityPanel({
       </div>
       {live && <p>{cameraLabel}</p>}
       {live && serverVision && <p className="muted">{serverVisionText(serverStatus)}</p>}
-      {lowLight && (
-        <p role="alert">
-          Low light: brighten the room for a usable face estimate. Setup controls remain available.
-        </p>
+      {lightingBanner && (
+        <div className="lighting-banner" role="alert">
+          <strong>{lightingBanner.headline}.</strong> {lightingBanner.tips.slice(0, 2).join(' ')}{' '}
+          Face tracking works best in good light. You can keep answering.
+          <button
+            type="button"
+            aria-pressed={lightBoost}
+            onClick={() => setLightBoost(!lightBoost)}
+          >
+            {lightBoost ? 'Turn off boost light' : 'Boost light'}
+          </button>
+        </div>
       )}
+      {brightnessTip(brightness) !== '' && <p className="muted">{brightnessTip(brightness)}</p>}
       {live && !readings && (
         <p role="status">Waiting for a fresh vision result. No current readings.</p>
       )}

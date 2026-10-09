@@ -86,6 +86,25 @@ interface AppMapping {
   readonly summary: string;
 }
 
+/** `lighting_poor_<class>` (e.g. `lighting_poor_backlit`) carries the class in its name. */
+const LIGHTING_CLASS_TEXT: Record<string, string> = {
+  too_dark: 'the face was too dark',
+  backlit: 'the student was backlit (a bright window or lamp behind them)',
+};
+
+function lightingMapping(name: string): AppMapping | undefined {
+  if (!name.startsWith('lighting_poor_')) return undefined;
+  const cls = name.slice('lighting_poor_'.length);
+  const reason = LIGHTING_CLASS_TEXT[cls];
+  if (reason === undefined) return undefined;
+  return {
+    source: 'camera',
+    kind: 'lighting_poor',
+    severity: 'info',
+    summary: `The camera lighting was poor for a while (${reason}); face tracking may be less reliable. Not a conduct issue`,
+  };
+}
+
 const FLAG_MAP: Record<string, AppMapping> = {
   window_minimize_blocked: {
     source: 'desktop',
@@ -245,6 +264,18 @@ const FLAG_MAP: Record<string, AppMapping> = {
     severity: 'flag',
     summary: 'A display that looks like capture or mirroring hardware was connected',
   },
+  brightness_restored: {
+    source: 'desktop',
+    kind: 'brightness_restored',
+    severity: 'info',
+    summary: 'Screen brightness was lowered during the exam and the app set it back to maximum',
+  },
+  lighting_poor: {
+    source: 'camera',
+    kind: 'lighting_poor',
+    severity: 'info',
+    summary: 'The camera lighting was poor for a while, which can make face tracking less reliable',
+  },
   recording_started: {
     source: 'system',
     kind: 'recording_started',
@@ -286,7 +317,7 @@ function appEntry(row: TimelineRows['apps'][number]): Entry | null {
   }
   if (app.startsWith('flag:')) {
     const name = app.slice(5);
-    const mapped = FLAG_MAP[name];
+    const mapped = FLAG_MAP[name] ?? lightingMapping(name);
     if (mapped !== undefined) {
       return entry(at, mapped.source, mapped.kind, mapped.severity, mapped.summary);
     }

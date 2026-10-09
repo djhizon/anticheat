@@ -157,6 +157,11 @@ describe('buildTimeline', () => {
             foreground_app: 'flag:something_new',
             display_count: 1,
           },
+          {
+            created_at: '2026-09-15T00:08:00.000Z',
+            foreground_app: 'flag:lighting_poor_backlit',
+            display_count: 1,
+          },
         ],
       }),
     );
@@ -169,6 +174,8 @@ describe('buildTimeline', () => {
     expect(by('desk_extra_person')?.source).toBe('phone');
     expect(by('camera_virtual')?.severity).toBe('flag');
     expect(by('flag')).toMatchObject({ source: 'system', summary: 'Recorded: something new' });
+    expect(by('lighting_poor')).toMatchObject({ source: 'camera', severity: 'info' });
+    expect(by('lighting_poor')?.summary).toContain('backlit');
   });
 
   it('summarises keystrokes per minute instead of one row each', () => {

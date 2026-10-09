@@ -19,7 +19,12 @@ import { appendFileSync, existsSync, statSync, writeFileSync } from 'fs';
 import { createAppController, createHelperCall } from './appControl';
 import { classifyDisplays, detectVirtualMachine } from './environment';
 import { defaultRunMode, mayCloseApps, planModeSwitch, type RunMode } from './mode';
-import { createLockdown, type LockdownBrowserWindow } from './lockdownWindow';
+import {
+  createLockdown,
+  LOCKDOWN_EVENT_CHANNEL,
+  type LockdownBrowserWindow,
+} from './lockdownWindow';
+import { registerDisplayBrightness } from './displayBrightness';
 import { captureScreenSnapshot } from './screenSnapshot';
 import { persistRunMode, readJudgeBuild, readRunMode, writeRunMode } from './settings';
 import {
@@ -66,6 +71,23 @@ const lockdown = createLockdown({
     ).response === 1,
   app: app as unknown as Parameters<typeof createLockdown>[0]['app'],
   log: (event) => diagnostic(event),
+});
+
+// Built-in display brightness: 100% during an attempt (Strict re-enforces, Demo sets once), restored after.
+const displayBrightness = registerDisplayBrightness({
+  ipcMain: ipcMain as unknown as Parameters<typeof registerDisplayBrightness>[0]['ipcMain'],
+  app: app as unknown as Parameters<typeof registerDisplayBrightness>[0]['app'],
+  resourcesPath: process.resourcesPath,
+  appDir: __dirname,
+  getMode: () => runMode,
+  trustedAppFrame,
+  validAttemptId,
+  notifyRestored: (attemptId) =>
+    mainWindow?.webContents.send(LOCKDOWN_EVENT_CHANNEL, {
+      attemptId,
+      event: 'brightness_restored',
+    }),
+  log: (event, detail) => diagnostic(event, detail),
 });
 
 // `npm run dev` keeps using the Vite + API dev servers; otherwise the bundled server is started.
@@ -573,6 +595,7 @@ export async function createWindow(): Promise<void> {
     appController?.reset();
     appController = null;
     lockdown.exit();
+    void displayBrightness.restore();
     mainWindow = null;
     stopWatcher();
   });
@@ -588,6 +611,7 @@ ipcMain.on('stop-watcher', (event) => {
   if (!trustedAppFrame(event)) return;
   stopWatcher();
   lockdown.exit();
+  void displayBrightness.restore();
 });
 
 ipcMain.handle('get-display-count', (event) => {

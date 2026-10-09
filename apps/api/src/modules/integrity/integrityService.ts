@@ -123,6 +123,20 @@ export class IntegrityService {
           severity: 'medium',
           description: `Server vision (OWL-ViT) possibly saw: ${friendlyVisionLabel(app.foreground_app.slice(12))}`,
         });
+      } else if (app.foreground_app.startsWith('flag:lighting_poor')) {
+        events.push({
+          timestamp: app.created_at,
+          type: 'HARDWARE',
+          severity: 'low',
+          description: 'Camera lighting was poor for a while (face tracking may be less reliable)',
+        });
+      } else if (app.foreground_app === 'flag:brightness_restored') {
+        events.push({
+          timestamp: app.created_at,
+          type: 'HARDWARE',
+          severity: 'low',
+          description: 'Screen brightness was lowered and the app restored it to maximum',
+        });
       } else if (app.foreground_app.startsWith('flag:')) {
         events.push({
           timestamp: app.created_at,

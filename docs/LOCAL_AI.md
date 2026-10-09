@@ -159,6 +159,24 @@ overlaps the face. Logic: `phoneEvidence.ts`; gaze maths: `gazeEstimator.ts`; st
   or an injured hand shift typing rhythm. These are leads for a human reviewer,
   never verdicts, and the log wording says so.
 
+## Lighting and screen brightness
+
+- **Lighting check (on-device):** small 64x64 luminance frames from the open camera (and the
+  MediaPipe face box when available) are reduced to numbers: face brightness, face-versus-background
+  contrast (backlight), clipped highlights, crushed shadows, noise and left/right asymmetry. Nothing
+  is stored or uploaded except, if the face stays too dark or backlit for over 20 s in the exam, one
+  informational `lighting_poor_<class>` timeline entry. Lighting never blocks an exam.
+- **Boost light:** a white frame around the exam (and a brief full-white flash during setup) uses the
+  screen as a fill light. Camera exposure/brightness constraints are tried when the camera exposes
+  them; macOS Chrome exposes few, and failures are ignored.
+- **Brightness (Mac app only):** the `app-control` helper reads and sets the built-in display level
+  through the private DisplayServices framework (fallback: CoreDisplay, then IOKit). The exam sets
+  100% and restores the original on exit; Strict re-applies it every 3 s if lowered (logged as
+  `brightness_restored`, at most every 30 s), Demo sets it once. The original level is saved in
+  `userData/display-brightness.json` and restored on the next launch after a crash. Private APIs may
+  change between macOS versions, and external displays are unsupported (the student sees a tip).
+  Browsers cannot change brightness and only show the tip.
+
 ## Offline demo
 
 Do this once with a network: `npm install`, `npm run vision:prepare`,

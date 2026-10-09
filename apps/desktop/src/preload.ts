@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld('electronExam', {
   listAppTargets: () => ipcRenderer.invoke('list-app-targets'),
   closeAppTarget: (id: string, mode: 'quit' | 'force') =>
     ipcRenderer.invoke('close-app-target', { id, mode }),
+  boostBrightness: (attemptId: string) =>
+    ipcRenderer.invoke('display:boost-brightness', attemptId) as Promise<unknown>,
+  restoreBrightness: () => ipcRenderer.invoke('display:restore-brightness') as Promise<unknown>,
   reportRenderFailure: () => ipcRenderer.send('renderer-failure'),
   onAppSnapshot: (
     callback: (snapshot: {

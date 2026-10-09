@@ -21,6 +21,7 @@ const LOCKDOWN_EVENTS = new Set([
   'fullscreen_exit_blocked',
   'focus_lost',
   'lockdown_emergency_exit',
+  'brightness_restored',
 ]);
 
 // The lockdown shell itself (and the dev-mode Electron binary) is expected focus.

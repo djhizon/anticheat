@@ -1,6 +1,8 @@
 import AppKit
 import Foundation
 import Darwin
+import CoreGraphics
+import IOKit
 
 struct Identity: Codable, Equatable {
     let pid: Int32
@@ -22,11 +24,16 @@ struct Request: Decodable {
     let hostExecutable: String
     let target: Identity?
     let demo: Bool?
+    let level: Double?
 }
 struct Reply: Encodable {
     var apps: [Entry]? = nil
     var status: String? = nil
     var error: String? = nil
+    // Built-in display brightness (brightness-get / brightness-set); 0...1.
+    var supported: Bool? = nil
+    var brightness: Double? = nil
+    var method: String? = nil
 }
 enum Failure: Error { case unavailable }
 
@@ -148,7 +155,116 @@ func inventory(_ request: Request) throws -> [Entry] {
     }
 }
 
+// MARK: - Built-in display brightness
+// DisplayServices and CoreDisplay are private frameworks, loaded lazily with dlopen so a missing
+// symbol (other macOS version, Intel vs Apple Silicon) is "unsupported", never a crash. Only the
+// built-in panel is ever touched; external displays are not.
+func clampLevel(_ value: Double) -> Double? {
+    guard value.isFinite else { return nil }
+    return min(1.0, max(0.0, value))
+}
+
+func builtInDisplayID() -> CGDirectDisplayID? {
+    var count: UInt32 = 0
+    var ids = [CGDirectDisplayID](repeating: 0, count: 16)
+    guard CGGetOnlineDisplayList(16, &ids, &count) == .success else { return nil }
+    return ids.prefix(Int(count)).first { CGDisplayIsBuiltin($0) != 0 }
+}
+
+struct BrightnessBackend {
+    let name: String
+    let get: () -> Double?
+    let set: (Double) -> Bool
+}
+
+func displayServicesBackend(_ display: CGDirectDisplayID) -> BrightnessBackend? {
+    typealias GetFn = @convention(c) (UInt32, UnsafeMutablePointer<Float>) -> Int32
+    typealias SetFn = @convention(c) (UInt32, Float) -> Int32
+    guard let handle = dlopen("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices", RTLD_LAZY),
+          let getSym = dlsym(handle, "DisplayServicesGetBrightness"),
+          let setSym = dlsym(handle, "DisplayServicesSetBrightness") else { return nil }
+    let getFn = unsafeBitCast(getSym, to: GetFn.self)
+    let setFn = unsafeBitCast(setSym, to: SetFn.self)
+    return BrightnessBackend(name: "DisplayServices",
+        get: { var value: Float = 0; return getFn(display, &value) == 0 ? Double(value) : nil },
+        set: { setFn(display, Float($0)) == 0 })
+}
+
+func coreDisplayBackend(_ display: CGDirectDisplayID) -> BrightnessBackend? {
+    typealias GetFn = @convention(c) (UInt32) -> Double
+    typealias SetFn = @convention(c) (UInt32, Double) -> Void
+    guard let handle = dlopen("/System/Library/Frameworks/CoreDisplay.framework/CoreDisplay", RTLD_LAZY),
+          let getSym = dlsym(handle, "CoreDisplay_Display_GetUserBrightness"),
+          let setSym = dlsym(handle, "CoreDisplay_Display_SetUserBrightness") else { return nil }
+    let getFn = unsafeBitCast(getSym, to: GetFn.self)
+    let setFn = unsafeBitCast(setSym, to: SetFn.self)
+    return BrightnessBackend(name: "CoreDisplay",
+        get: { let value = getFn(display); return value.isFinite && value >= 0 && value <= 1 ? value : nil },
+        set: { setFn(display, $0); return true })
+}
+
+func ioKitBackend() -> BrightnessBackend? {
+    func forEachConnection(_ body: (io_object_t) -> Bool) -> Bool {
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IODisplayConnect"), &iterator) == KERN_SUCCESS else { return false }
+        defer { IOObjectRelease(iterator) }
+        var any = false
+        while case let service = IOIteratorNext(iterator), service != 0 {
+            if body(service) { any = true }
+            IOObjectRelease(service)
+        }
+        return any
+    }
+    let key = "brightness" as CFString
+    var probe: Float = 0
+    var found = false
+    _ = forEachConnection { service in
+        if IODisplayGetFloatParameter(service, 0, key, &probe) == kIOReturnSuccess { found = true }
+        return found
+    }
+    guard found else { return nil }
+    return BrightnessBackend(name: "IOKit",
+        get: {
+            var value: Float = -1
+            _ = forEachConnection { IODisplayGetFloatParameter($0, 0, key, &value) == kIOReturnSuccess }
+            return value >= 0 ? Double(value) : nil
+        },
+        set: { level in
+            forEachConnection { IODisplaySetFloatParameter($0, 0, key, Float(level)) == kIOReturnSuccess }
+        })
+}
+
+/// The first backend that can read the built-in display, or nil (external display only, closed lid,
+/// or an OS/hardware combination without a brightness API).
+func brightnessBackend() -> BrightnessBackend? {
+    if let display = builtInDisplayID() {
+        for backend in [displayServicesBackend(display), coreDisplayBackend(display)] {
+            if let backend = backend, backend.get() != nil { return backend }
+        }
+    }
+    if let backend = ioKitBackend(), backend.get() != nil { return backend }
+    return nil
+}
+
+func brightnessReply(_ request: Request) -> Reply {
+    guard let backend = brightnessBackend(), let current = backend.get() else {
+        return Reply(supported: false)
+    }
+    if request.action == "brightness-get" {
+        return Reply(supported: true, brightness: current, method: backend.name)
+    }
+    guard let wanted = request.level.flatMap(clampLevel), backend.set(wanted) else {
+        return Reply(supported: true, brightness: current, method: backend.name)
+    }
+    usleep(60_000)
+    return Reply(supported: true, brightness: backend.get() ?? wanted, method: backend.name)
+}
+
 func run(_ request: Request) throws -> Reply {
+    if request.action == "brightness-get" || request.action == "brightness-set" {
+        guard getppid() == request.hostPid else { throw Failure.unavailable }
+        return brightnessReply(request)
+    }
     guard ["list", "quit", "force"].contains(request.action) else { throw Failure.unavailable }
     let apps = try inventory(request)
     if request.action == "list" { return Reply(apps: apps) }
@@ -181,7 +297,16 @@ if CommandLine.arguments.dropFirst().elementsEqual(["--self-test"]) {
     precondition(!baselineExemptions.contains("com.google.antigravity"))
     precondition(!protectedIds.contains("com.google.antigravity"))
     precondition(baselineExemptions.allSatisfy { $0.hasPrefix("com.apple.") })
+    precondition(clampLevel(1.5) == 1.0 && clampLevel(-0.2) == 0.0 && clampLevel(0.4) == 0.4)
+    precondition(clampLevel(Double.nan) == nil && clampLevel(Double.infinity) == nil)
     print("native policy checks passed (fixtures only)")
+    exit(0)
+}
+
+// Manual probe (read-only): `app-control --brightness-get` prints the built-in display level.
+if CommandLine.arguments.dropFirst().elementsEqual(["--brightness-get"]) {
+    let reply = brightnessReply(Request(action: "brightness-get", hostPid: getppid(), hostExecutable: "", target: nil, demo: nil, level: nil))
+    if let output = try? JSONEncoder().encode(reply) { FileHandle.standardOutput.write(output) }
     exit(0)
 }
 

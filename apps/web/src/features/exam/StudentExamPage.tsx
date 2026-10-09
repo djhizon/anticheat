@@ -33,6 +33,7 @@ import {
 } from '../integrity/cameraContinuity.js';
 import { CameraLostOverlay } from '../integrity/CameraGatePanel.js';
 import { desktopWatcherBridge, startDesktopWatcher } from '../integrity/desktopWatcher.js';
+import { useExamBrightness } from '../integrity/desktopBrightness.js';
 
 /** Optional per-question time limit (focused mode); not every question has one. */
 function timeLimitOf(question: object): number | undefined {
@@ -96,7 +97,6 @@ export function StudentExamPage({
   const [receiptMessage, setReceiptMessage] = useState<string | null>(null);
   const [questionTimeLeft, setQuestionTimeLeft] = useState<Record<string, number>>({});
   const [pasteToastVisible, setPasteToastVisible] = useState(false);
-  const [brightnessBanner, setBrightnessBanner] = useState(true);
   const currentDeliveryRef = useRef(delivery);
   const answersRef = useRef<AnswerMap>({});
   const revisionRef = useRef(0);
@@ -351,6 +351,11 @@ export function StudentExamPage({
     const attemptId = currentDelivery.attempt.id;
     return startDesktopWatcher(bridge, attemptId, (event) => examApi.patchEvents(attemptId, event));
   }, [currentDelivery?.attempt.id, currentDelivery?.attempt.status, examApi]);
+
+  // Desktop: raise the built-in display to full brightness for the attempt, restore on exit.
+  useExamBrightness(
+    currentDelivery?.attempt.status === 'in_progress' ? currentDelivery.attempt.id : null,
+  );
 
   // Mid-exam camera continuity: a lost/virtual feed pauses answering until a native webcam
   // passes the camera gate again. Pauses and resumes are logged as integrity events.
@@ -920,14 +925,6 @@ export function StudentExamPage({
         <div className="violation-banner" role="alert">
           ⚠️ {violations.length} violation{violations.length !== 1 ? 's' : ''} logged — repeated
           violations will lock your exam
-        </div>
-      )}
-      {brightnessBanner && isActive && (
-        <div className="brightness-banner">
-          💡 For best face tracking, please increase your screen brightness to maximum.
-          <button className="brightness-close" onClick={() => setBrightnessBanner(false)}>
-            ×
-          </button>
         </div>
       )}
 
