@@ -28,6 +28,9 @@ function localVisionPolicy(): Plugin {
   };
 }
 
+// Set by `npm run share` so the ngrok domain can reach the dev server.
+const shareHost = process.env.SHARE_HOST?.trim() || undefined;
+
 export default defineConfig({
   plugins: [react(), localVisionPolicy()],
   worker: {
@@ -42,6 +45,7 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    ...(shareHost ? { allowedHosts: [shareHost], hmr: false } : {}),
     warmup: {
       // Pre-transform these files so the first page visit is instant
       clientFiles: [

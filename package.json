@@ -16,6 +16,7 @@
   ],
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "share": "node scripts/share.mjs",
     "dev:api": "npm run dev --workspace @exam-anti-cheat/api",
     "dev:web": "npm run dev --workspace @exam-anti-cheat/web",
     "demo:seed": "npm run demo:seed --workspace @exam-anti-cheat/api",
