@@ -1321,6 +1321,36 @@ describe('exam delivery boundary', () => {
     expect(
       (await routes.handle(studentRequest(owner, 'GET', '/exam/instructor/attempts'))).status,
     ).toBe(403);
+    // Each row carries the triage summary; one focus loss alone is never a finding.
+    expect((list.body as { attempts: unknown[] }).attempts[0]).toMatchObject({
+      level: 'none',
+      topReason: null,
+      findingCount: 0,
+    });
+
+    // Findings follow the same ownership rules as the log.
+    expect((await routes.handle(studentRequest(other, 'GET', `${base}/findings`))).status).toBe(
+      404,
+    );
+    expect(
+      (await routes.handle({ method: 'GET', path: `${base}/findings`, headers: { origin } }))
+        .status,
+    ).toBe(401);
+    expect(
+      (await routes.handle(studentRequest(instructor, 'GET', '/exam/attempts/missing/findings')))
+        .status,
+    ).toBe(404);
+    const findings = await routes.handle(studentRequest(owner, 'GET', `${base}/findings`));
+    expect(findings.status).toBe(200);
+    expect(findings.body).toEqual({
+      attemptId,
+      level: 'none',
+      findings: [],
+      topReason: null,
+    });
+    expect(
+      (await routes.handle(studentRequest(instructor, 'GET', `${base}/findings`))).status,
+    ).toBe(200);
   });
 
   it('saves non-empty transcripts as structured events and returns them in order to the owner only', async () => {

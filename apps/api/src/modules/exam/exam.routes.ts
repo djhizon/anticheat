@@ -70,6 +70,7 @@ const transpPattern = /^\/exam\/attempts\/([^/]+)\/transparency$/u;
 const enrollPhonePattern = /^\/exam\/attempts\/([^/]+)\/enroll-phone$/u;
 const phoneStatusPattern = /^\/exam\/attempts\/([^/]+)\/phone-status$/u;
 const timelinePattern = /^\/exam\/attempts\/([^/]+)\/timeline$/u;
+const findingsPattern = /^\/exam\/attempts\/([^/]+)\/findings$/u;
 const instructorAttemptsPath = '/exam/instructor/attempts';
 const instructorCapabilitiesPath = '/exam/instructor/capabilities';
 const evidenceListPattern = /^\/exam\/attempts\/([^/]+)\/evidence$/u;
@@ -180,6 +181,7 @@ function isExamPath(path: string): boolean {
     path === instructorAttemptsPath ||
     path === instructorCapabilitiesPath ||
     timelinePattern.test(path) ||
+    findingsPattern.test(path) ||
     similarityPattern.test(path) ||
     instructorAiCheckPattern.test(path) ||
     [
@@ -640,6 +642,23 @@ export class ExamRoutes {
               },
             }
           : response;
+      }
+
+      // ── Triage findings: student owner or any instructor ─────────────────
+      const findingsMatch = findingsPattern.exec(path);
+      if (method === 'GET' && findingsMatch !== null && this.integrity !== null) {
+        const principal = this.boundary.requirePrincipal(request);
+        const attemptId = parsePathId<'AttemptId'>(findingsMatch[1] ?? '', 'Attempt ID');
+        if (principal.user.role === 'student') {
+          // Ownership check: another student's attempt answers 404, like the timeline route.
+          await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
+        } else {
+          this.boundary.requireRole(principal, 'instructor');
+        }
+        const findings = this.integrity.getFindings(String(attemptId));
+        if (findings === null)
+          throw new DomainError('not_found', 'The exam attempt was not found.');
+        return jsonResponse(request, this.config.allowedOrigins, 200, findings);
       }
 
       // ── Instructor: attempt list for integrity review ─────────────────────

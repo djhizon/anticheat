@@ -271,6 +271,36 @@ no official quantized build exists, so it is not offered.
   or an injured hand shift typing rhythm. These are leads for a human reviewer,
   never verdicts, and the log wording says so.
 
+## Findings (triage of the stored timeline)
+
+- **What it is:** `GET /exam/attempts/:id/findings` (owner or instructor) reads the same stored
+  rows as the integrity log and returns at most six plain-language findings plus one level:
+  `review` (any high-confidence finding, or two medium ones), `glance` (any finding) or `none`.
+  Findings are leads for a human, never verdicts; the wording always offers an innocent
+  explanation. Each carries ISO windows, evidence-snapshot ids within ±10 s of a window,
+  transcript lines inside the windows, and a `studentNote` slot. Results are cached 30 s per
+  attempt, and the instructor attempt list carries `level`, `topReason` and `findingCount`.
+- **Rules:** one weak signal never becomes a finding; confidence comes from corroboration. The
+  student's own first 3 minutes are the baseline: the typing-burst floor is raised to twice their
+  baseline rate, and a glance region they already used (and typed after) at least 3 times in the
+  baseline at a similar rate (≥ 0.75× the attempt rate) is treated as a habit (keyboard, allowed
+  notes), not a lead. Thresholds live in `FINDING_THRESHOLDS`
+  (`apps/api/src/modules/integrity/findings.ts`):
+
+  | Finding                  | Rule                                                                                                                                                                                                                                                                                            |
+  | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `notes_or_second_screen` | 8 or more glances to one region (yaw and pitch within ±8°), 4 or more followed within 10 s by a typing burst (12 keystrokes or 40 characters in 10 s, an answer save growing by 20 words, or injected text); high when 8 or more are followed or any is followed by injected text               |
+  | `second_person`          | 2 or more `multiple_faces` episodes of 2 s or more (or one of 10 s or more), and/or voice activity of 2 s or more with a transcript line of 3 or more words within 15 s while no `no_face` episode overlaps; high when both, medium for faces or 2 speech pairs, low for a single speech pair   |
+  | `external_answer_entry`  | 2 or more injection episodes (`text_injected`, merged within 30 s), or one with a still pointer (`idle_pointer_injections`, or 0 pointer events in the window), or `burst_after_idle` with a still pointer over the 30 s before it; a single injection with a moving pointer is ignored         |
+  | `phone_use`              | a downward gaze of 5 s or more within 60 s of `iphone_lost` / `phone_left_app`, or a phone sighting (`phone_detected`, server `vision_*phone*`) within 60 s of such a gaze or phone event, or 2 or more sightings (merged within 30 s); one sighting or one dropped connection alone is ignored |
+  | `left_exam`              | 2 or more interruption episodes (focus loss, hidden page, blocked minimize or full-screen exit, recording stopped, emergency exit, another app in front; merged within 5 s); failed presence checks count only from the second one; medium at 3, high at 5 or an emergency exit                 |
+  | `environment_risk`       | any virtual camera, capture device or capture display event (high with a second kind, 3 events, or a weak signal); `camera_unverified` and more than one display are weak and only count together                                                                                               |
+
+- **False positives to expect:** touch-typists and hunt-and-peck typists look at the keyboard;
+  a calculator or scratch paper sits below the camera; people read aloud or have family in the
+  room; dictation and text expanders insert text at once; notifications steal focus; a locked
+  phone drops its connection; docking stations present as capture hardware.
+
 ## Lighting and screen brightness
 
 - **Lighting check (on-device):** small 64x64 luminance frames from the open camera (and the

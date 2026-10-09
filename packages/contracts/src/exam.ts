@@ -1,4 +1,5 @@
 import type { AttemptId, ExamId, Opaque, UserId } from './common.js';
+import type { ReviewLevel } from './findings.js';
 
 export type ExamVersionId = Opaque<string, 'ExamVersionId'>;
 export type QuestionVersionId = Opaque<string, 'QuestionVersionId'>;
@@ -288,6 +289,11 @@ export interface InstructorAttemptSummary {
   readonly examTitle: string;
   readonly status: 'in_progress' | 'submitted' | 'expired';
   readonly startedAt: string;
+  /** Triage from the findings engine (see `./findings`), so the list can be sorted by need. */
+  readonly level: ReviewLevel;
+  /** Title of the most important finding, or null when there is none. */
+  readonly topReason: string | null;
+  readonly findingCount: number;
 }
 
 /** Instructor view of a published exam version and its free-text questions. */

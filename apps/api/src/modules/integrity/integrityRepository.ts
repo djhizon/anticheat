@@ -505,6 +505,21 @@ export class IntegrityRepository {
     };
   }
 
+  /**
+   * Student notes on findings, keyed by finding id. The `finding_notes` table is owned by a
+   * later package; until its migration exists this returns an empty map.
+   */
+  getFindingNotes(attemptId: string): ReadonlyMap<string, string> {
+    const table = this.db
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'finding_notes'`)
+      .get() as { name: string } | undefined;
+    if (table === undefined) return new Map();
+    const rows = this.db
+      .prepare(`SELECT finding_id, note FROM finding_notes WHERE attempt_id = ?`)
+      .all(attemptId) as unknown as ReadonlyArray<{ finding_id: string; note: string }>;
+    return new Map(rows.map((row) => [row.finding_id, row.note]));
+  }
+
   /** Newest attempts across all students for the instructor review list. */
   listAttemptsForInstructor(limit = 200): TimelineAttemptListRow[] {
     return this.db

@@ -43,8 +43,13 @@ import type {
   SimilarityRunResponse,
   TransparencyEvent,
 } from '@examguard/contracts/exam';
+import type { AttemptFindings } from '@examguard/contracts/findings';
 import { friendlyVisionLabel } from './visionLabels.js';
 import { buildTimeline } from './timeline.js';
+import { buildFindings } from './findings.js';
+
+/** Findings are recomputed from the timeline at most this often per attempt. */
+export const FINDINGS_CACHE_MS = 30_000;
 
 const GAZE_DIRECTIONS = new Set([
   'left',
@@ -116,6 +121,8 @@ const TRANSPARENCY_NOTES: Readonly<Record<string, string>> = {
 };
 
 export class IntegrityService {
+  private readonly findingsCache = new Map<string, { at: number; value: AttemptFindings }>();
+
   async getTransparencyReport(attemptId: string): Promise<TransparencyEvent[]> {
     const data = this.repo.getTransparencyEvents(attemptId);
 
@@ -671,14 +678,48 @@ export class IntegrityService {
     return sources === undefined ? entries : entries.filter((e) => sources.has(e.source));
   }
 
+  /**
+   * Triage findings for one attempt (null when it does not exist). Computed from the stored
+   * timeline and cached for FINDINGS_CACHE_MS so list views and polling stay cheap.
+   */
+  getFindings(attemptId: string, now: number = Date.now()): AttemptFindings | null {
+    const cached = this.findingsCache.get(attemptId);
+    if (cached !== undefined && now - cached.at < FINDINGS_CACHE_MS) return cached.value;
+    const meta = this.repo.getAttemptTimelineMeta(attemptId);
+    if (meta === null) {
+      this.findingsCache.delete(attemptId);
+      return null;
+    }
+    const built = buildFindings(this.repo.getTimelineRows(attemptId, meta));
+    const notes = this.repo.getFindingNotes(attemptId);
+    const value: AttemptFindings =
+      notes.size === 0
+        ? built
+        : {
+            ...built,
+            findings: built.findings.map((f) => ({
+              ...f,
+              studentNote: notes.get(f.id) ?? null,
+            })),
+          };
+    this.findingsCache.set(attemptId, { at: now, value });
+    return value;
+  }
+
   listAttemptsForInstructor(): InstructorAttemptSummary[] {
-    return this.repo.listAttemptsForInstructor().map((row) => ({
-      id: row.id,
-      studentEmail: row.student_email,
-      examTitle: row.exam_title,
-      status: row.status,
-      startedAt: row.started_at,
-    }));
+    return this.repo.listAttemptsForInstructor().map((row) => {
+      const findings = this.getFindings(row.id);
+      return {
+        id: row.id,
+        studentEmail: row.student_email,
+        examTitle: row.exam_title,
+        status: row.status,
+        startedAt: row.started_at,
+        level: findings?.level ?? 'none',
+        topReason: findings?.topReason ?? null,
+        findingCount: findings?.findings.length ?? 0,
+      };
+    });
   }
 
   recordAppEvent(attemptId: string, foregroundApp: string, displayCount: number): void {
