@@ -42,17 +42,27 @@ it('keeps an inactive camera off without false readings or a CPU checkbox', asyn
   expect(container.querySelector('input')).toBeNull();
   expect(container.querySelector('button')).toBeNull();
 });
-const camera = vi.hoisted(() => ({ start: vi.fn(async (_value: boolean) => {}) }));
+const camera = vi.hoisted(() => ({
+  start: vi.fn(async (_value: boolean) => {}),
+  publish: null as null | ((snapshot: import('./cameraSession.js').CameraSnapshot) => void),
+}));
 vi.mock('./cameraSession.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('./cameraSession.js')>();
   return {
     ...original,
-    createCameraSession: () => ({
-      start: camera.start,
-      stop: vi.fn(),
-      destroy: vi.fn(),
-      calibrate: vi.fn(),
-    }),
+    createCameraSession: (
+      _env: unknown,
+      _attempt: unknown,
+      publish: (snapshot: import('./cameraSession.js').CameraSnapshot) => void,
+    ) => {
+      camera.publish = publish;
+      return {
+        start: camera.start,
+        stop: vi.fn(),
+        destroy: vi.fn(),
+        calibrate: vi.fn(),
+      };
+    },
   };
 });
 const attempt = (active: boolean) => ({ id: 'a', active, deadline: Date.now() + 60000 });
@@ -60,6 +70,23 @@ const attempt = (active: boolean) => ({ id: 'a', active, deadline: Date.now() + 
 it('auto-starts camera checks once for an in-progress consented attempt', async () => {
   await act(async () => root.render(<CameraIntegrityPanel attempt={attempt(true)} autoStart />));
   expect(camera.start).toHaveBeenCalledOnce();
+});
+it('shows students no calibration prompt, button, status or wording while live', async () => {
+  const { emptyCamera } = await import('./cameraSession.js');
+  await act(async () => root.render(<CameraIntegrityPanel attempt={attempt(true)} autoStart />));
+  await act(async () =>
+    camera.publish!({
+      ...emptyCamera('Camera checks running'),
+      phase: 'live',
+      faces: 1,
+      pose: { yaw: 3, pitch: -4 },
+    }),
+  );
+  expect(container.textContent).toContain('Camera active');
+  expect(container.textContent).toContain('Gaze details');
+  expect(container.textContent).not.toMatch(/calibrat|confidence|look at the|dot/i);
+  for (const button of container.querySelectorAll('button'))
+    expect(button.textContent).not.toMatch(/calibrat/i);
 });
 it('does not auto-start the camera without consent or for a submitted attempt', async () => {
   await act(async () => root.render(<CameraIntegrityPanel attempt={attempt(true)} />));

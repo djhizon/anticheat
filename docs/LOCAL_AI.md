@@ -56,9 +56,58 @@ eye corners (33/133, 362/263) and lids (159/145, 386/374) with (b) the
 `eyeLookIn/Out/Up/Down` blendshapes. The result is smoothed with a One-Euro filter and shown
 on the "Gaze details" dial (compass bearing, head vs eyes, 5 s trail) next to statistics
 (time on screen, look-aways of 1 s or more, per-direction dwell, blink rate, face present %,
-multiple-face events, tracking quality, phone detections, vision frames/s). An optional
-5-point calibration (centre plus four corners, about 1.7 s each) fits an offset and per-axis
-gain; "Centre only" is the fallback, and with no calibration the camera centre is used.
+multiple-face events, tracking quality, phone detections, vision frames/s).
+
+**Plug-and-play: no calibration step.** Students never see anything about calibration; any
+webcam works. The gaze estimate calibrates itself while the student works
+(`implicitCalibration.ts`, DOM side in `interactionCalibration.ts`):
+
+1. _Bootstrapping prior._ It starts from the camera-centre model (gaze 0,0 = looking into the
+   lens). Viewing distance comes from the inter-pupillary distance in the image (63 mm adult
+   average, iris landmarks 468/473, corrected for head yaw) or, without irises, the face-mesh
+   width (about 140 mm), assuming a 65° horizontal webcam field of view. The screen size is
+   `window.screen` CSS pixels x 0.25 mm (clamped to 300-700 mm wide, which slightly
+   over-estimates a laptop screen on purpose) with the camera 10 mm above the top edge. A
+   typical laptop at 55 cm gives about ±18° x ±12°. Until the calibration is confident, the
+   on-screen zone is deliberately wide: 2x the sideways extent + 6°, and 1.5x the full screen
+   height below the camera + 3° vertically (about ±42° x ±38°), so nobody is flagged early.
+2. _Interaction pairs._ A click or tap (at the pointer position), focusing an answer field, or
+   typing in a small field (at most every 3 s) is taken as "looking at that spot": the median
+   raw gaze of the preceding 0.6 s is paired with the point in screen-normalised coordinates.
+   Per axis, raw = offset + slope x target is refitted over the last 40 pairs with a robust
+   fit (Theil-Sen start, Huber IRLS, residuals beyond 3 robust sigmas rejected), so clicks
+   made while looking at the keyboard do not skew it. The slope (gain, including a mirrored
+   sign) is only trusted when targets spread over at least a quarter of the screen half-size
+   and there are 8+ pairs; otherwise the fit is offset-only. Only positions and timing are
+   used: no key values or text.
+3. _Self-centering._ While the student types, the running median of the residual against the
+   current model feeds a slow drift correction (time constant 4 s while learning, 30 s after;
+   at most ±12° sideways / ±15° vertically), which absorbs head creep and laptop-lid changes.
+   A posture change (face 20% larger/smaller or moved by half a face width for 2.5 s while
+   still facing the camera) clears the pairs and restarts the learning phase with the wide
+   zone; a turned head (looking at notes) is not a posture change.
+4. _Confidence._ 0-1 from the number of consistent pairs, their residual spread, the share of
+   inliers and whether the gain was fitted (offset-only caps at 0.6). The on-screen zone
+   shrinks from the wide learning zone toward the screen extent x 1.25 (plus two residual
+   sigmas) as confidence grows. Look-away statistics and the `look_away` evidence trigger use
+   that zone, and the direction log treats an unconfident estimate as "forward" unless it is
+   clearly (10°+) beyond the wide zone. When the irises are unreliable (glare from glasses,
+   low light: readings missing, jumping frame to frame or poor tracking quality), gaze falls
+   back to head pose only with an extra ±12° x ±8° tolerance and confidence capped at 0.4.
+5. _UI._ Calibration is silent. Students see no prompt, dots, buttons, status or confidence,
+   and no code path asks them to look at points; the "Calibrate face direction" button is
+   gone too. The status ("Auto-calibrating… (learns as you work)" / "Calibrated", with the
+   confidence) is available to instructor views through `GazePanel`'s `showCalibration` prop,
+   and in development builds with `VITE_GAZE_DEBUG=1`.
+
+Limits of implicit calibration: it assumes people mostly look where they click and at the
+screen while typing. Hunt-and-peck typists who watch the keyboard more than half the time
+bias the vertical centre downward (bounded by the drift limit); a student who never clicks or
+types in a small field stays in the wide learning zone. The geometry assumptions (field of
+view, IPD, CSS pixel size) are averages; the fitted gain absorbs most of the error, but an
+external monitor far from the webcam may need many interactions before the gain is trusted.
+Someone who deliberately moves around to trigger posture resets keeps the zone wide; large
+look-aways are still recorded, and a human reviews everything.
 
 Limits: expect roughly +-5 to 10 degrees on a typical webcam. Glasses (glare, thick frames),
 dim or back-lit rooms, a camera far from the screen, and extreme head angles all degrade it,
@@ -70,8 +119,8 @@ Phone detector: EfficientDet-Lite0 now returns up to 3 'cell phone' boxes at a 0
 floor (run about once a second). A phone is only "Detected" when 3 of the last 5 detector
 frames scored >= 0.5, or one frame scored >= 0.75; weaker evidence shows as "Possible phone".
 Boxes overlapping the face are flagged but not discarded, because a phone held to the ear
-overlaps the face. Logic: `phoneEvidence.ts`; gaze maths: `gazeEstimator.ts`; statistics:
-`gazeStats.ts`; tracker and hook: `eyeGazeTracker.ts`.
+overlaps the face. Logic: `phoneEvidence.ts`; gaze maths: `gazeEstimator.ts`; implicit calibration:
+`implicitCalibration.ts`; statistics: `gazeStats.ts`; tracker and hook: `eyeGazeTracker.ts`.
 
 ## How the cloud parts degrade
 

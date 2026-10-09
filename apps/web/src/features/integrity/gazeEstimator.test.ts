@@ -3,15 +3,16 @@ import {
   DEFAULT_EXTENT,
   NO_CALIBRATION,
   applyCalibration,
+  buildSample,
   bearingDegrees,
   createBlendSignLearner,
   createOneEuro,
   extractEyeFeatures,
   eyeOffsetDegrees,
   faceBoxFromLandmarks,
-  fitCalibration,
   offScreenDegrees,
   rawGaze,
+  reporterAngles,
   rollFromMatrix,
   sectorOf,
   trackingQuality,
@@ -166,66 +167,33 @@ describe('compass', () => {
 describe('calibration', () => {
   const sample = (headYaw: number, headPitch: number, eyeYaw = 0, eyePitch = 0): RawGaze =>
     rawGaze({ yaw: headYaw, pitch: headPitch }, 0, { yaw: eyeYaw, pitch: eyePitch });
-  const repeat = (s: RawGaze) => [s, s, s];
 
   it('without calibration, gaze is head plus eyes', () => {
     const angles = applyCalibration(sample(10, -5, 6, 3), NO_CALIBRATION);
     expect(angles.yaw).toBe(16);
     expect(angles.pitch).toBe(-2);
   });
-  it('centre-only removes the resting offset', () => {
-    const fit = fitCalibration({ centre: repeat(sample(4, -8, 2, 1)) })!;
-    expect(fit.calibration.kind).toBe('centre');
-    const angles = applyCalibration(sample(4, -8, 2, 1), fit.calibration);
-    expect(angles.yaw).toBeCloseTo(0);
-    expect(angles.pitch).toBeCloseTo(0);
+  it('uses an explicit wider zone and carries confidence into the sample', () => {
+    const cal = {
+      ...NO_CALIBRATION,
+      zone: { yaw: 40, pitch: 30 },
+      confidence: 0.2,
+    };
+    const angles = applyCalibration(sample(30, -20), cal);
+    const s = buildSample(0, angles, angles, cal, true, 0.9);
+    expect(s.onScreen).toBe(true);
+    expect(s.confidence).toBe(0.2);
+    expect(s.headOnly).toBe(false);
+    expect(buildSample(0, angles, angles, NO_CALIBRATION, true, 0.9).onScreen).toBe(false);
   });
-  it('five points scale corners to the assumed screen extent', () => {
-    const fit = fitCalibration({
-      centre: repeat(sample(0, 0)),
-      topLeft: repeat(sample(-6, 4)),
-      topRight: repeat(sample(6, 4)),
-      bottomLeft: repeat(sample(-6, -4)),
-      bottomRight: repeat(sample(6, -4)),
-    })!;
-    expect(fit.calibration.kind).toBe('five-point');
-    expect(fit.calibration.gain.yaw).toBeCloseTo(3); // clamped from 18/6
-    expect(fit.calibration.gain.pitch).toBeCloseTo(2.75);
-    const tr = applyCalibration(sample(6, 4), fit.calibration);
-    expect(tr.yaw).toBeCloseTo(18);
-    expect(tr.pitch).toBeCloseTo(11);
-  });
-  it('uses head and eyes together and corrects an inverted axis sign', () => {
-    const fit = fitCalibration({
-      centre: repeat(sample(0, 0)),
-      topLeft: repeat(sample(4, -3, 5, -2)),
-      topRight: repeat(sample(-4, -3, -5, -2)),
-      bottomLeft: repeat(sample(4, 3, 5, 2)),
-      bottomRight: repeat(sample(-4, 3, -5, 2)),
-    })!;
-    expect(fit.calibration.gain.yaw).toBeLessThan(0);
-    expect(fit.calibration.gain.pitch).toBeLessThan(0);
-    const tr = applyCalibration(sample(-4, -3, -5, -2), fit.calibration);
-    expect(tr.yaw).toBeGreaterThan(0);
-    expect(tr.pitch).toBeGreaterThan(0);
-  });
-  it('keeps default scale and warns when nothing moved, and needs a centre', () => {
-    const still = repeat(sample(0, 0));
-    const fit = fitCalibration({
-      centre: still,
-      topLeft: still,
-      topRight: still,
-      bottomLeft: still,
-    })!;
-    expect(fit.calibration.gain).toEqual({ yaw: 1, pitch: 1 });
-    expect(fit.warnings.length).toBe(2);
-    expect(fitCalibration({ topLeft: still })).toBeNull();
-    expect(fitCalibration({ centre: [sample(0, 0)] })).toBeNull();
-  });
-  it('falls back to centre-only with a warning when too few corners were read', () => {
-    const fit = fitCalibration({ centre: repeat(sample(1, 1)), topLeft: repeat(sample(-6, 4)) })!;
-    expect(fit.calibration.kind).toBe('centre');
-    expect(fit.warnings).toHaveLength(1);
+  it('reports directions only when trusted or clearly off screen', () => {
+    const cal = { ...NO_CALIBRATION, zone: { yaw: 40, pitch: 30 }, confidence: 0.2 };
+    const near = applyCalibration(sample(30, 0), cal);
+    expect(reporterAngles(buildSample(0, near, near, cal, true, 1))).toEqual({ yaw: 0, pitch: 0 });
+    const far = applyCalibration(sample(60, 0), cal);
+    expect(reporterAngles(buildSample(0, far, far, cal, true, 1)).yaw).toBe(60);
+    const trusted = { ...cal, confidence: 0.8 };
+    expect(reporterAngles(buildSample(0, near, near, trusted, true, 1)).yaw).toBe(30);
   });
 });
 

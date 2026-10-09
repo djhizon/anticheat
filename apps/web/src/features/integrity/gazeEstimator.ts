@@ -40,6 +40,11 @@ export interface EyeFeatures {
   readonly blendV: number | null;
   /** 0..1 mean blink blendshape (or lid-closure proxy). */
   readonly blink: number;
+  /**
+   * Horizontal distance between the two iris centres in normalised image-x units (0..1), used
+   * to estimate viewing distance. Absent when either iris is missing.
+   */
+  readonly ipd?: number | null;
 }
 
 export interface Angles {
@@ -114,7 +119,12 @@ export function extractEyeFeatures(
   let irisH: number | null = null;
   let irisV: number | null = null;
   let openness: number | null = null;
+  let ipd: number | null = null;
   if (mesh !== undefined && mesh.length >= IRIS_LANDMARK_COUNT) {
+    const ri = mesh[RIGHT_EYE.iris];
+    const li = mesh[LEFT_EYE.iris];
+    if (ri && li && finite(ri.x) && finite(li.x) && Math.abs(li.x - ri.x) > 1e-4)
+      ipd = Math.abs(li.x - ri.x);
     const r = eyeGeometry(mesh, RIGHT_EYE, RIGHT_EYE.outer, RIGHT_EYE.inner);
     const l = eyeGeometry(mesh, LEFT_EYE, LEFT_EYE.inner, LEFT_EYE.outer);
     const eyes = [r, l].filter((e): e is NonNullable<typeof e> => e !== null);
@@ -141,7 +151,7 @@ export function extractEyeFeatures(
   let blink = blinkL !== null && blinkR !== null ? (blinkL + blinkR) / 2 : 0;
   if (blinkL === null && blinkR === null && openness === null && irisH === null) blink = 0;
   if (irisH === null && blendH === null && blendV === null) return null;
-  return { irisH, irisV, blendH, blendV, blink };
+  return { irisH, irisV, blendH, blendV, blink, ipd };
 }
 
 /**
@@ -308,7 +318,12 @@ export function rawGaze(
   };
 }
 
-export type CalibrationKind = 'none' | 'centre' | 'five-point';
+/**
+ * 'none' = camera-centre model with default extents; 'auto' = implicit (self-) calibration
+ * learned from the student's own clicks and typing (see implicitCalibration.ts). There is no
+ * explicit calibration step for the student.
+ */
+export type CalibrationKind = 'none' | 'auto';
 export interface GazeCalibration {
   readonly kind: CalibrationKind;
   readonly headOffset: { readonly yaw: number; readonly pitch: number; readonly roll: number };
@@ -316,6 +331,15 @@ export interface GazeCalibration {
   /** Multiplies (head + eye) so that a screen corner reads as +-extent. */
   readonly gain: Angles;
   readonly extent: Extent;
+  /**
+   * On-screen rectangle half-extents actually used for classification. Wider than
+   * zoneOf(extent) while confidence is low, so nobody is flagged before calibration settles.
+   */
+  readonly zone?: Extent;
+  /** 0..1 calibration confidence (0 = still learning). */
+  readonly confidence?: number;
+  /** True when the eyes were unreliable and gaze is head pose only (with a wider zone). */
+  readonly headOnly?: boolean;
 }
 export const NO_CALIBRATION: GazeCalibration = {
   kind: 'none',
@@ -323,6 +347,7 @@ export const NO_CALIBRATION: GazeCalibration = {
   eyeOffset: { yaw: 0, pitch: 0 },
   gain: { yaw: 1, pitch: 1 },
   extent: DEFAULT_EXTENT,
+  confidence: 0,
 };
 
 export interface GazeAngles {
@@ -350,104 +375,6 @@ export function applyCalibration(raw: RawGaze, cal: GazeCalibration): GazeAngles
     headRoll,
     eyeYaw,
     eyePitch,
-  };
-}
-
-export type CalibrationTarget = 'centre' | 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight';
-export const CALIBRATION_ORDER: readonly CalibrationTarget[] = [
-  'centre',
-  'topLeft',
-  'topRight',
-  'bottomRight',
-  'bottomLeft',
-];
-const CORNER_SIGNS: Record<Exclude<CalibrationTarget, 'centre'>, { x: 1 | -1; y: 1 | -1 }> = {
-  topLeft: { x: -1, y: 1 },
-  topRight: { x: 1, y: 1 },
-  bottomLeft: { x: -1, y: -1 },
-  bottomRight: { x: 1, y: -1 },
-};
-
-function median(values: readonly number[]): number {
-  if (values.length === 0) return 0;
-  const s = [...values].sort((a, b) => a - b);
-  const m = Math.floor(s.length / 2);
-  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
-}
-function medianRaw(samples: readonly RawGaze[]) {
-  const eyes = samples.filter((s) => s.eyesValid);
-  const ref = samples[0]!;
-  const unwrap = (v: number, r: number) => r + wrapDegrees(v - r);
-  return {
-    headYaw: median(samples.map((s) => unwrap(s.headYaw, ref.headYaw))),
-    headPitch: median(samples.map((s) => unwrap(s.headPitch, ref.headPitch))),
-    headRoll: median(samples.map((s) => unwrap(s.headRoll, ref.headRoll))),
-    eyeYaw: median(eyes.map((s) => s.eyeYaw)),
-    eyePitch: median(eyes.map((s) => s.eyePitch)),
-  };
-}
-
-export interface CalibrationFit {
-  readonly calibration: GazeCalibration;
-  readonly warnings: readonly string[];
-}
-
-const MIN_POINT_SAMPLES = 2;
-const MIN_SPREAD_DEGREES = 3;
-const GAIN_RANGE = [0.4, 3] as const;
-
-/**
- * Fits an offset (centre) and, with at least three corners, a per-axis gain/sign so the
- * corners read as +-extent. Returns null without a usable centre capture. Centre-only gives
- * kind "centre" with unit gain.
- */
-export function fitCalibration(
-  samples: Partial<Record<CalibrationTarget, readonly RawGaze[]>>,
-  extent: Extent = DEFAULT_EXTENT,
-): CalibrationFit | null {
-  const centreSamples = samples.centre ?? [];
-  if (centreSamples.length < MIN_POINT_SAMPLES) return null;
-  const c = medianRaw(centreSamples);
-  const warnings: string[] = [];
-  let gain: Angles = { yaw: 1, pitch: 1 };
-  let kind: CalibrationKind = 'centre';
-  const xs: number[] = [];
-  const ys: number[] = [];
-  for (const key of Object.keys(CORNER_SIGNS) as Array<keyof typeof CORNER_SIGNS>) {
-    const pts = samples[key] ?? [];
-    if (pts.length < MIN_POINT_SAMPLES) continue;
-    const p = medianRaw(pts);
-    const dx = wrapDegrees(p.headYaw - c.headYaw) + (p.eyeYaw - c.eyeYaw);
-    const dy = wrapDegrees(p.headPitch - c.headPitch) + (p.eyePitch - c.eyePitch);
-    xs.push(dx * CORNER_SIGNS[key].x);
-    ys.push(dy * CORNER_SIGNS[key].y);
-  }
-  if (xs.length >= 3) {
-    kind = 'five-point';
-    const axis = (values: number[], target: number, label: string): number => {
-      const m = values.reduce((a, b) => a + b, 0) / values.length;
-      if (Math.abs(m) < MIN_SPREAD_DEGREES) {
-        warnings.push(`${label} movement was too small to measure; default scale kept.`);
-        return 1;
-      }
-      return Math.sign(m) * clamp(target / Math.abs(m), GAIN_RANGE[0], GAIN_RANGE[1]);
-    };
-    gain = {
-      yaw: axis(xs, extent.yaw, 'Sideways'),
-      pitch: axis(ys, extent.pitch, 'Up/down'),
-    };
-  } else if (Object.keys(samples).length > 1) {
-    warnings.push('Not enough corner readings; used the centre only.');
-  }
-  return {
-    calibration: {
-      kind,
-      headOffset: { yaw: c.headYaw, pitch: c.headPitch, roll: c.headRoll },
-      eyeOffset: { yaw: c.eyeYaw, pitch: c.eyePitch },
-      gain,
-      extent,
-    },
-    warnings,
   };
 }
 
@@ -512,6 +439,10 @@ export interface GazeSample {
   /** 0..1 tracking-quality proxy. */
   readonly quality: number;
   readonly calibration: CalibrationKind;
+  /** 0..1 implicit-calibration confidence when this sample was taken. */
+  readonly confidence: number;
+  /** True when the eyes were unreliable (glare, low light) and only head pose was used. */
+  readonly headOnly: boolean;
 }
 
 export function buildSample(
@@ -522,7 +453,7 @@ export function buildSample(
   eyesValid: boolean,
   quality: number,
 ): GazeSample {
-  const zone = zoneOf(cal.extent);
+  const zone = cal.zone ?? zoneOf(cal.extent);
   const magnitude = Math.hypot(smooth.yaw, smooth.pitch);
   const off = offScreenDegrees(smooth.yaw, smooth.pitch, zone);
   return {
@@ -543,7 +474,28 @@ export function buildSample(
     eyesValid,
     quality,
     calibration: cal.kind,
+    confidence: cal.confidence ?? 0,
+    headOnly: cal.headOnly ?? false,
   };
+}
+
+/** Calibration confidence at or above which gaze directions are logged as such. */
+export const TRUSTED_CONFIDENCE = 0.5;
+/** While still learning, only a gaze this far beyond the (already wide) zone is reported. */
+export const UNTRUSTED_REPORT_DEGREES = 10;
+
+/**
+ * Angles for the debounced direction log. With a trusted calibration this is the gaze itself.
+ * While still learning, on-screen and near-screen gaze reads as straight ahead (no event) and
+ * only a gaze clearly beyond the wide learning zone is passed through, so plug-and-play never
+ * produces early direction events from an unsettled calibration.
+ */
+export function reporterAngles(sample: GazeSample): Angles {
+  if (sample.confidence >= TRUSTED_CONFIDENCE && !sample.headOnly)
+    return { yaw: sample.yaw, pitch: sample.pitch };
+  if (sample.offScreenDeg >= UNTRUSTED_REPORT_DEGREES)
+    return { yaw: sample.yaw, pitch: sample.pitch };
+  return { yaw: 0, pitch: 0 };
 }
 
 /** "S 18°" style label: nearest compass sector plus total degrees off centre. */

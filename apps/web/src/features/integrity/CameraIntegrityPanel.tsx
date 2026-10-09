@@ -6,8 +6,9 @@ import { faceDirection } from './faceDirection.js';
 import { createGazeReporter } from './gazeReporter.js';
 import { useEvidenceCapture } from '../evidence/useEvidenceCapture.js';
 import { createEyeGazeTracker } from './eyeGazeTracker.js';
-import type { GazeSample } from './gazeEstimator.js';
-import { GazePanel } from './GazePanel.js';
+import { reporterAngles, type GazeSample } from './gazeEstimator.js';
+import { useImplicitGazeCalibration } from './interactionCalibration.js';
+import { GazePanel, gazeDebugEnabled } from './GazePanel.js';
 import type { ExamApi } from '../exam/api.js';
 import type { Box } from './gazeEstimator.js';
 import { brightnessTip, useBrightnessState } from './desktopBrightness.js';
@@ -101,6 +102,8 @@ export function CameraIntegrityPanel({
   });
   const ended = !attempt.active;
   const live = snapshot.phase === 'live';
+  // Plug-and-play gaze: clicks, focus and typing calibrate it implicitly (no calibration step).
+  useImplicitGazeCalibration(gazeTracker, live && !paused);
   const running = snapshot.phase !== 'off';
   const readings = live && snapshot.faces !== null;
 
@@ -150,11 +153,12 @@ export function CameraIntegrityPanel({
       reporter.current?.pause();
       return;
     }
-    // Prefer the eye-gaze signal (head + iris, calibrated); fall back to head pose.
+    // Prefer the eye-gaze signal (head + iris, auto-calibrated; reads as forward while the
+    // calibration is still learning unless clearly off screen); fall back to head pose.
     const gaze = freshGaze();
     reporter.current?.sample({
       faces: snapshot.faces,
-      pose: gaze ? { yaw: gaze.yaw, pitch: gaze.pitch } : (snapshot.relative ?? snapshot.pose),
+      pose: gaze ? reporterAngles(gaze) : (snapshot.relative ?? snapshot.pose),
       phone: snapshot.phone,
     });
   }, [live, snapshot, paused]);
@@ -303,9 +307,11 @@ export function CameraIntegrityPanel({
           <p>
             <strong>
               Face direction:{' '}
-              {snapshot.faces === 1
-                ? faceDirection(snapshot.relative)
-                : 'Unavailable — one face is required'}
+              {snapshot.faces !== 1
+                ? 'Unavailable — one face is required'
+                : (snapshot.relative ?? snapshot.pose)
+                  ? faceDirection(snapshot.relative ?? snapshot.pose)
+                  : 'Unavailable'}
             </strong>
           </p>
           {snapshot.relative && (
@@ -352,19 +358,10 @@ export function CameraIntegrityPanel({
           )}
         </div>
       )}
-      {live && (
-        <button
-          type="button"
-          disabled={!readings || snapshot.faces !== 1}
-          onClick={() => controller.current?.calibrate()}
-        >
-          Calibrate face direction
-        </button>
-      )}
-      <GazePanel tracker={gazeTracker} live={live} />
+      {/* Calibration is automatic and silent: no student-facing calibration UI. */}
+      <GazePanel tracker={gazeTracker} live={live} showCalibration={gazeDebugEnabled()} />
       <p className="muted">
-        Direction is relative to your calibrated pose and camera coordinates—not eye gaze or proof
-        of cheating.
+        Direction is an on-device estimate from camera coordinates—not proof of cheating.
       </p>
     </section>
   );

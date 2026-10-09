@@ -62,35 +62,36 @@ describe('eye gaze tracker', () => {
     const late = t.push(sample(1500, { eye: null }, null))!;
     expect(late.eyeYaw).toBe(0);
   });
-  it('centre-only calibration re-zeroes gaze', () => {
-    const t = createEyeGazeTracker();
-    for (let i = 0; i < 4; i += 1) t.push(sample(i * 300, { pose: { yaw: 8, pitch: -6 } }, 0));
-    expect(t.calibrateCentreNow()!.calibration.kind).toBe('centre');
-    const g = t.push(sample(1500, { pose: { yaw: 8, pitch: -6 } }, 0))!;
-    expect(Math.abs(g.yaw)).toBeLessThan(0.5);
+  it('starts uncalibrated-but-wide: a camera-centre model with no prompt and no early flags', () => {
+    const t = createEyeGazeTracker({ screen: { width: 1440, height: 900 } });
+    const g = t.push(sample(0, { pose: { yaw: 25, pitch: -20 } }, 0))!;
+    expect(g.calibration).toBe('auto');
+    expect(g.confidence).toBe(0);
     expect(g.onScreen).toBe(true);
-    expect(g.calibration).toBe('centre');
+    expect(t.calibrationState().phase).toBe('learning');
   });
-  it('five-point capture produces a gain and marks distant gaze off screen', () => {
-    const t = createEyeGazeTracker();
+  it('learns the screen centre from clicks and re-zeroes gaze', () => {
+    const t = createEyeGazeTracker({ screen: { width: 1440, height: 900 } });
     let now = 0;
-    const capture = (yaw: number, pitch: number) => {
-      t.beginCapture();
-      for (let i = 0; i < 4; i += 1) t.push(sample((now += 300), { pose: { yaw, pitch } }, 0));
-      return t.endCapture();
-    };
-    const fit = t.applyFit({
-      centre: capture(0, 0),
-      topLeft: capture(-9, 5),
-      topRight: capture(9, 5),
-      bottomRight: capture(9, -5),
-      bottomLeft: capture(-9, -5),
-    })!;
-    expect(fit.calibration.kind).toBe('five-point');
-    expect(fit.calibration.gain.yaw).toBeCloseTo(2);
-    const far = t.push(sample((now += 300), { pose: { yaw: 20, pitch: 0 } }, 0))!;
-    expect(far.onScreen).toBe(false);
-    expect(far.sector).toBe('E');
+    for (let i = 0; i < 16; i += 1) {
+      t.push(sample((now += 300), { pose: { yaw: 8, pitch: -6 } }, 0));
+      t.observeInteraction({ kind: 'pointer', t: now + 10, point: { x: 0, y: 0 }, precise: true });
+      now += 400;
+    }
+    for (let i = 0; i < 5; i += 1) t.push(sample((now += 300), { pose: { yaw: 8, pitch: -6 } }, 0));
+    const g = t.latest()!;
+    expect(Math.abs(g.yaw)).toBeLessThan(0.5);
+    expect(Math.abs(g.pitch)).toBeLessThan(0.5);
+    expect(g.onScreen).toBe(true);
+    expect(t.calibrationState().pairs).toBe(16);
+    expect(t.calibrationState().confidence).toBeGreaterThan(0);
+  });
+  it('ignores interactions with no recent face reading and non-finite points', () => {
+    const t = createEyeGazeTracker();
+    t.observeInteraction({ kind: 'pointer', t: 100, point: { x: 0, y: 0 }, precise: true });
+    t.push(sample(5000));
+    t.observeInteraction({ kind: 'pointer', t: 5010, point: { x: NaN, y: 0 }, precise: true });
+    expect(t.calibrationState().pairs).toBe(0);
   });
   it('smooths a one-frame spike', () => {
     const t = createEyeGazeTracker();
