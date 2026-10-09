@@ -1,0 +1,28 @@
+{
+  "packageName": "@mediapipe/tasks-vision",
+  "packageVersion": "1.0.1",
+  "wasmFiles": [
+    "vision_wasm_internal.js",
+    "vision_wasm_internal.wasm",
+    "vision_wasm_module_internal.js",
+    "vision_wasm_module_internal.wasm",
+    "vision_wasm_nosimd_internal.js",
+    "vision_wasm_nosimd_internal.wasm"
+  ],
+  "models": [
+    {
+      "target": "vision/models/face_landmarker.task",
+      "url": "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task?generation=1683136941468629",
+      "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
+    },
+    {
+      "target": "vision/models/efficientdet_lite0.tflite",
+      "url": "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/latest/efficientdet_lite0.tflite?generation=1682636015897115",
+      "sha256": "0720bf247bd76e6594ea28fa9c6f7c5242be774818997dbbeffc4da460c723bb"
+    }
+  ],
+  "limits": {
+    "maxBytes": 16000000,
+    "timeoutMs": 120000
+  }
+}

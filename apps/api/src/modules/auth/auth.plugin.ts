@@ -1,0 +1,129 @@
+import { DomainError, SystemClock, type UserRole } from '@exam-anti-cheat/contracts';
+import type { DatabaseSync } from 'node:sqlite';
+
+import { loadConfig, type ApiConfig } from '../../config.js';
+import { openDatabase } from '../../db/client.js';
+import { SqliteAuthRepository, SqliteAuditSink } from './auth.repository.js';
+import { AuthRoutes } from './auth.routes.js';
+import { AuthService, type AuthenticatedPrincipal } from './auth.service.js';
+import {
+  getCookie,
+  isAllowedOrigin,
+  verifyDoubleSubmitToken,
+  verifySessionCsrfToken,
+} from './csrf.js';
+import { SecureTokenGenerator, SessionService } from './session.js';
+
+export type RequestHeaders = Readonly<Record<string, string | undefined>>;
+
+export interface AuthRequest {
+  readonly method: string;
+  readonly path: string;
+  readonly headers: RequestHeaders;
+  readonly body?: unknown;
+}
+
+export function headerValue(headers: RequestHeaders, name: string): string | undefined {
+  const wanted = name.toLowerCase();
+  const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === wanted);
+  return entry?.[1];
+}
+
+function isUnsafeMethod(method: string): boolean {
+  return method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
+}
+
+export class AuthRequestBoundary {
+  constructor(
+    private readonly authService: AuthService,
+    private readonly config: Pick<
+      ApiConfig,
+      'allowedOrigins' | 'sessionCookieName' | 'csrfCookieName' | 'csrfHeaderName'
+    >,
+  ) {}
+
+  requirePrincipal(request: AuthRequest): AuthenticatedPrincipal {
+    const sessionToken = getCookie(
+      headerValue(request.headers, 'cookie'),
+      this.config.sessionCookieName,
+    );
+    const principal = this.authService.authenticateSession(sessionToken);
+    if (principal === null) {
+      throw new DomainError('unauthorized', 'The session is invalid or expired.');
+    }
+
+    return principal;
+  }
+
+  requireRole(principal: AuthenticatedPrincipal, role: UserRole): void {
+    if (principal.user.role !== role) {
+      throw new DomainError('forbidden', 'The current role is not allowed for this operation.');
+    }
+  }
+
+  validateUnsafe(request: AuthRequest, principal?: AuthenticatedPrincipal): void {
+    const method = request.method.toUpperCase();
+    if (!isUnsafeMethod(method)) {
+      return;
+    }
+
+    const origin = headerValue(request.headers, 'origin');
+    if (!isAllowedOrigin(origin, this.config.allowedOrigins)) {
+      throw new DomainError('forbidden', 'The request origin is not allowed.');
+    }
+
+    const headerToken = headerValue(request.headers, this.config.csrfHeaderName);
+    if (principal === undefined) {
+      const cookieToken = getCookie(
+        headerValue(request.headers, 'cookie'),
+        this.config.csrfCookieName,
+      );
+      if (!verifyDoubleSubmitToken(headerToken, cookieToken)) {
+        throw new DomainError('forbidden', 'The CSRF token is invalid.');
+      }
+      return;
+    }
+
+    if (!verifySessionCsrfToken(headerToken, principal.session.csrfTokenHash)) {
+      throw new DomainError('forbidden', 'The CSRF token is invalid.');
+    }
+  }
+}
+
+export interface AuthPlugin {
+  readonly database: DatabaseSync;
+  readonly repository: SqliteAuthRepository;
+  readonly sessions: SessionService;
+  readonly service: AuthService;
+  readonly boundary: AuthRequestBoundary;
+  readonly routes: AuthRoutes;
+  close(): void;
+}
+
+export function createAuthPlugin(config: ApiConfig = loadConfig()): AuthPlugin {
+  const database = openDatabase(config.databasePath);
+  const repository = new SqliteAuthRepository(database);
+  const auditSink = new SqliteAuditSink(database);
+  const tokenGenerator = new SecureTokenGenerator();
+  const clock = new SystemClock();
+  const sessions = new SessionService(repository, clock, config.sessionTtlSeconds, tokenGenerator);
+  const service = new AuthService({
+    repository,
+    sessions,
+    clock,
+    auditSink,
+    idGenerator: tokenGenerator,
+  });
+  const boundary = new AuthRequestBoundary(service, config);
+  const routes = new AuthRoutes(service, boundary, tokenGenerator, config);
+
+  return {
+    database,
+    repository,
+    sessions,
+    service,
+    boundary,
+    routes,
+    close: () => database.close(),
+  };
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@exam-anti-cheat/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/common.ts",
+    "./exam": "./src/exam.ts"
+  }
+}

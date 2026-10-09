@@ -1,0 +1,44 @@
+{
+  "name": "@exam-anti-cheat/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "npm run build && electron dist/main.js",
+    "build": "tsc && node scripts/build-native.cjs",
+    "pack": "npm run build && electron-builder --mac"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "electron-builder": "^25.0.0",
+    "typescript": "^5.8.0",
+    "electron": "^44.4.1"
+  },
+  "build": {
+    "appId": "com.exam-anti-cheat.desktop",
+    "productName": "Exam Anti-Cheat",
+    "extraResources": [{ "from": "native-bin/app-control", "to": "app-control" }],
+    "mac": {
+      "category": "public.app-category.education",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSCameraUsageDescription": "This app requires camera access to verify your identity during exams.",
+        "NSMicrophoneUsageDescription": "This app requires microphone access to monitor the testing environment.",
+        "NSCameraUseContinuityCameraDeviceType": true
+      },
+      "identity": null
+    },
+    "directories": {
+      "output": "out"
+    }
+  },
+  "allowScripts": {
+    "electron@34.5.8": true
+  },
+  "dependencies": {}
+}

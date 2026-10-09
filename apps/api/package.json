@@ -1,0 +1,23 @@
+{
+  "name": "@exam-anti-cheat/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite-node src/start.ts",
+    "demo:seed": "vite-node src/seed-demo.ts",
+    "build": "npm run typecheck",
+    "test:e2e": "vitest run --config ../../vitest.config.ts src/server.test.ts",
+    "test": "vitest run --config ../../vitest.config.ts src",
+    "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --useUnknownInCatchVariables --forceConsistentCasingInFileNames --skipLibCheck src/*.ts src/db/*.ts src/modules/auth/*.ts src/modules/exam/*.ts"
+  },
+  "devDependencies": {
+    "vite-node": "^3.2.4"
+  },
+  "dependencies": {
+    "@tensorflow-models/hand-pose-detection": "^2.0.1",
+    "@tensorflow/tfjs-backend-wasm": "^4.22.0",
+    "@tensorflow/tfjs-core": "^4.22.0",
+    "@tensorflow/tfjs-node": "^4.22.0"
+  }
+}

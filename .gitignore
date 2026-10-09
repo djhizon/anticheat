@@ -1,0 +1,27 @@
+node_modules/
+dist/
+build/
+coverage/
+.vite/
+.cache/
+.tmp/
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+playwright-report/
+test-results/
+.DS_Store
+/apps/web/public/vision/
+
+# Large / machine-local artifacts (fetch or build locally, see README)
+/apps/api/vendor/whisper.cpp/
+/apps/api/vendor/venv/
+/apps/api/data/
+/apps/desktop/out*/
+/apps/desktop/native-bin/
+/dom.html
+/outputs/
+/work/

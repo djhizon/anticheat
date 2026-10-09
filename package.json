@@ -1,0 +1,51 @@
+{
+  "name": "exam-anti-cheat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A consent-first browser exam-integrity prototype for classroom research.",
+  "type": "module",
+  "engines": {
+    "node": ">=24.7.0",
+    "npm": ">=10.0.0"
+  },
+  "workspaces": [
+    "apps/api",
+    "apps/web",
+    "apps/desktop",
+    "packages/contracts"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:api": "npm run dev --workspace @exam-anti-cheat/api",
+    "dev:web": "npm run dev --workspace @exam-anti-cheat/web",
+    "demo:seed": "npm run demo:seed --workspace @exam-anti-cheat/api",
+    "vision:prepare": "node scripts/prepare-vision-assets.mjs",
+    "vision:verify": "node scripts/prepare-vision-assets.mjs --verify",
+    "vision:smoke": "node scripts/vision-smoke.mjs",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "tsc -p packages/contracts/tsconfig.json && npm run typecheck --workspace @exam-anti-cheat/api && tsc -p apps/api/tsconfig.json && tsc -p apps/web/tsconfig.json",
+    "test": "node --test packages/contracts/src/common.test.ts && vitest run --config vitest.config.ts packages/contracts/src/auth.test.ts packages/contracts/src/exam.test.ts apps/api/src apps/web/src apps/desktop/src scripts/lan-config.test.ts",
+    "test:api": "vitest run --config vitest.config.ts apps/api/src",
+    "test:web": "npm run test --workspace @exam-anti-cheat/web",
+    "test:e2e": "npm run test:e2e --workspace @exam-anti-cheat/api",
+    "build": "npm run build --workspace @exam-anti-cheat/api && npm run build --workspace @exam-anti-cheat/web",
+    "validate": "npm run format:check && npm run lint && npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@eslint/js": "^9.22.0",
+    "@playwright/test": "^1.51.1",
+    "@types/node": "^22.13.4",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^9.22.0",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.26.0",
+    "vite": "^6.1.0",
+    "vitest": "^3.0.7"
+  }
+}

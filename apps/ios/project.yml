@@ -1,0 +1,39 @@
+name: ExamCompanion
+options:
+  bundleIdPrefix: com.djhizon
+  deploymentTarget:
+    iOS: '16.0'
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    TARGETED_DEVICE_FAMILY: '1'
+    SUPPORTS_MACCATALYST: NO
+    CODE_SIGN_STYLE: Automatic
+    PRODUCT_BUNDLE_IDENTIFIER: com.djhizon.examcompanion
+    MARKETING_VERSION: '0.1.0'
+    CURRENT_PROJECT_VERSION: '1'
+targets:
+  ExamCompanion:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Exam Companion
+        UILaunchScreen: {}
+        UIApplicationSupportsIndirectInputEvents: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSLocalNetworkUsageDescription: Connect to your exam laptop on Wi-Fi to send foreground-only presence checks.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        CFBundleURLTypes:
+          - CFBundleURLName: com.djhizon.examcompanion.pairing
+            CFBundleURLSchemes: [examcompanion]
+schemes:
+  ExamCompanion:
+    build:
+      targets:
+        ExamCompanion: all
+    run:
+      config: Debug
