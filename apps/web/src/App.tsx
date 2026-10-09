@@ -5,6 +5,8 @@ import type {
   ExamDeliveryProjection,
 } from '@exam-anti-cheat/contracts/exam';
 
+import { createInstructorApi } from './features/admin/api.js';
+import { SimilarityDashboard } from './features/admin/SimilarityDashboard.js';
 import { AuthProvider, useAuth } from './features/auth/AuthProvider.js';
 import { LoginPage } from './features/auth/LoginPage.js';
 import { createExamApi, ExamApiError, type ExamApi } from './features/exam/api.js';
@@ -42,16 +44,7 @@ function AuthenticatedApp(): React.ReactElement {
     return <LoginPage />;
   }
   if (user.role !== 'student') {
-    return (
-      <main className="panel">
-        <p className="eyebrow">Instructor account</p>
-        <h1>Student delivery is not available for this account.</h1>
-        <p className="muted">Use a student account to open an assigned exam.</p>
-        <button onClick={() => void logout()} type="button">
-          Sign out
-        </button>
-      </main>
-    );
+    return <InstructorWorkspace email={user.email} getCsrfToken={getCsrfToken} onLogout={logout} />;
   }
 
   return (
@@ -61,6 +54,36 @@ function AuthenticatedApp(): React.ReactElement {
       onLogout={logout}
       onSessionExpired={refresh}
     />
+  );
+}
+
+function InstructorWorkspace({
+  email,
+  getCsrfToken,
+  onLogout,
+}: {
+  readonly email: string;
+  readonly getCsrfToken: () => Promise<string>;
+  readonly onLogout: () => Promise<void>;
+}): React.ReactElement {
+  const instructorApi = useMemo(() => createInstructorApi(getCsrfToken), [getCsrfToken]);
+  return (
+    <main className="workspace">
+      <header className="topbar">
+        <div>
+          <p className="eyebrow">Exam Anti-Cheat</p>
+          <p className="signed-in">Signed in as {email}</p>
+        </div>
+        <button className="secondary-button" onClick={() => void onLogout()} type="button">
+          Sign out
+        </button>
+      </header>
+      <section className="hero">
+        <p className="eyebrow">Instructor workspace</p>
+        <h1>Integrity review</h1>
+      </section>
+      <SimilarityDashboard api={instructorApi} />
+    </main>
   );
 }
 

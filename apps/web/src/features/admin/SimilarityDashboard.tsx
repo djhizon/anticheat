@@ -1,62 +1,107 @@
 import { useEffect, useState } from 'react';
-import type { SimilarityReportResponse } from '@exam-anti-cheat/contracts/exam';
+import type { InstructorExamVersion, SimilarityRunResponse } from '@exam-anti-cheat/contracts/exam';
 
-export function SimilarityDashboard({ examId }: { readonly examId: string }) {
-  const [reports, setReports] = useState<SimilarityReportResponse[]>([]);
-  const [loading, setLoading] = useState(true);
+import type { InstructorApi } from './api.js';
 
-  // Note: in a real app, this would hit an actual endpoint like `/admin/exams/:id/similarity`
-  // that runs the k-means clustering or returns pre-computed pairs.
-  // We'll simulate fetching for the sake of the dashboard scaffold.
+/**
+ * Instructor review of cross-student answer similarity. Answers are embedded
+ * with Gemini and compared pairwise; close pairs are flagged for a human to
+ * read side by side — never an automatic penalty.
+ */
+export function SimilarityDashboard({ api }: { readonly api: InstructorApi }) {
+  const [versions, setVersions] = useState<readonly InstructorExamVersion[] | null>(null);
+  const [selection, setSelection] = useState('');
+  const [result, setResult] = useState<SimilarityRunResponse | null>(null);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
-    // Fake fetch
-    setTimeout(() => {
-      setReports([
-        {
-          questionId: 'q-123',
-          threshold: 0.9,
-          generatedAt: new Date().toISOString(),
-          pairs: [
-            { studentAId: 'user-001', studentBId: 'user-004', score: 0.95, flagged: true },
-            { studentAId: 'user-007', studentBId: 'user-012', score: 0.92, flagged: true },
-          ],
-        },
-      ]);
-      setLoading(false);
-    }, 1000);
-  }, [examId]);
+    let active = true;
+    api
+      .listVersions()
+      .then((loaded) => {
+        if (!active) return;
+        setVersions(loaded);
+        const first = loaded[0];
+        const firstQuestion = first?.questions[0];
+        if (first && firstQuestion) setSelection(`${first.id}|${firstQuestion.id}`);
+      })
+      .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : 'Could not load exams.'); });
+    return () => { active = false; };
+  }, [api]);
 
-  if (loading) return <div className="admin-loading">Running Gemini K-Means Clustering...</div>;
+  async function run() {
+    const [versionId, questionId] = selection.split('|');
+    if (!versionId || !questionId) return;
+    setRunning(true);
+    setError(null);
+    setResult(null);
+    try {
+      setResult(await api.runSimilarity(versionId, questionId));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The similarity check failed.');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const label = (id: string) => result?.students[id] ?? id;
+  const flagged = result?.report.pairs.filter((pair) => pair.flagged) ?? [];
 
   return (
-    <div className="admin-dashboard">
-      <h2>🤝 Cross-Student Similarity Clusters</h2>
-      <p>Using Gemini Embeddings to cluster suspiciously similar subjective answers.</p>
-      
-      {reports.length === 0 ? (
-        <p>No collusion detected.</p>
-      ) : (
-        reports.map((report) => (
-          <div key={report.questionId} className="similarity-card">
-            <h3>Question {report.questionId} (Threshold: {report.threshold})</h3>
-            <span className="similarity-meta">Generated: {new Date(report.generatedAt).toLocaleString()}</span>
-            
+    <section className="admin-dashboard" aria-labelledby="similarity-title">
+      <h2 id="similarity-title">🤝 Cross-student similarity</h2>
+      <p className="muted">
+        Compares every student&apos;s saved free-text answer to the same question using Gemini embeddings. Flagged pairs
+        are leads for review, not verdicts.
+      </p>
+
+      {versions === null && error === null && <p role="status">Loading exams…</p>}
+      {versions !== null && versions.length === 0 && <p>No published exams with free-text questions yet.</p>}
+      {versions !== null && versions.length > 0 && (
+        <div className="similarity-controls">
+          <label htmlFor="similarity-question">Question</label>
+          <select id="similarity-question" value={selection} onChange={(event) => setSelection(event.target.value)}>
+            {versions.map((version) => (
+              <optgroup key={version.id} label={`${version.title} (v${version.versionNumber})`}>
+                {version.questions.map((question, index) => (
+                  <option key={question.id} value={`${version.id}|${question.id}`}>
+                    Q{index + 1}: {question.prompt.length > 80 ? `${question.prompt.slice(0, 80)}…` : question.prompt}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <button className="submit-button" type="button" disabled={running || selection === ''} onClick={() => void run()}>
+            {running ? 'Comparing answers…' : 'Run similarity check'}
+          </button>
+        </div>
+      )}
+
+      {error !== null && <p role="alert" className="similarity-error">{error}</p>}
+
+      {result !== null && (
+        <div className="similarity-card" role="status">
+          <p className="similarity-meta">
+            {result.report.pairs.length} pair{result.report.pairs.length === 1 ? '' : 's'} compared · threshold{' '}
+            {Math.round(result.report.threshold * 100)}% · {flagged.length} flagged ·{' '}
+            {new Date(result.report.generatedAt).toLocaleString()}
+          </p>
+          {result.report.pairs.length === 0 ? (
+            <p>At least two students need saved answers to compare.</p>
+          ) : (
             <ul className="similarity-list">
-              {report.pairs.map((pair, idx) => (
-                <li key={idx} className={pair.flagged ? 'flagged-pair' : ''}>
-                  <div className="pair-ids">
-                    Student A (ID: {pair.studentAId}) ↔ Student B (ID: {pair.studentBId})
-                  </div>
-                  <div className="pair-score">
-                    Similarity Score: {(pair.score * 100).toFixed(1)}%
-                  </div>
-                  {pair.flagged && <span className="collusion-warning">⚠️ Highly Suspicious</span>}
+              {result.report.pairs.map((pair) => (
+                <li key={`${pair.studentAId}-${pair.studentBId}`} className={pair.flagged ? 'flagged-pair' : ''}>
+                  <span className="pair-ids">{label(pair.studentAId)} ↔ {label(pair.studentBId)}</span>
+                  <span className="pair-score">{(pair.score * 100).toFixed(1)}%</span>
+                  {pair.flagged && <span className="collusion-warning">⚠️ Review</span>}
                 </li>
               ))}
             </ul>
-          </div>
-        ))
+          )}
+        </div>
       )}
-    </div>
+    </section>
   );
 }

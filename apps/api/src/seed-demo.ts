@@ -9,6 +9,8 @@ import { generateExamQuestions } from './modules/integrity/questionGenerator.js'
 
 const demoEmail = process.env.DEMO_STUDENT_EMAIL ?? 'demo.student@example.test';
 const demoPassword = process.env.DEMO_STUDENT_PASSWORD ?? 'Demo exam password 2026!';
+const instructorEmail = process.env.DEMO_INSTRUCTOR_EMAIL ?? 'demo.instructor@example.test';
+const instructorPassword = process.env.DEMO_INSTRUCTOR_PASSWORD ?? 'Demo instructor password 2026!';
 const demoSlug = 'pack8-ai-exam';
 
 function readString(value: unknown, message: string): string {
@@ -64,6 +66,12 @@ async function seedDemo(): Promise<void> {
     if (student === null || student.role !== 'student') {
       throw new Error('The demo student account could not be prepared.');
     }
+
+    // ── Ensure demo instructor account exists (registration only creates students) ──
+    if (auth.repository.findUserByEmail(instructorEmail) === null) {
+      await auth.service.register({ email: instructorEmail, password: instructorPassword });
+    }
+    auth.database.prepare(`UPDATE users SET role = 'instructor' WHERE email = ?`).run(instructorEmail);
 
     const exam = createExamPlugin(auth.database, auth.boundary, config);
 
@@ -135,6 +143,7 @@ async function seedDemo(): Promise<void> {
     console.log('──────────────────────────────────────────');
     console.log(`✅  Demo student:  ${demoEmail}`);
     console.log(`✅  Demo password: ${demoPassword}`);
+    console.log(`✅  Instructor:    ${instructorEmail} / ${instructorPassword}`);
     console.log(`✅  Exam:          🤖 AI-Generated Exam — Pack 8`);
     console.log(`✅  Questions:     ${questions.length}`);
     console.log('──────────────────────────────────────────');
