@@ -271,6 +271,8 @@ export interface ApiApplication {
 export interface ApiServerOptions {
   /** Directory of the built web app (apps/web/dist) to serve from the same port. */
   readonly webRoot?: string;
+  /** When set, requests whose Host header fails this check get 421 (DNS-rebinding guard). */
+  readonly isAllowedHost?: (host: string | undefined) => boolean;
 }
 
 export function createApiServer(
@@ -282,6 +284,13 @@ export function createApiServer(
   const auth = createAuthPlugin(config);
   const exam = createExamPlugin(auth.database, auth.boundary, config);
   const server = createHttpServer((request, response) => {
+    if (options.isAllowedHost !== undefined && !options.isAllowedHost(request.headers.host)) {
+      response.statusCode = 421;
+      response.setHeader('content-type', 'text/plain; charset=utf-8');
+      response.setHeader('connection', 'close');
+      response.end('Misdirected request.');
+      return;
+    }
     void handleRequest(request, response, application, staticWeb).catch((error: unknown) => {
       sendResponse(response, problemResponse(request, config, error));
     });

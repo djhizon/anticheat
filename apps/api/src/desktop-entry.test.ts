@@ -5,7 +5,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createWebServer, isAllowedHost, shouldSeedDemo } from './desktop-entry.js';
+import {
+  createWebServer,
+  isAllowedApiHost,
+  isAllowedHost,
+  parentHasDied,
+  shouldSeedDemo,
+} from './desktop-entry.js';
+import { loadConfig } from './config.js';
+import { createApiServer } from './server.js';
 
 const servers: Server[] = [];
 const directories: string[] = [];
@@ -98,5 +106,60 @@ describe('local proxy', () => {
     const webPort = await setup(apiPort, 100);
     const result = await get(webPort, '/exam/slow', 'localhost:5173');
     expect(result.status).toBe(504);
+  });
+});
+
+describe('isAllowedApiHost', () => {
+  it('allows loopback API and web hosts only', () => {
+    for (const host of ['127.0.0.1:3000', 'localhost:3000', 'LOCALHOST:3000', '127.0.0.1:5173'])
+      expect(isAllowedApiHost(host, 3000, 5173)).toBe(true);
+    for (const host of [undefined, '', 'evil.test', 'evil.test:3000', '127.0.0.1', '127.0.0.1:80'])
+      expect(isAllowedApiHost(host, 3000, 5173)).toBe(false);
+  });
+
+  it('is enforced by the API server before any route runs', async () => {
+    const app = createApiServer(
+      loadConfig({ NODE_ENV: 'test', DATABASE_PATH: ':memory:', COOKIE_SECURE: 'false' }),
+      { isAllowedHost: (host) => isAllowedApiHost(host, 3000, 5173) },
+    );
+    const address = await app.start(0);
+    try {
+      expect((await get(address.port, '/auth/csrf', 'evil.test:3000')).status).toBe(421);
+      expect((await get(address.port, '/auth/csrf', 'evil.test')).status).toBe(421);
+      expect((await get(address.port, '/auth/csrf', '127.0.0.1:3000')).status).not.toBe(421);
+    } finally {
+      await app.stop();
+    }
+  });
+});
+
+describe('web server marker', () => {
+  it('tags responses so a stale copy of this server can be recognised', async () => {
+    const webRoot = mkdtempSync(join(tmpdir(), 'eac-web-'));
+    directories.push(webRoot);
+    const port = await listen(createWebServer(webRoot, 1, 5173, 100));
+    const status = await new Promise<string | undefined>((resolve, reject) => {
+      const req = request(
+        { host: '127.0.0.1', port, path: '/', headers: { host: 'evil' } },
+        (r) => {
+          r.resume();
+          resolve(r.headers['x-eac-server'] as string | undefined);
+        },
+      );
+      req.on('error', reject);
+      req.end();
+    });
+    expect(status).toBe('desktop');
+  });
+});
+
+describe('parentHasDied', () => {
+  it('detects reparenting or a vanished parent, and ignores unwatchable parents', () => {
+    expect(parentHasDied({ initialPpid: 500, currentPpid: 500, parentAlive: true })).toBe(false);
+    expect(parentHasDied({ initialPpid: 500, currentPpid: 1, parentAlive: true })).toBe(true);
+    expect(parentHasDied({ initialPpid: 500, currentPpid: 500, parentAlive: false })).toBe(true);
+    expect(parentHasDied({ initialPpid: 500, currentPpid: 777, parentAlive: true })).toBe(true);
+    expect(parentHasDied({ initialPpid: 1, currentPpid: 1, parentAlive: false })).toBe(false);
+    expect(parentHasDied({ initialPpid: 0, currentPpid: 0, parentAlive: false })).toBe(false);
   });
 });

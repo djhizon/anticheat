@@ -8,9 +8,12 @@ import {
   VISION_WORKER_CSP,
 } from '../../web/src/features/integrity/visionPolicy.js';
 
-/** Keep in sync with `documentPolicy` in apps/web/vite.config.ts. */
+/**
+ * Policy of the built app (no inline scripts: the Vite build emits none). The Vite dev server in
+ * apps/web/vite.config.ts keeps 'unsafe-inline' because React Refresh injects an inline preamble.
+ */
 export const DOCUMENT_CSP =
-  "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'";
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'";
 
 const MIME_TYPES: Readonly<Record<string, string>> = {
   '.html': 'text/html; charset=utf-8',

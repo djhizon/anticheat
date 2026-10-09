@@ -28,6 +28,7 @@ vi.mock('fs', () => ({
 vi.mock('./settings.js', () => ({
   readRunMode: (_dir: string, fallback: string) => fallback,
   readJudgeBuild: () => false,
+  persistRunMode: (judge: boolean) => judge,
   writeRunMode: mocks.writeRunMode,
 }));
 vi.mock('electron', () => ({
@@ -54,8 +55,10 @@ vi.mock('electron', () => ({
       this.destroyed = true;
       this.emit('closed');
     }
-    constructor() {
+    options: unknown;
+    constructor(options?: unknown) {
       super();
+      this.options = options;
       mocks.windows.push(this);
     }
   },
@@ -83,7 +86,13 @@ vi.mock('electron', () => ({
 }));
 
 import { screen } from 'electron';
-import { createWindow, isAppUrl, reportStartupFailure, switchRunMode } from './main.js';
+import {
+  createWindow,
+  isAppUrl,
+  reportStartupFailure,
+  shouldUseDevServers,
+  switchRunMode,
+} from './main.js';
 const flush = async () => {
   for (let i = 0; i < 8; i++) await Promise.resolve();
 };
@@ -310,6 +319,41 @@ describe('native window recovery', () => {
       expect(check(webContents, 'geolocation', 'http://127.0.0.1:5173')).toBe(false);
     });
   });
+  describe('dev-server guard', () => {
+    it('honours the flag and env only when not packaged', () => {
+      expect(shouldUseDevServers(false, ['--use-dev-servers'], {})).toBe(true);
+      expect(shouldUseDevServers(false, [], { EAC_USE_DEV_SERVERS: '1' })).toBe(true);
+      expect(shouldUseDevServers(false, [], {})).toBe(false);
+      expect(shouldUseDevServers(true, ['--use-dev-servers'], {})).toBe(false);
+      expect(shouldUseDevServers(true, [], { EAC_USE_DEV_SERVERS: '1' })).toBe(false);
+    });
+  });
+  describe('window hardening', () => {
+    it('sets sandbox/no webview and blocks every non-app navigation kind', async () => {
+      await createWindow();
+      const win = mocks.windows.at(-1);
+      expect(win.options.webPreferences).toMatchObject({
+        sandbox: true,
+        webviewTag: false,
+        contextIsolation: true,
+        nodeIntegration: false,
+      });
+      for (const name of ['will-navigate', 'will-redirect', 'will-frame-navigate']) {
+        const blocked = { preventDefault: vi.fn() };
+        win.webContents.emit(name, blocked, 'https://evil.test/');
+        const blockedDetails = { preventDefault: vi.fn(), url: 'https://evil.test/' };
+        win.webContents.emit(name, blockedDetails);
+        expect(blockedDetails.preventDefault, name).toHaveBeenCalled();
+        expect(blocked.preventDefault, name).toHaveBeenCalled();
+        const samePathOther = { preventDefault: vi.fn() };
+        win.webContents.emit(name, samePathOther, 'http://127.0.0.1:5173/other');
+        expect(samePathOther.preventDefault, name).toHaveBeenCalled();
+        const allowed = { preventDefault: vi.fn() };
+        win.webContents.emit(name, allowed, 'http://127.0.0.1:5173/?a=1');
+        expect(allowed.preventDefault, name).not.toHaveBeenCalled();
+      }
+    });
+  });
   describe('ipc trust', () => {
     async function trusted() {
       await createWindow();
@@ -448,7 +492,7 @@ describe('native window recovery', () => {
         'Untrusted',
       );
     });
-    it('confirms both directions, persists only after confirmation, and demo never closes apps', async () => {
+    it('confirms both directions, does not persist in non-judge builds, and demo never closes apps', async () => {
       const event = await trustedEvent();
       // Strict -> Demo, cancelled.
       mocks.showMessageBox.mockResolvedValueOnce({ response: 0 });
@@ -465,7 +509,8 @@ describe('native window recovery', () => {
       await switchRunMode('demo');
       expect(mocks.showMessageBox).toHaveBeenCalledTimes(2);
       expect(await mocks.handlers.get('get-run-mode')!(event)).toBe('demo');
-      expect(mocks.writeRunMode).toHaveBeenLastCalledWith('/tmp', 'demo');
+      // Non-judge build: the in-app Demo choice is session-only and never written to disk.
+      expect(mocks.writeRunMode).not.toHaveBeenCalled();
       const refused = (await mocks.handlers.get('close-app-target')!(event, {
         id: 'x',
         mode: 'quit',
@@ -481,7 +526,7 @@ describe('native window recovery', () => {
       expect(await mocks.handlers.get('get-run-mode')!(event)).toBe('demo');
       await switchRunMode('strict');
       expect(await mocks.handlers.get('get-run-mode')!(event)).toBe('strict');
-      expect(mocks.writeRunMode).toHaveBeenLastCalledWith('/tmp', 'strict');
+      expect(mocks.writeRunMode).not.toHaveBeenCalled();
       const result = (await mocks.handlers.get('close-app-target')!(event, {
         id: 'unknown',
         mode: 'quit',

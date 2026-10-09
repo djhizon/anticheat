@@ -14,12 +14,24 @@ export function readJudgeBuild(appPath: string, isPackaged: boolean): boolean {
   }
 }
 
-export function readRunMode(dir: string, fallback: RunMode): RunMode {
+/**
+ * A settings file is user-writable, so it may only ever change the mode of the judge build (whose
+ * default is Demo anyway). Every other build is Strict at each start: a hand-edited
+ * `{"mode":"demo"}` must not silently disable the exam checks. An in-app switch to Demo in such a
+ * build lasts for that session only (see `persistRunMode`).
+ */
+export function readRunMode(dir: string, fallback: RunMode, judgeBuild = false): RunMode {
+  if (!judgeBuild) return 'strict';
   try {
     return parseRunMode(readFileSync(path.join(dir, SETTINGS_FILE), 'utf8'), fallback);
   } catch {
     return fallback;
   }
+}
+
+/** Only the judge build persists the chosen mode; other builds start Strict every time. */
+export function persistRunMode(judgeBuild: boolean): boolean {
+  return judgeBuild;
 }
 
 /** Atomic write: temp file (0600) in the same directory, then rename over the target. */

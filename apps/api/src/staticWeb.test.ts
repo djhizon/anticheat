@@ -48,6 +48,13 @@ describe('static web handler', () => {
     expect(res.headers.get('cache-control')).toBe('no-cache');
   });
 
+  it('document CSP forbids inline scripts and eval', () => {
+    const script = /script-src ([^;]*)/u.exec(DOCUMENT_CSP)?.[1] ?? '';
+    expect(script).toBe("'self'");
+    expect(DOCUMENT_CSP).not.toContain('unsafe-eval');
+    expect(DOCUMENT_CSP).toContain("object-src 'none'");
+  });
+
   it('falls back to index.html for SPA routes such as /account/confirm', async () => {
     const res = await fetch(`${base}/account/confirm?token=1`);
     expect(res.status).toBe(200);

@@ -21,7 +21,7 @@ import { classifyDisplays, detectVirtualMachine } from './environment';
 import { defaultRunMode, mayCloseApps, planModeSwitch, type RunMode } from './mode';
 import { createLockdown, type LockdownBrowserWindow } from './lockdownWindow';
 import { captureScreenSnapshot } from './screenSnapshot';
-import { readJudgeBuild, readRunMode, writeRunMode } from './settings';
+import { persistRunMode, readJudgeBuild, readRunMode, writeRunMode } from './settings';
 import {
   checkCanConnect,
   checkPortFree,
@@ -69,8 +69,16 @@ const lockdown = createLockdown({
 });
 
 // `npm run dev` keeps using the Vite + API dev servers; otherwise the bundled server is started.
-const useDevServers =
-  process.argv.includes('--use-dev-servers') || process.env.EAC_USE_DEV_SERVERS === '1';
+/** Dev-server hooks (flag/env) are honoured only by unpackaged builds. */
+export function shouldUseDevServers(
+  isPackaged: boolean,
+  argv: readonly string[],
+  env: NodeJS.ProcessEnv,
+): boolean {
+  return !isPackaged && (argv.includes('--use-dev-servers') || env.EAC_USE_DEV_SERVERS === '1');
+}
+
+const useDevServers = shouldUseDevServers(app.isPackaged, process.argv, process.env);
 
 /** Same origin and path as the app page; query/hash differences (e.g. SPA state) are tolerated. */
 export function isAppUrl(url: unknown): boolean {
@@ -264,10 +272,12 @@ export async function switchRunMode(target: RunMode): Promise<void> {
     if (response.response !== 1) return;
   }
   runMode = target;
-  try {
-    writeRunMode(app.getPath('userData'), runMode);
-  } catch {
-    diagnostic('settings-write-failed');
+  if (persistRunMode(judgeBuild)) {
+    try {
+      writeRunMode(app.getPath('userData'), runMode);
+    } catch {
+      diagnostic('settings-write-failed');
+    }
   }
   buildAppMenu();
   // Reload so the pre-flight check runs again under the new mode.
@@ -338,6 +348,8 @@ export async function createWindow(): Promise<void> {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      webviewTag: false,
     },
     title: 'Exam Anti-Cheat',
   });
@@ -349,11 +361,16 @@ export async function createWindow(): Promise<void> {
   // Never open extra windows (target=_blank, window.open); they would escape the exam shell.
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
-  mainWindow.webContents.on('will-navigate', (event, url) => {
-    if (new URL(url).origin !== new URL(WEB_URL).origin) {
-      event.preventDefault();
-    }
-  });
+  // Only the app page may be navigated to, by the main frame or any subframe, including redirects.
+  const guardNavigation = (
+    event: { preventDefault(): void; url?: string },
+    legacyUrl?: string,
+  ): void => {
+    if (!isAppUrl(event.url ?? legacyUrl)) event.preventDefault();
+  };
+  mainWindow.webContents.on('will-navigate', guardNavigation);
+  mainWindow.webContents.on('will-redirect', guardNavigation);
+  mainWindow.webContents.on('will-frame-navigate', guardNavigation);
 
   buildAppMenu();
 
@@ -612,7 +629,8 @@ async function startLocalServer(): Promise<boolean> {
         stdio: 'pipe',
         serviceName: 'Exam Anti-Cheat server',
       }),
-    forkNode: (entry, options) => nodeChildProcess(entry, options),
+    // The Electron fuses disable ELECTRON_RUN_AS_NODE in packaged builds: utility process only.
+    ...(app.isPackaged ? {} : { forkNode: (entry, options) => nodeChildProcess(entry, options) }),
     isPortFree: checkPortFree,
     canConnect: checkCanConnect,
     showError: async (title, message) => {
@@ -629,7 +647,7 @@ export async function startApp(): Promise<void> {
   judgeBuild =
     readJudgeBuild(app.getAppPath(), app.isPackaged) ||
     (!app.isPackaged && process.env.EAC_TEST_JUDGE_BUILD === '1');
-  runMode = readRunMode(app.getPath('userData'), defaultRunMode(judgeBuild));
+  runMode = readRunMode(app.getPath('userData'), defaultRunMode(judgeBuild), judgeBuild);
   if (!(await startLocalServer())) {
     app.quit();
     return;

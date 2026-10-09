@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
+import { request as httpRequest } from 'http';
 import * as net from 'net';
 import * as path from 'path';
 
@@ -46,6 +47,8 @@ export interface RuntimeDeps {
   forkNode?(entry: string, options: { cwd: string; env: NodeJS.ProcessEnv }): ServerProcess;
   isPortFree(port: number): Promise<boolean>;
   canConnect(port: number): Promise<boolean>;
+  /** True when `port` is held by a (stale) copy of this app's own server. Defaults to an HTTP probe. */
+  isOurServer?(port: number): Promise<boolean>;
   showError(title: string, message: string): Promise<void> | void;
   log(line: string): void;
   sleep?(ms: number): Promise<void>;
@@ -95,6 +98,9 @@ export function buildServerEnv(
   const env: NodeJS.ProcessEnv = { ...base };
   delete env.NODE_ENV;
   delete env.ELECTRON_RUN_AS_NODE;
+  delete env.NODE_OPTIONS;
+  // The server exits by itself if this Electron process dies (see desktop-entry.ts).
+  env.EAC_EXIT_WITH_PARENT = '1';
   // Never inherited: only the build flag decides whether demo accounts are seeded.
   delete env.EAC_SEED_DEMO;
   if (deps.judgeBuild === true) env.EAC_SEED_DEMO = '1';
@@ -165,6 +171,22 @@ export function checkCanConnect(port: number): Promise<boolean> {
   });
 }
 
+/** The desktop server tags every web response with `x-eac-server: desktop`. */
+export function probeOurServer(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = httpRequest(
+      { host: '127.0.0.1', port, path: '/', method: 'HEAD', timeout: 1000 },
+      (response) => {
+        response.resume();
+        resolve(response.headers['x-eac-server'] === 'desktop');
+      },
+    );
+    req.on('timeout', () => req.destroy());
+    req.on('error', () => resolve(false));
+    req.end();
+  });
+}
+
 const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -197,6 +219,16 @@ export function nodeChildProcess(
 export async function startRuntime(deps: RuntimeDeps): Promise<RuntimeHandle | null> {
   for (const port of [API_PORT, WEB_PORT]) {
     if (!(await deps.isPortFree(port))) {
+      // The API port (3000) does not carry the marker; the web port does and both belong together.
+      const stale = await (deps.isOurServer ?? probeOurServer)(WEB_PORT).catch(() => false);
+      if (stale) {
+        deps.log(`Port ${port} is held by a stale Exam Anti-Cheat server.`);
+        await deps.showError(
+          'A previous Exam Anti-Cheat server is still running',
+          `A server from an earlier run of Exam Anti-Cheat (for example after a crash) is still using port ${port} on 127.0.0.1. Quit "Exam Anti-Cheat" in Activity Monitor (or restart your Mac) and open the app again.`,
+        );
+        return null;
+      }
       await deps.showError(
         `Port ${port} is already in use`,
         `Exam Anti-Cheat needs port ${port} on 127.0.0.1, but another program is using it. Close that program (for example a development server) and open the app again.`,
@@ -242,7 +274,10 @@ export async function startRuntime(deps: RuntimeDeps): Promise<RuntimeHandle | n
     return 'timeout';
   };
 
-  let mode: 'utility' | 'node' = process.env.EAC_SERVER_FALLBACK === '1' ? 'node' : 'utility';
+  // The Node-mode fallback needs ELECTRON_RUN_AS_NODE, which the packaged app's fuses disable;
+  // packaged builds therefore pass no `forkNode` and always use the utility process.
+  let mode: 'utility' | 'node' =
+    deps.forkNode !== undefined && process.env.EAC_SERVER_FALLBACK === '1' ? 'node' : 'utility';
   let started = launch(mode);
   let outcome = await waitReady(started.exited);
   if (outcome === 'exited' && mode === 'utility' && deps.forkNode !== undefined) {

@@ -16,10 +16,11 @@
     "pack": "npm run build && npm run pack:builder"
   },
   "devDependencies": {
+    "@electron/fuses": "^1.8.0",
     "@types/node": "^22.0.0",
+    "electron": "^44.4.1",
     "electron-builder": "^25.0.0",
-    "typescript": "^5.8.0",
-    "electron": "^44.4.1"
+    "typescript": "^5.8.0"
   },
   "build": {
     "appId": "com.exam-anti-cheat.desktop",
@@ -65,7 +66,7 @@
           ]
         }
       ],
-      "hardenedRuntime": false,
+      "hardenedRuntime": true,
       "entitlements": "assets/entitlements.mac.plist",
       "extendInfo": {
         "NSCameraUsageDescription": "This app requires camera access to verify your identity during exams.",
@@ -117,6 +118,5 @@
   },
   "allowScripts": {
     "electron@44.4.1": true
-  },
-  "dependencies": {}
+  }
 }

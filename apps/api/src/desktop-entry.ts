@@ -62,6 +62,50 @@ export function isAllowedHost(host: string | undefined, webPort: number): boolea
     : value === `127.0.0.1:${webPort}` || value === `localhost:${webPort}`;
 }
 
+/** The API port accepts its own loopback hosts plus the web port's (the proxy forwards Host as-is). */
+export function isAllowedApiHost(
+  host: string | undefined,
+  apiPort: number,
+  webPort: number,
+): boolean {
+  if (host === undefined) return false;
+  const value = host.toLowerCase();
+  return (
+    value === `127.0.0.1:${apiPort}` ||
+    value === `localhost:${apiPort}` ||
+    isAllowedHost(value, webPort)
+  );
+}
+
+/** Marker header so the Electron shell can tell a stale copy of this server from another program. */
+export const SERVER_MARKER_HEADER = 'x-eac-server';
+export const SERVER_MARKER_VALUE = 'desktop';
+
+/** How often the server checks that the Electron process that started it is still alive. */
+export const PARENT_POLL_MS = 2000;
+
+/**
+ * True when the process that started this server is gone: it was reparented (ppid changed or
+ * became 1/launchd) or the original parent no longer exists. Pure so it can be unit tested.
+ */
+export function parentHasDied(state: {
+  readonly initialPpid: number;
+  readonly currentPpid: number;
+  readonly parentAlive: boolean;
+}): boolean {
+  if (state.initialPpid <= 1) return false; // Not started by a parent we can watch.
+  return state.currentPpid !== state.initialPpid || !state.parentAlive;
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
 function tooLarge(response: ServerResponse): void {
   if (response.headersSent) return;
   response.statusCode = 413;
@@ -129,6 +173,7 @@ export function createWebServer(
 ): Server {
   const staticWeb = createStaticWebHandler(webRoot);
   return createServer((request, response) => {
+    response.setHeader(SERVER_MARKER_HEADER, SERVER_MARKER_VALUE);
     if (!isAllowedHost(request.headers.host, webPort)) {
       response.statusCode = 421;
       response.setHeader('content-type', 'text/plain; charset=utf-8');
@@ -185,7 +230,9 @@ export async function startDesktopServer(options: DesktopServerOptions): Promise
   env.PORT = String(apiPort);
   const dataDir = dirname(env.DATABASE_PATH);
 
-  const application = createApiServer(loadConfig(env));
+  const application = createApiServer(loadConfig(env), {
+    isAllowedHost: (host) => isAllowedApiHost(host, apiPort, webPort),
+  });
   const web = createWebServer(resolve(webRoot), apiPort, webPort);
   try {
     await application.start(apiPort, '127.0.0.1');
@@ -193,6 +240,12 @@ export async function startDesktopServer(options: DesktopServerOptions): Promise
   } catch (error) {
     await close(web);
     await application.stop().catch(() => undefined);
+    if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+      throw new Error(
+        `Port ${String(apiPort)} or ${String(webPort)} on 127.0.0.1 is already in use (possibly a stale copy of this server left behind by a crash).`,
+        { cause: error },
+      );
+    }
     throw error;
   }
   // Only the judge build seeds demo/instructor accounts (flag set by the Electron runtime).
@@ -230,6 +283,7 @@ if (typeof __DESKTOP_BUNDLE__ !== 'undefined' && __DESKTOP_BUNDLE__) {
   const shutdown = (): void => {
     if (stopping) return;
     stopping = true;
+    setTimeout(() => process.exit(0), 5000).unref(); // Never linger if a graceful stop hangs.
     void (server?.stop() ?? Promise.resolve()).finally(() => process.exit(0));
   };
   process.once('SIGINT', shutdown);
@@ -242,6 +296,22 @@ if (typeof __DESKTOP_BUNDLE__ !== 'undefined' && __DESKTOP_BUNDLE__) {
   parentPort?.on('message', (event) => {
     if (event.data === 'shutdown') shutdown();
   });
+  // If the Electron main process crashes, nothing else would stop this server (it would hold
+  // ports 3000/5173 and block the next launch), so exit when the parent goes away.
+  if (process.env.EAC_EXIT_WITH_PARENT === '1') {
+    const initialPpid = process.ppid;
+    const timer = setInterval(() => {
+      if (
+        parentHasDied({
+          initialPpid,
+          currentPpid: process.ppid,
+          parentAlive: pidAlive(initialPpid),
+        })
+      )
+        shutdown();
+    }, PARENT_POLL_MS);
+    timer.unref();
+  }
   startDesktopServer({ env: process.env, cwd: process.cwd() }).then(
     (started) => {
       server = started;

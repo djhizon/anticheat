@@ -105,6 +105,17 @@ describe('runtime paths and environment', () => {
     expect(env.ELECTRON_RUN_AS_NODE).toBeUndefined();
   });
 
+  it('strips NODE_OPTIONS, never inherits the seed flag and asks the server to follow its parent', () => {
+    const env = buildServerEnv(
+      { isPackaged: true, resourcesPath: '/res', repoRoot: '/repo', userDataPath: '/ud' },
+      { NODE_OPTIONS: '--require /tmp/evil.js', ELECTRON_RUN_AS_NODE: '1', EAC_SEED_DEMO: '1' },
+    );
+    expect(env.NODE_OPTIONS).toBeUndefined();
+    expect(env.ELECTRON_RUN_AS_NODE).toBeUndefined();
+    expect(env.EAC_SEED_DEMO).toBeUndefined();
+    expect(env.EAC_EXIT_WITH_PARENT).toBe('1');
+  });
+
   it('uses a bundled ffmpeg only when it exists', () => {
     const dir = mkdtempSync(join(tmpdir(), 'eac-res-'));
     try {
@@ -164,6 +175,7 @@ describe('startRuntime', () => {
   it('shows a dialog naming a busy port and never starts the server', async () => {
     const { deps, forkUtility, showError } = makeDeps({
       isPortFree: (port) => Promise.resolve(port !== 5173),
+      isOurServer: () => Promise.resolve(false),
     });
     const result = await startRuntime(deps);
 
@@ -172,6 +184,16 @@ describe('startRuntime', () => {
     expect(showError).toHaveBeenCalledTimes(1);
     expect(String(showError.mock.calls[0]?.[0])).toContain('5173');
     expect(String(showError.mock.calls[0]?.[1])).toContain('5173');
+  });
+
+  it('reports a stale copy of our own server distinctly', async () => {
+    const { deps, forkUtility, showError } = makeDeps({
+      isPortFree: (port) => Promise.resolve(port !== 3000),
+      isOurServer: () => Promise.resolve(true),
+    });
+    expect(await startRuntime(deps)).toBeNull();
+    expect(forkUtility).not.toHaveBeenCalled();
+    expect(String(showError.mock.calls[0]?.[0])).toContain('previous Exam Anti-Cheat server');
   });
 
   it('retries with plain Node mode when the utility process exits early', async () => {

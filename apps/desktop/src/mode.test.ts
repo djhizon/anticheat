@@ -9,7 +9,7 @@ import {
   parseRunMode,
   planModeSwitch,
 } from './mode';
-import { readJudgeBuild, readRunMode, writeRunMode } from './settings';
+import { persistRunMode, readJudgeBuild, readRunMode, writeRunMode } from './settings';
 
 describe('run mode', () => {
   it('build default is demo for the judge build and strict everywhere else', () => {
@@ -52,21 +52,34 @@ describe('settings file', () => {
   }
   it('round-trips, is owner-only, and leaves no temp file behind', () =>
     withDir((dir) => {
-      expect(readRunMode(dir, 'strict')).toBe('strict');
-      expect(readRunMode(dir, 'demo')).toBe('demo');
+      expect(readRunMode(dir, 'strict', true)).toBe('strict');
+      expect(readRunMode(dir, 'demo', true)).toBe('demo');
       writeFileSync(path.join(dir, 'settings.json'), '{}', { mode: 0o644 });
       writeRunMode(dir, 'demo');
-      expect(readRunMode(dir, 'strict')).toBe('demo');
+      expect(readRunMode(dir, 'strict', true)).toBe('demo');
       expect(statSync(path.join(dir, 'settings.json')).mode & 0o777).toBe(0o600);
       writeRunMode(dir, 'strict');
-      expect(readRunMode(dir, 'demo')).toBe('strict');
+      expect(readRunMode(dir, 'demo', true)).toBe('strict');
       expect(readdirSync(dir)).toEqual(['settings.json']);
     }));
   it('a corrupt file falls back to the build default', () =>
     withDir((dir) => {
       writeFileSync(path.join(dir, 'settings.json'), '{"mode":');
-      expect(readRunMode(dir, 'strict')).toBe('strict');
+      expect(readRunMode(dir, 'strict', true)).toBe('strict');
+      expect(readRunMode(dir, 'demo', true)).toBe('demo');
     }));
+  it('a hand-edited demo setting is ignored by every non-judge build', () =>
+    withDir((dir) => {
+      writeFileSync(path.join(dir, 'settings.json'), '{"mode":"demo"}');
+      expect(readRunMode(dir, 'strict')).toBe('strict');
+      expect(readRunMode(dir, 'strict', false)).toBe('strict');
+      expect(readRunMode(dir, 'demo', false)).toBe('strict');
+      expect(readRunMode(dir, 'demo', true)).toBe('demo');
+    }));
+  it('persists the chosen mode only for the judge build', () => {
+    expect(persistRunMode(true)).toBe(true);
+    expect(persistRunMode(false)).toBe(false);
+  });
   it('removes the temp file when the write cannot complete', () =>
     withDir((dir) => {
       // A directory squatting on the target makes the final rename fail.
