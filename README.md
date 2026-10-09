@@ -185,7 +185,8 @@ its own secrets (`SEND_EMAIL_HOOK_SECRET`, `MS_TENANT_ID`, `MS_CLIENT_ID`,
 More guides: [demo performance](docs/demo-performance.md) ·
 [media & phone demo](docs/media-and-phone-demo.md) ·
 [iPhone presence](docs/iphone-presence.md) ·
-[desktop recovery](docs/desktop-recovery.md)
+[desktop recovery](docs/desktop-recovery.md) ·
+[judge install guide (macOS .dmg)](docs/JUDGES.md)
 
 ## Quality gates
 

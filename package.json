@@ -38,7 +38,8 @@
     "test:web": "npm run test --workspace @exam-anti-cheat/web",
     "test:e2e": "npm run test:e2e --workspace @exam-anti-cheat/api",
     "build": "npm run build --workspace @exam-anti-cheat/api && npm run build --workspace @exam-anti-cheat/web",
-    "validate": "npm run format:check && npm run lint && npm run typecheck && npm test"
+    "validate": "npm run format:check && npm run lint && npm run typecheck && npm test",
+    "package:mac": "npm run vision:prepare && npm run build --workspace @exam-anti-cheat/web && npm run build:bundle --workspace @exam-anti-cheat/api && npm run build --workspace @exam-anti-cheat/desktop && npm run pack:builder --workspace @exam-anti-cheat/desktop"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",

@@ -8,7 +8,8 @@
     "start": "npm run build:server && npm run build && electron dist/main.js",
     "build:server": "cd ../.. && npm run build --workspace @exam-anti-cheat/web && npm run build:bundle --workspace @exam-anti-cheat/api",
     "build": "tsc && node scripts/build-native.cjs",
-    "pack": "npm run build && electron-builder --mac"
+    "pack:builder": "electron-builder --mac --x64",
+    "pack": "npm run build && npm run pack:builder"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -18,34 +19,68 @@
   },
   "build": {
     "appId": "com.exam-anti-cheat.desktop",
+    "npmRebuild": false,
+    "electronVersion": "44.4.1",
+    "electronDist": "../../node_modules/electron/dist",
     "productName": "Exam Anti-Cheat",
     "extraResources": [
       {
         "from": "native-bin/app-control",
         "to": "app-control"
+      },
+      {
+        "from": "../api/dist",
+        "to": "api"
+      },
+      {
+        "from": "../web/dist",
+        "to": "web"
+      },
+      {
+        "from": "native-bin/whisper",
+        "to": "whisper"
+      },
+      {
+        "from": "native-bin/ffmpeg",
+        "to": "ffmpeg"
       }
     ],
     "mac": {
       "category": "public.app-category.education",
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
-      "hardenedRuntime": true,
-      "entitlements": "build/entitlements.mac.plist",
+      "hardenedRuntime": false,
+      "entitlements": "assets/entitlements.mac.plist",
       "extendInfo": {
         "NSCameraUsageDescription": "This app requires camera access to verify your identity during exams.",
         "NSMicrophoneUsageDescription": "This app requires microphone access to monitor the testing environment.",
-        "NSCameraUseContinuityCameraDeviceType": true
+        "NSCameraUseContinuityCameraDeviceType": true,
+        "LSMinimumSystemVersion": "13.0"
       },
-      "identity": null
+      "identity": null,
+      "entitlementsInherit": "assets/entitlements.mac.plist",
+      "minimumSystemVersion": "13.0",
+      "gatekeeperAssess": false
     },
     "directories": {
-      "output": "out"
+      "output": "release"
+    },
+    "asarUnpack": [
+      "**/native-bin/**"
+    ],
+    "afterPack": "scripts/adhoc-sign.cjs",
+    "dmg": {
+      "title": "Exam Anti-Cheat"
     }
   },
   "allowScripts": {
-    "electron@34.5.8": true
+    "electron@44.4.1": true
   },
   "dependencies": {}
 }

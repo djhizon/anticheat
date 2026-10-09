@@ -29,3 +29,4 @@ test-results/
 # Agent worktrees
 /.claude/worktrees/
 /supabase/.temp/
+/apps/desktop/release/

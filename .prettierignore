@@ -5,3 +5,4 @@ package-lock.json
 apps/desktop/package-lock.json
 .claude/
 supabase/.temp/
+apps/desktop/release/**

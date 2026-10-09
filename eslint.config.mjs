@@ -11,6 +11,7 @@ export default [
       '**/dist/**',
       'build/**',
       '**/build/**',
+      'apps/desktop/release/**',
       'coverage/**',
       '.tmp/**',
       'playwright-report/**',
