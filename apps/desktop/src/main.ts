@@ -317,10 +317,10 @@ export async function createWindow(): Promise<void> {
         if (!trusted() || sources.length === 0) return finish({});
         const choice = await dialog.showMessageBox(window, {
           type: 'question',
-          title: 'Local screen recording',
+          title: 'Exam screen recording',
           message: 'Choose a screen to record on this Mac',
           detail:
-            'Everything visible on the selected screen may be recorded. Recording files stay local. The built-in microphone is requested separately. Cancel does not start capture.',
+            "Everything visible on the selected screen may be recorded. Segments upload to your school's secure OneDrive for exam review, or are saved on this computer if the connection is poor. The built-in microphone is requested separately. Cancel does not start capture.",
           buttons: [
             'Cancel',
             ...sources.map((source, index) => `Record screen ${index + 1}: ${source.name}`),

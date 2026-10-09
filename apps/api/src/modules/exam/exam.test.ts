@@ -20,6 +20,12 @@ import { IntegrityRepository } from '../integrity/integrityRepository.js';
 import type { GeminiRotatingClient } from '../integrity/gemini.js';
 import { transcribeAudio } from '../integrity/whisper.js';
 import { PhonePresenceService } from '../integrity/phonePresence.js';
+import { uploadRecordingChunk } from '../integrity/graph.js';
+
+vi.mock('../integrity/graph.js', async (original) => ({
+  ...(await original<typeof import('../integrity/graph.js')>()),
+  uploadRecordingChunk: vi.fn(async () => undefined),
+}));
 
 vi.mock('../integrity/whisper.js', async (original) => ({
   ...(await original<typeof import('../integrity/whisper.js')>()),
@@ -67,6 +73,7 @@ describe('exam delivery boundary', () => {
 
   beforeEach(() => {
     vi.mocked(transcribeAudio).mockReset();
+    vi.mocked(uploadRecordingChunk).mockClear();
     config = loadConfig({
       NODE_ENV: 'test',
       DATABASE_PATH: ':memory:',
@@ -706,6 +713,58 @@ describe('exam delivery boundary', () => {
     ).toBe(200);
   });
 
+  it('validates recording segments and answers 202, or 503 when Graph is not configured', async () => {
+    const student = await registerStudent('rec@example.test');
+    const seeded = await seedExam();
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: student.userId,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(student, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
+    const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
+    const path = `/exam/attempts/${attemptId}/recording`;
+    const send = (body: unknown) => exam.routes.handle(studentRequest(student, 'POST', path, body));
+
+    for (const bad of [
+      { index: -1, chunk: 'AAAA' },
+      { index: 1.5, chunk: 'AAAA' },
+      { index: '1', chunk: 'AAAA' },
+      { index: 0, chunk: '' },
+      { index: 0, chunk: '***' },
+      { index: 0, chunk: 'A'.repeat(4_000_004) },
+    ]) {
+      expect((await send(bad)).status).toBe(400);
+    }
+    expect(uploadRecordingChunk).not.toHaveBeenCalled();
+
+    // Graph not configured: clear 503 so the client falls back to local-only.
+    const unconfigured = await send({ index: 0, chunk: 'AAAA' });
+    expect(unconfigured.status).toBe(503);
+    expect(uploadRecordingChunk).not.toHaveBeenCalled();
+
+    const configured = {
+      ...config,
+      msTenantId: 't',
+      msClientId: 'c',
+      msClientSecret: 's',
+      msTargetEmail: 'a@b.test',
+    };
+    const routes = new ExamRoutes(exam.service, auth.boundary, configured);
+    const accepted = await routes.handle(
+      studentRequest(student, 'POST', path, { index: 3, chunk: 'AAAA' }),
+    );
+    expect(accepted.status).toBe(202);
+    expect(uploadRecordingChunk).toHaveBeenCalledWith(
+      configured,
+      student.userId,
+      attemptId,
+      3,
+      Buffer.from('AAAA', 'base64'),
+    );
+  });
+
   it('answers CORS preflight for every browser-called exam route', async () => {
     const paths = [
       '/exam/speedtest',
@@ -949,6 +1008,24 @@ describe('exam delivery boundary', () => {
     });
     expect(detector).toHaveBeenCalledWith(Buffer.from('jpeg').toString('base64'));
     expect(integrity.recordAppEvent).toHaveBeenCalledWith(attemptId, 'flag:vision_cell_phone', 1);
+  });
+
+  it('only lets signed-in students run the upload speed probe', async () => {
+    const student = await registerStudent('speed@example.test');
+    expect(
+      (
+        await exam.routes.handle({
+          method: 'POST',
+          path: '/exam/speedtest',
+          headers: { origin },
+          body: { data: 'x' },
+        })
+      ).status,
+    ).toBe(401);
+    expect(
+      (await exam.routes.handle(studentRequest(student, 'POST', '/exam/speedtest', { data: 'x' })))
+        .status,
+    ).toBe(200);
   });
 
   it('checks audio ownership before inference and reports inference failures instead of empty success', async () => {

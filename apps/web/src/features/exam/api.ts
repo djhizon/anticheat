@@ -19,7 +19,10 @@ export interface ExamProblem {
 }
 
 export class ExamApiError extends Error {
-  constructor(readonly problem: ExamProblem) {
+  constructor(
+    readonly problem: ExamProblem,
+    readonly status?: number,
+  ) {
     super(problem.message);
     this.name = 'ExamApiError';
   }
@@ -643,7 +646,7 @@ export class BrowserExamApi implements ExamApi {
     }
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, init);
     if (!response.ok) {
-      throw new ExamApiError(safeProblems[response.status] ?? fallbackProblem);
+      throw new ExamApiError(safeProblems[response.status] ?? fallbackProblem, response.status);
     }
 
     try {

@@ -361,8 +361,10 @@ function StudentWorkspace({
                 <div>
                   <strong>Optional Screen Recording</strong>
                   <p>
-                    Only if you turn it on: your screen is recorded in short segments that are saved
-                    to your own computer. Nothing is uploaded.
+                    Only if you turn it on: your screen is recorded in short segments and uploaded
+                    to the school&apos;s secure OneDrive for exam review. Quality adapts to your
+                    connection; if the connection is poor, segments are saved on your computer
+                    instead.
                   </p>
                 </div>
               </li>

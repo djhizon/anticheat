@@ -5,6 +5,8 @@ export default [
   {
     ignores: [
       'node_modules/**',
+      '.claude/**',
+      'supabase/.temp/**',
       'dist/**',
       '**/dist/**',
       'build/**',

@@ -1,12 +1,56 @@
-import type { ExamApi } from '../exam/api.js';
+import { ExamApiError, type ExamApi } from '../exam/api.js';
 import { acquireBuiltInMicrophone } from './builtInMicrophone.js';
+import {
+  LOCAL_PROFILE,
+  PROFILES,
+  applyConnectionHint,
+  chooseProfile,
+  probeUploadKbps,
+  profileRank,
+  readConnectionHint,
+  stepDown,
+  stepUp,
+  type ProfileName,
+  type RecordingProfile,
+} from './networkProbe.js';
+import { RecordingUploadQueue, type QueueItem } from './recordingUploadQueue.js';
 
-/** Local-only segments: no speed test, base64 encoding, or recording API calls. */
+export const CLOUD_SEGMENT_MS = 10_000;
+export const LOCAL_SEGMENT_MS = 60_000;
+const STEP_COOLDOWN_MS = 30_000;
+const STEP_UP_QUIET_MS = 120_000;
+const FLUSH_AFTER_STOP_MS = 60_000;
+
+export interface ScreenRecorderOptions {
+  /** Returns upload kbps or null; defaults to timing /exam/speedtest. */
+  readonly probe?: () => Promise<number | null>;
+  /** Blob to base64 for upload; defaults to FileReader. */
+  readonly encode?: (blob: Blob) => Promise<string>;
+  readonly now?: () => number;
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error('Could not read segment.'));
+    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/u, ''));
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Opt-in screen recording. Segments are uploaded in the background when the
+ * connection allows (quality adapts), otherwise saved on the student's computer.
+ * Recording problems never block or interrupt the exam.
+ */
 export function createScreenRecorder(
-  _attemptId: string,
-  _examApi?: ExamApi,
+  attemptId: string,
+  examApi?: ExamApi,
   status: (message: string) => void = () => {},
+  options: ScreenRecorderOptions = {},
 ) {
+  const now = options.now ?? Date.now;
+  const encode = options.encode ?? blobToBase64;
   let stopped = false;
   let started = false;
   let screen: MediaStream | null = null;
@@ -14,36 +58,163 @@ export function createScreenRecorder(
   let stream: MediaStream | null = null;
   let recorder: MediaRecorder | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let segment = 0;
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  let segmentIndex = 0;
+  let mode: 'cloud' | 'local' = 'local';
+  let profile: RecordingProfile = PROFILES.low;
+  let lastStepAt = now();
+  let lastBusyAt = now();
+  let reprobing = false;
+  let notice = '';
+  let queue: RecordingUploadQueue | null = null;
   const session = new Date().toISOString().replace(/[:.]/g, '-');
+
   function release() {
     screen?.getTracks().forEach((track) => track.stop());
     microphone?.getTracks().forEach((track) => track.stop());
   }
-  function download(blob: Blob) {
+
+  function report() {
+    if (mode === 'local') {
+      status(
+        notice ||
+          'Recording on this computer • segments are saved to your Downloads, not uploaded.',
+      );
+      return;
+    }
+    const uploaded = queue?.uploaded ?? 0;
+    const total = queue?.total ?? 0;
+    const waiting = queue?.waiting ?? 0;
+    const lead = stopped ? 'Recording stopped' : 'Recording';
+    status(
+      `${lead} • ${profile.label} • uploaded ${uploaded}/${total}` +
+        (waiting > 0 ? ` • ${waiting} waiting` : ''),
+    );
+  }
+
+  function download(blob: Blob, index: number) {
     if (!blob.size) return;
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `exam-demo-${session}-${++segment}.webm`;
+    link.download = `exam-demo-${session}-${index + 1}.webm`;
     document.body.append(link);
     link.click();
     link.remove();
     // Allow the download handler to acquire the blob before releasing it.
     setTimeout(() => URL.revokeObjectURL(url), 30000);
-    status(
-      `Local segment ${segment}: download requested. Check your Downloads/save dialog. No upload.`,
-    );
   }
+
+  function goLocal(pending: QueueItem[], message: string) {
+    mode = 'local';
+    notice = message;
+    if (flushTimer) clearTimeout(flushTimer);
+    flushTimer = null;
+    for (const item of pending) download(item.blob, item.index);
+    applyProfileToTrack({ ...LOCAL_PROFILE });
+    report();
+  }
+
+  function applyProfileToTrack(target: { width: number; height: number; frameRate: number }) {
+    for (const track of screen?.getVideoTracks() ?? []) {
+      // Resolution changes are best effort; the encoder bitrate is what protects the uplink.
+      void track
+        .applyConstraints?.({
+          width: { ideal: target.width, max: target.width },
+          height: { ideal: target.height, max: target.height },
+          frameRate: { ideal: target.frameRate, max: target.frameRate },
+        })
+        ?.catch(() => {});
+    }
+  }
+
+  function changeProfile(next: ProfileName) {
+    if (next === profile.name) return;
+    profile = PROFILES[next];
+    lastStepAt = now();
+    lastBusyAt = lastStepAt;
+    applyProfileToTrack(profile);
+    report();
+  }
+
+  function onPressure() {
+    lastBusyAt = now();
+    if (now() - lastStepAt < STEP_COOLDOWN_MS) return;
+    changeProfile(stepDown(profile.name));
+  }
+
+  async function maybeStepUp() {
+    if (reprobing || mode !== 'cloud' || !examApi || profile.name === 'high') return;
+    if (now() - lastBusyAt < STEP_UP_QUIET_MS || now() - lastStepAt < STEP_UP_QUIET_MS) return;
+    reprobing = true;
+    try {
+      const kbps = await (options.probe ?? (() => probeUploadKbps(examApi)))();
+      const choice = applyConnectionHint(chooseProfile(kbps), readConnectionHint());
+      if (stopped || mode !== 'cloud' || choice === 'local-only') return;
+      if (profileRank(choice) > profileRank(profile.name)) changeProfile(stepUp(profile.name));
+      else lastBusyAt = now();
+    } finally {
+      reprobing = false;
+    }
+  }
+
+  function handleSegment(blob: Blob) {
+    const index = segmentIndex++;
+    if (!blob.size) return;
+    if (mode === 'cloud' && queue && !queue.isDead) {
+      if (queue.waiting > 0) lastBusyAt = now();
+      queue.enqueue({ index, blob });
+      armFlush();
+      return;
+    }
+    download(blob, index);
+    report();
+  }
+
+  // After Stop, queued segments may finish uploading, but never get lost on a bad link.
+  function armFlush() {
+    if (!stopped || flushTimer || mode !== 'cloud' || !queue || queue.isDead) return;
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      if (!queue || queue.isDead || queue.waiting === 0) return;
+      goLocal(
+        queue.drainPending(),
+        'Some segments could not finish uploading, so they were saved on your computer (Downloads).',
+      );
+    }, FLUSH_AFTER_STOP_MS);
+  }
+
+  function startQueue(api: ExamApi) {
+    queue = new RecordingUploadQueue({
+      segmentMs: CLOUD_SEGMENT_MS,
+      now,
+      upload: async (item) => {
+        await api.uploadRecordingChunk(attemptId, item.index, await encode(item.blob));
+      },
+      // Not configured / rejected: retrying will not help, keep the footage locally.
+      isFatal: (error) =>
+        error instanceof ExamApiError && [400, 403, 404, 503].includes(error.status ?? 0),
+      onChange: report,
+      onPressure,
+      onGiveUp: (pending) =>
+        goLocal(
+          pending,
+          'Your connection was not steady enough to upload, so segments are being saved on your computer (Downloads) instead.',
+        ),
+    });
+  }
+
   function capture() {
     if (stopped || !stream) return;
     const mime = ['video/webm;codecs=vp8,opus', 'video/webm'].find((type) =>
       MediaRecorder.isTypeSupported(type),
     );
-    if (!mime) throw new Error('Local screen recording format unavailable.');
+    if (!mime) throw new Error('Screen recording format unavailable.');
+    const bitrate =
+      mode === 'cloud' ? profile.videoBitsPerSecond : LOCAL_PROFILE.videoBitsPerSecond;
     const current = new MediaRecorder(stream, {
       mimeType: mime,
-      videoBitsPerSecond: 250000,
+      videoBitsPerSecond: bitrate,
       audioBitsPerSecond: 32000,
     });
     recorder = current;
@@ -53,53 +224,57 @@ export function createScreenRecorder(
     };
     current.onerror = () => {
       // Keep onstop attached: MediaRecorder may still deliver a final salvageable
-      // blob after an error. Never restart, but offer that partial local segment.
+      // blob after an error. Never restart, but keep that partial segment.
       stop();
       status(
-        'Screen recording failed. Check Downloads for previous/final partial segments; the final segment may be incomplete.',
+        'Screen recording stopped unexpectedly. Earlier segments were kept; the last one may be incomplete.',
       );
     };
     current.onstop = () => {
-      // Start a new container each minute; timeslice fragments alone are not
-      // necessarily playable. Save the final partial segment on Stop as well.
+      // Each segment is its own container so it is independently playable.
       try {
-        download(new Blob(chunks, { type: current.mimeType }));
+        handleSegment(new Blob(chunks, { type: current.mimeType }));
       } catch {
         stop();
-        status(
-          'Local download could not start. Check download permissions; this segment was not saved.',
-        );
+        status('A recording segment could not be saved. Check download permissions.');
       }
       chunks.length = 0;
       if (!stopped) {
         try {
           capture();
+          void maybeStepUp().catch(() => {});
         } catch {
           stop();
-          status('Screen recording could not continue. Retry recording.');
+          status('Screen recording could not continue. You can retry recording.');
         }
       }
     };
     current.start();
-    timer = setTimeout(() => {
-      if (current.state !== 'inactive') current.stop();
-    }, 60000);
+    timer = setTimeout(
+      () => {
+        if (current.state !== 'inactive') current.stop();
+      },
+      mode === 'cloud' ? CLOUD_SEGMENT_MS : LOCAL_SEGMENT_MS,
+    );
   }
+
   async function start() {
     if (started || stopped) return;
     started = true;
-    status('Choose a screen to record locally…');
+    status('Choose a screen to record…');
     try {
       if (!navigator.mediaDevices?.getDisplayMedia)
         throw new Error(
           'Screen capture is unavailable. Use the updated desktop app or a supported desktop browser.',
         );
       try {
+        // Ask for the screen first (needs the student's click), then adapt to the network.
+        const initial = PROFILES.standard;
         screen = await navigator.mediaDevices.getDisplayMedia({
           video: {
-            width: { ideal: 1280, max: 1280 },
-            height: { ideal: 720, max: 720 },
-            frameRate: { ideal: 5, max: 5 },
+            width: { ideal: initial.width, max: initial.width },
+            height: { ideal: initial.height, max: initial.height },
+            frameRate: { ideal: initial.frameRate, max: initial.frameRate },
           },
           audio: false,
         });
@@ -114,7 +289,7 @@ export function createScreenRecorder(
             'Screen sharing was cancelled or denied. Choose a screen and allow this app in macOS Privacy & Security → Screen Recording, then reopen it if requested.',
           );
         if (name === 'InvalidStateError')
-          throw new Error('Click Start local recording again with the exam window focused.');
+          throw new Error('Click Start recording again with the exam window focused.');
         throw error;
       }
       if (stopped) {
@@ -128,9 +303,7 @@ export function createScreenRecorder(
           'ended',
           () => {
             stop();
-            status(
-              'Screen sharing ended. Any captured final segment was requested as a local download.',
-            );
+            status('Screen sharing ended. Segments captured so far were kept.');
           },
           { once: true },
         ),
@@ -153,26 +326,48 @@ export function createScreenRecorder(
           'ended',
           () => {
             stop();
-            status('Microphone disconnected. Final local download requested.');
+            status('Microphone disconnected. Segments captured so far were kept.');
           },
           { once: true },
         ),
       );
+
+      // Choose quality from measured upload speed; any failure means local-only.
+      if (examApi) {
+        status('Checking your connection…');
+        const kbps = await (options.probe ?? (() => probeUploadKbps(examApi)))().catch(() => null);
+        if (stopped) {
+          release();
+          return;
+        }
+        const choice = applyConnectionHint(chooseProfile(kbps), readConnectionHint());
+        if (choice === 'local-only') {
+          notice =
+            'Could not reach the server to upload, so recording on this computer instead (segments saved to Downloads).';
+        } else {
+          mode = 'cloud';
+          profile = PROFILES[choice];
+          startQueue(examApi);
+        }
+      }
+      lastStepAt = lastBusyAt = now();
+      applyProfileToTrack(mode === 'cloud' ? profile : { ...LOCAL_PROFILE });
       capture();
-      status(
-        'Recording locally at 720p / up to 5 fps. A download is requested each minute and on Stop.',
-      );
+      report();
     } catch (error) {
       stop();
       throw error;
     }
   }
+
   function stop() {
     if (stopped) return;
     stopped = true;
     if (timer) clearTimeout(timer);
-    if (recorder?.state !== 'inactive') recorder?.stop();
+    if (recorder && recorder.state !== 'inactive') recorder.stop();
     release();
+    armFlush();
+    if (recorder) report();
   }
   return { start, stop };
 }

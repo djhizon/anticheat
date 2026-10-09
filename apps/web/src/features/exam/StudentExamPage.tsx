@@ -87,7 +87,7 @@ export function StudentExamPage({
   const [showPhoneModal, setShowPhoneModal] = useState(false);
   const [showLivenessModal, setShowLivenessModal] = useState(false);
   const [recordScreen, setRecordScreen] = useState(false);
-  const [recordingStatus, setRecordingStatus] = useState('Screen recording off — local-only demo.');
+  const [recordingStatus, setRecordingStatus] = useState('Screen recording is off.');
   const [focusedMode] = useState(true);
   const phonePresence = usePhonePresence(
     currentDelivery?.attempt.id,
@@ -303,7 +303,7 @@ export function StudentExamPage({
     });
   }, [currentDelivery?.attempt.id, currentDelivery?.attempt.status, examApi]);
 
-  // Explicit, local-only recording; never start expensive capture with the exam.
+  // Explicit opt-in recording; adapts to the network and never blocks the exam.
 
   useEffect(() => {
     if (!recordScreen || !currentDelivery || currentDelivery.attempt.status !== 'in_progress')
@@ -1001,10 +1001,11 @@ export function StudentExamPage({
           {/* RIGHT SIDEBAR: Audio + Exam Info */}
           <aside className="exam-sidebar exam-sidebar--right">
             <section className="sidebar-section">
-              <p className="sidebar-label">Local screen recording</p>
+              <p className="sidebar-label">Screen recording (optional)</p>
               <p className="muted">
-                Includes the built-in microphone. Saves to this Mac only; no upload. Stop to finish
-                the last clip.
+                Includes the built-in microphone. Segments upload to the school&apos;s secure
+                OneDrive for exam review; quality adapts to your connection. On a poor connection
+                they are saved on your computer instead.
               </p>
               {isActive && (
                 <button
@@ -1014,11 +1015,11 @@ export function StudentExamPage({
                     setRecordScreen((value) => !value);
                     if (recordScreen)
                       setRecordingStatus(
-                        'Recording stopped. Check Downloads/save dialog for the final segment.',
+                        'Recording stopped. Any segments still waiting will finish uploading or be saved on your computer.',
                       );
                   }}
                 >
-                  {recordScreen ? 'Stop local recording' : 'Start local recording'}
+                  {recordScreen ? 'Stop recording' : 'Start recording'}
                 </button>
               )}
               <p role="status">{recordingStatus}</p>

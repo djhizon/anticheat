@@ -63,8 +63,14 @@ optional.
    the **AI-written answer check** to show per-answer scores with quoted
    phrases. Say: these are optional instructor aids, not the core; they are
    leads for a human conversation.
-9. **Optional: desktop shell.** With the web app running, `npm run dev` inside `apps/desktop` builds and launches the Electron lockdown shell (see
-   [desktop recovery](desktop-recovery.md)).
+9. **Optional: adaptive screen recording.** Say: recording is opt-in. Start it
+   from the exam sidebar; the status line shows quality (for example "720p (fast
+   network)") and uploads. Segments go to the school's OneDrive when Graph is
+   configured, quality steps down on a slow connection, and segments are saved
+   on the student's computer instead if the connection is poor or cloud
+   recording is not configured.
+10. **Optional: desktop shell.** With the web app running, `npm run dev` inside `apps/desktop` builds and launches the Electron lockdown shell (see
+    [desktop recovery](desktop-recovery.md)).
 
 ## Talking points
 

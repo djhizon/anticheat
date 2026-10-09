@@ -16,7 +16,7 @@ import { headerValue, type AuthRequest, type AuthRequestBoundary } from '../auth
 import { isAllowedOrigin } from '../auth/csrf.js';
 import { ExamService } from './exam.service.js';
 import type { IntegrityService } from '../integrity/integrityService.js';
-import { uploadRecordingChunk } from '../integrity/graph.js';
+import { isRecordingUploadConfigured, uploadRecordingChunk } from '../integrity/graph.js';
 import type { PhonePresenceService } from '../integrity/phonePresence.js';
 import type { VisionResult } from '../integrity/backendVision.js';
 
@@ -47,6 +47,10 @@ const transpPattern = /^\/exam\/attempts\/([^/]+)\/transparency$/u;
 const enrollPhonePattern = /^\/exam\/attempts\/([^/]+)\/enroll-phone$/u;
 const phoneStatusPattern = /^\/exam\/attempts\/([^/]+)\/phone-status$/u;
 const revisionsPattern = /^\/exam\/attempts\/([^/]+)\/revisions$/u;
+/** Segments are ~10 s; 4M base64 chars (~3 MB) is far above the highest profile and below the server body cap. */
+const MAX_RECORDING_BASE64_CHARS = 4_000_000;
+const MAX_RECORDING_INDEX = 100_000;
+const base64Pattern = /^[A-Za-z0-9+/]+={0,2}$/u;
 const recordingPattern = /^\/exam\/attempts\/([^/]+)\/recording$/u;
 const speedtestPattern = /^\/exam\/speedtest$/u;
 const phonePresencePattern = /^\/exam\/attempts\/([^/]+)\/phone-presence$/u;
@@ -634,7 +638,10 @@ export class ExamRoutes {
 
       // ── Pack 8: Speedtest ─────────────────────────────────────────────────
       if (method === 'POST' && speedtestPattern.test(path)) {
-        // Read body to measure time, but immediately discard it
+        // Upload-speed probe for adaptive recording: signed-in students only,
+        // and the body is discarded once it has been received.
+        const principal = this.requireStudent(request);
+        this.boundary.validateUnsafe(request, principal);
         return jsonResponse(request, this.config.allowedOrigins, 200, { ok: true });
       }
 
@@ -647,22 +654,41 @@ export class ExamRoutes {
         await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
 
         const body = parseObject(request.body, 'Recording chunk required');
-        const chunkBase64 = String(body.chunk ?? '');
-        const chunkIndex = Number(body.index ?? 0);
+        const chunkIndex = body.index;
+        if (
+          typeof chunkIndex !== 'number' ||
+          !Number.isInteger(chunkIndex) ||
+          chunkIndex < 0 ||
+          chunkIndex > MAX_RECORDING_INDEX
+        ) {
+          throw new DomainError('validation_failed', 'Recording segment index is invalid.');
+        }
+        const chunkBase64 = body.chunk;
+        if (
+          typeof chunkBase64 !== 'string' ||
+          chunkBase64.length === 0 ||
+          chunkBase64.length > MAX_RECORDING_BASE64_CHARS ||
+          !base64Pattern.test(chunkBase64)
+        ) {
+          throw new DomainError('validation_failed', 'Recording segment is empty or too large.');
+        }
+        if (!isRecordingUploadConfigured(this.config)) {
+          return jsonResponse(request, this.config.allowedOrigins, 503, {
+            code: 'invalid_state',
+            message: 'Cloud recording is not configured. Save recording segments locally instead.',
+          });
+        }
 
-        // Convert base64 to Buffer
-        const buffer = Buffer.from(chunkBase64, 'base64');
-
-        // Upload to MS Graph
+        // Folder layout: <studentId>/<attemptId>/segment-<index>.webm
         await uploadRecordingChunk(
           this.config,
-          principal.user.id, // Using studentId as exam folder prefix
+          principal.user.id,
           String(attemptId),
           chunkIndex,
-          buffer,
+          Buffer.from(chunkBase64, 'base64'),
         );
 
-        return jsonResponse(request, this.config.allowedOrigins, 201, { ok: true });
+        return jsonResponse(request, this.config.allowedOrigins, 202, { ok: true });
       }
 
       throw new DomainError('not_found', 'The requested exam route does not exist.');

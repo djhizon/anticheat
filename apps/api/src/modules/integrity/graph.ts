@@ -46,13 +46,32 @@ async function getGraphToken(config: ApiConfig): Promise<string> {
   return cachedToken;
 }
 
+/** True when every setting needed to upload recording segments is present. */
+export function isRecordingUploadConfigured(config: ApiConfig): boolean {
+  return Boolean(
+    config.msTenantId && config.msClientId && config.msClientSecret && config.msTargetEmail,
+  );
+}
+
+const safeSegment = (value: string): string => value.replace(/[^A-Za-z0-9_-]/gu, '_');
+
+/** OneDrive path of one recording segment, sortable by index. */
+export function recordingSegmentPath(
+  studentId: string,
+  attemptId: string,
+  segmentIndex: number,
+): string {
+  const padded = segmentIndex.toString().padStart(6, '0');
+  return `/ExamAntiCheat/${safeSegment(studentId)}/${safeSegment(attemptId)}/segment-${padded}.webm`;
+}
+
 /**
- * Uploads a chunk of recording to the target user's OneDrive under:
- * /ExamAntiCheat/{examId}/{attemptId}/{filename}
+ * Uploads one recording segment to the target user's OneDrive under:
+ * /ExamAntiCheat/{studentId}/{attemptId}/segment-{index}.webm
  */
 export async function uploadRecordingChunk(
   config: ApiConfig,
-  examId: string,
+  studentId: string,
   attemptId: string,
   chunkIndex: number,
   buffer: Buffer,
@@ -63,11 +82,7 @@ export async function uploadRecordingChunk(
   }
 
   const token = await getGraphToken(config);
-
-  // Format chunk index to be 001, 002, etc. so they sort alphabetically
-  const paddedIndex = chunkIndex.toString().padStart(3, '0');
-  const filename = `recording_${paddedIndex}.webm`;
-  const path = `/ExamAntiCheat/exam_${examId}/attempt_${attemptId}/${filename}`;
+  const path = recordingSegmentPath(studentId, attemptId, chunkIndex);
 
   const uploadUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(msTargetEmail)}/drive/root:${path}:/content`;
 
