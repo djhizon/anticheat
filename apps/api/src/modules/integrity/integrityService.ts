@@ -6,10 +6,10 @@ import type { IntegrityRepository } from './integrityRepository.js';
 import {
   CHALLENGE_TYPES,
   generateChallenge,
+  kindFromStoredType,
   scoreColourResponse,
   selectChallengeType,
   signNonce,
-  storageType,
   verifyHeadTurns,
   verifyNonceSignature,
   verifySpokenWords,
@@ -159,13 +159,7 @@ export class IntegrityService {
     const type: ChallengeType = selectChallengeType(preferred);
     const challenge = generateChallenge(type);
     const data = JSON.stringify(challenge.data);
-    this.repo.insertLivenessChallenge(
-      challenge.nonce,
-      attemptId,
-      storageType(type),
-      data,
-      challenge.expiresAt,
-    );
+    this.repo.insertLivenessChallenge(challenge.nonce, attemptId, type, data, challenge.expiresAt);
     const signature = signNonce({ attemptId, ...challenge, data }, this.livenessSecret);
     return { ...challenge, signature };
   }
@@ -215,7 +209,7 @@ export class IntegrityService {
     const signed = {
       attemptId,
       nonce,
-      type: this.kindOf(row.challenge_data),
+      type: this.kindOf(row.challenge_data, row.challenge_type),
       expiresAt: row.expires_at,
       data: row.challenge_data,
     };
@@ -228,7 +222,7 @@ export class IntegrityService {
     this.repo.markLivenessChallengeUsed(nonce);
 
     let result: VerifyResult;
-    const kind = this.kindOf(row.challenge_data);
+    const kind = this.kindOf(row.challenge_data, row.challenge_type);
     if (!cameraLabel || VIRTUAL_CAMERA_LABEL.test(cameraLabel)) {
       // Only a native hardware webcam counts; OBS and other virtual feeds fail.
       result = {
@@ -263,13 +257,16 @@ export class IntegrityService {
     return { passed: result.passed, layer, detail: result.detail };
   }
 
-  private kindOf(challengeData: string): string {
+  private kindOf(challengeData: string, storedType: string): string {
     try {
       const parsed = JSON.parse(challengeData) as { kind?: unknown };
-      return typeof parsed.kind === 'string' ? parsed.kind : 'unknown';
+      if (typeof parsed.kind === 'string') {
+        return parsed.kind;
+      }
     } catch {
-      return 'unknown';
+      // fall through to the stored column
     }
+    return kindFromStoredType(storedType) ?? 'unknown';
   }
 
   // ── AI Check ─────────────────────────────────────────────────────────────────

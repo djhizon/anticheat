@@ -77,14 +77,14 @@ it('rejects missing or forged signatures without consuming the challenge', async
   expect(repo.markLivenessChallengeUsed).not.toHaveBeenCalled();
 });
 
-it('issues signed challenges that cover the random sequence and are stored under a legal type', () => {
+it('issues signed challenges that cover the random sequence and are stored under its real kind', () => {
   const repo = repoFor(colourData);
   const challenge = service(repo).issueLivenessChallenge('a');
   expect(challenge.type).toBe('colour_flash');
   expect(repo.insertLivenessChallenge).toHaveBeenCalledWith(
     challenge.nonce,
     'a',
-    'flash',
+    'colour_flash',
     JSON.stringify(challenge.data),
     challenge.expiresAt,
   );

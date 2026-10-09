@@ -4,6 +4,40 @@ import { describe, expect, it } from 'vitest';
 import { applyMigrations, loadMigrations, type Migration } from './migrate.js';
 
 describe('database migrations', () => {
+  it('keeps legacy liveness rows and accepts the real challenge kinds', () => {
+    const database = new DatabaseSync(':memory:');
+
+    try {
+      const all = loadMigrations();
+      applyMigrations(
+        database,
+        all.filter((migration) => migration.version < 7),
+      );
+      database.exec('PRAGMA foreign_keys = OFF;');
+      database.exec(
+        `INSERT INTO liveness_challenges (nonce, attempt_id, challenge_type, challenge_data, expires_at)
+         VALUES ('old', 'a1', 'flash', '{"kind":"colour_flash"}', '2030-01-01T00:00:00Z')`,
+      );
+      applyMigrations(database, all);
+
+      expect(database.prepare('SELECT challenge_type FROM liveness_challenges').all()).toEqual([
+        { challenge_type: 'flash' },
+      ]);
+      database.exec(
+        `INSERT INTO liveness_challenges (nonce, attempt_id, challenge_type, expires_at)
+         VALUES ('new', 'a1', 'head_turn', '2030-01-01T00:00:00Z')`,
+      );
+      expect(() =>
+        database.exec(
+          `INSERT INTO liveness_challenges (nonce, attempt_id, challenge_type, expires_at)
+           VALUES ('bad', 'a1', 'nope', '2030-01-01T00:00:00Z')`,
+        ),
+      ).toThrow();
+    } finally {
+      database.close();
+    }
+  });
+
   it('records ordered versions and is safe to rerun', () => {
     const database = new DatabaseSync(':memory:');
 
@@ -22,6 +56,7 @@ describe('database migrations', () => {
         { version: 4, name: 'integrity' },
         { version: 5, name: 'phone_presence' },
         { version: 6, name: 'supabase_identity' },
+        { version: 7, name: 'liveness_kinds' },
       ]);
     } finally {
       database.close();

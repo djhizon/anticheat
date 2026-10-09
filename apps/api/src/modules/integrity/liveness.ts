@@ -15,18 +15,14 @@ export const CHALLENGE_TYPES = ['colour_flash', 'head_turn', 'spoken_words'] as 
 export type ChallengeType = (typeof CHALLENGE_TYPES)[number];
 
 /**
- * The liveness_challenges table predates these types and its CHECK constraint
- * only allows flash/gesture/word. The real kind is stored (and signed) inside
- * challenge_data, so no schema migration is needed.
+ * Since migration 0007 challenge_type holds the real kind. Rows written earlier
+ * hold flash/gesture/word and carry the real kind in challenge_data.kind, so
+ * this deliberately returns undefined for those legacy names.
  */
-const STORAGE_TYPE: Record<ChallengeType, 'flash' | 'gesture' | 'word'> = {
-  colour_flash: 'flash',
-  head_turn: 'gesture',
-  spoken_words: 'word',
-};
-
-export function storageType(type: ChallengeType): 'flash' | 'gesture' | 'word' {
-  return STORAGE_TYPE[type];
+export function kindFromStoredType(stored: string): ChallengeType | undefined {
+  return (CHALLENGE_TYPES as readonly string[]).includes(stored)
+    ? (stored as ChallengeType)
+    : undefined;
 }
 
 /** Default is the effortless colour flash; students may opt into an alternative. */
