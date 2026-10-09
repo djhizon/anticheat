@@ -1,103 +1,89 @@
-# 5 to 7 minute judge walkthrough
+# 5-minute judge demo
 
-## Prerequisites
-
-- Node ≥ 24.7 (see `.nvmrc`).
-- Run `npm run vision:prepare` once with a network to fetch the MediaPipe
-  models used by the on-device camera panel.
-- Optional: `npm run setup:whisper` (local transcription) and
-  `npm run setup:vision` (server vision check). On Intel Macs use
-  `PYTHON=python3.12 npm run setup:vision`.
-- Optional: `GEMINI_API_KEYS` in a gitignored `.env.local` at the repo root, for
-  the AI checks. Everything else works without it.
+Demo Day gives each team **5 minutes of live demo, then 3 minutes of Q&A**. The
+script below runs **4:45**, leaving 15 seconds of buffer. Practise it with a
+timer.
 
 ## Setup
 
 ```bash
-npm install
-npm run demo:seed
-npm run dev
+npm run demo
 ```
 
-Open http://127.0.0.1:5173.
+`npm run demo` checks the machine, prepares the on-device models, seeds the demo
+data and opens http://127.0.0.1:5173. No Node? `docker compose up --build` and
+open http://localhost:8080 (see [DOCKER.md](DOCKER.md)).
 
 | Role       | Email                          | Password                         |
 | ---------- | ------------------------------ | -------------------------------- |
 | Student    | `demo.student@example.test`    | `Demo exam password 2026!`       |
 | Instructor | `demo.instructor@example.test` | `Demo instructor password 2026!` |
 
-## Demo beats
+## Before you go on stage (10 minutes earlier)
 
-About 5 to 7 minutes. The first six beats are on-device AI and consent. Cloud
-features come last and are optional.
+- `npm run demo -- --reset` so the demo student's exam is "Not started" again
+  (the old database is backed up, not deleted).
+- Chrome window 1: signed in as the **student**. Chrome window 2 (incognito):
+  signed in as the **instructor** with "Integrity review" open.
+- Speak once into the audio panel so Whisper is warm, and run one liveness check
+  so the camera permission is already granted.
+- Close other apps, notifications on Do Not Disturb, one display only.
+- Have a phone ready to hold up to the webcam for the phone-detection beat.
 
-1. **Consent (about 30s).** Sign in as the student and start the exam. A "Before
-   you begin" modal lists every monitor. Say: nothing starts until the student
-   reads it and ticks the checkbox, and the core AI runs on this laptop.
-2. **On-device camera, native webcam only (about 45s).** Camera checks start by themselves when the exam opens (Stop/Start
-   camera checks remain in the sidebar). Show face landmarks, head pose and phone detection. Say: MediaPipe
-   runs in the browser; no frame leaves the machine. Say: the camera must be a
-   native webcam, so OBS, Camo, DroidCam and other virtual cameras are refused,
-   and the desktop shell also refuses virtual machines and capture displays.
-   If the webcam is unplugged or swapped mid-exam it is noted in the report.
-3. **Liveness colour flash and fallbacks (about 60s).** Click **🙋 Verify I'm
-   here** in the top bar. It opens the native webcam itself, shows three random
-   full-screen colours and checks that the face reflects each one. Say: the
-   sequence is HMAC-signed so it cannot be forged or replayed, and scoring is
-   relative to each student's own baseline. Then show the alternatives: **Try
-   head turn instead** (on-device head pose, for a room that is too bright) and
-   **I can't do the visual check** (say three random words, checked by local
-   Whisper). Say: a student can always pass.
-4. **Keystroke and tab signals (about 45s).** Type an answer; answers autosave.
-   Switch tabs, lose focus or paste to show the violation banner. Audio checks also start
-   automatically; speak to show the local Whisper transcript. Say:
-   typing rhythm is plain statistics computed in the browser, and every signal
-   is shown to the student.
-5. **Optional: desk camera on iPhone (about 45s).** Choose **Require iPhone** to
-   open the pairing modal. Its "Optional desk camera" section explains what is
-   sent. Pair the iPhone app, turn on its desk camera and show "Desk camera: on".
-   Say: Apple's Vision framework runs on the phone; only a people count and two
-   yes/no flags are sent, never pictures. Skip if no iPhone is available.
-6. **Adaptive recording status (about 30s).** Say: recording is opt-in. Under
-   "Screen recording (optional)" choose **Start recording**; the status line
-   shows the chosen quality (for example "720p (fast network)") and upload
-   progress. Quality steps down on a slow connection. Segments go to the
-   school's OneDrive when Graph is configured, and are saved on the student's
-   computer if the connection is poor or cloud recording is not configured. The
-   exam never waits on an upload.
-7. **Submit (about 15s).** Click **Submit Exam** and confirm. Say: the receipt is
-   recorded and answers are idempotent.
-8. **Transparency report (about 45s).** Open "What monitoring recorded". Say:
-   the student sees every recorded event in plain language. It is a record for
-   review, not a verdict.
-9. **Secondary: instructor similarity and AI check (about 60s, optional).** Needs
-   `GEMINI_API_KEYS` and a network. Sign out, sign in as the instructor and open
-   "Integrity review". Run **Cross-student similarity** to show flagged answer
-   pairs, then **AI-written answer check** to show per-answer scores with quoted
-   phrases. Say: these are optional cloud aids, not the core, and they are leads
-   for a human conversation.
-10. **Optional: pull the network (about 30s).** Turn Wi-Fi off (after
-    `npm run vision:prepare` and `npm run setup:whisper`) and repeat beat 2 or 3.
-    Say: if cloud services disappear, the core still runs. Gemini features will
-    not; see [LOCAL_AI.md](LOCAL_AI.md). Turn Wi-Fi back on afterwards.
-11. **Optional: desktop shell and live link.** `npm run setup:desktop` once, then
-    `npm run dev` inside `apps/desktop` launches the Electron lockdown shell (see
-    [desktop recovery](desktop-recovery.md)). To let judges try the app from a
-    browser, run `npm run share` (needs `SHARE_HOST`, see the README).
+## If the venue Wi-Fi is bad
 
-## Talking points
+Everything in beats 1–6 runs on the laptop with no network. Skip beat 7 (it
+needs Gemini) or show the instructor screenshots instead. For iPhone pairing, put
+the laptop and phone on the laptop's own hotspot.
 
-- Local-first: the core AI runs on-device and works without cloud services;
-  Gemini is secondary. Full inventory in [LOCAL_AI.md](LOCAL_AI.md).
-- Consent first: students see what is monitored before, and what was recorded
-  after.
-- Transparency: the report lists every recorded event; nothing is an automatic
-  verdict.
-- Security fixes: auth, ownership and CSRF checks on every integrity route;
-  signed liveness challenges. The baseline bugs are in [AUDIT.md](AUDIT.md).
-- Incremental history: read [CHANGELOG.md](../CHANGELOG.md) and
-  `git log --oneline`.
-- CI is green on every push (`npm run validate`).
+## The script (4:45)
+
+| Time      | Beat                              | Do                                                                                                                                                         | Say                                                                                                                                                                                                       |
+| --------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0:00–0:20 | **Hook**                          | Title slide or the sign-in page.                                                                                                                           | "Online exams either trust students blindly, or stream their webcam to a cloud proctor. We run the AI on the student's own laptop instead."                                                               |
+| 0:20–0:45 | **Consent**                       | Sign in as the student, click **Start exam**. Show the "Before you begin" list, tick the box, grant camera and microphone.                                 | "Nothing starts until the student reads exactly what is monitored and agrees. Then the checks start by themselves."                                                                                       |
+| 0:45–1:35 | **On-device camera**              | Point at the camera panel: face and head pose. Look away, then hold a phone up to the webcam.                                                              | "MediaPipe runs inside the browser. No frame leaves this laptop. Only a real webcam is accepted: OBS and other virtual cameras are refused."                                                              |
+| 1:35–2:25 | **Liveness**                      | Click **🙋 Verify I'm here** → **Start**. The screen flashes three colours.                                                                                | "The server picks a random colour sequence and signs it; the camera must see your face reflect it in order. Too bright? There's a head-turn check, and a spoken-words option, so every student can pass." |
+| 2:25–2:55 | **Audio + typing**                | Type an answer (it autosaves). Say a sentence; show the Whisper transcript. Switch tabs once to show the banner.                                           | "Speech is transcribed by Whisper running locally. Typing rhythm and tab switches are simple statistics in the browser."                                                                                  |
+| 2:55–3:20 | **Pull the network**              | Turn Wi-Fi off. Hold the phone up again; detection still works.                                                                                            | "If the cloud disappears, the core keeps working." Turn Wi-Fi back on.                                                                                                                                    |
+| 3:20–3:50 | **Submit + transparency**         | Click **Submit Exam**, then open **What monitoring recorded**.                                                                                             | "The student sees every event we recorded, in plain language. These are leads for a human, never automatic verdicts."                                                                                     |
+| 3:50–4:30 | **Instructor (cloud, secondary)** | Switch to the instructor window: **Cross-student similarity** shows the flagged copied pair; **AI-written answer check** shows scores with quoted phrases. | "These two use Gemini and are optional extras for the teacher. Everything the student is checked with runs locally."                                                                                      |
+| 4:30–4:45 | **Close**                         | Back to the student report.                                                                                                                                | "Private by design, works on bad school Wi-Fi, no per-student cloud cost. That's why the AI runs locally."                                                                                                |
+
+**Cut first if running long:** the tab-switch in 2:25, then the AI-written
+check in 3:50. **Never cut:** consent, liveness, pull the network.
+
+**Optional extras (only if a judge asks):** the iPhone desk camera (Apple
+Vision on the phone; only a people count and two yes/no flags are sent), the
+desktop lockdown app, and adaptive cloud recording.
+
+## Likely judge questions
+
+- **What exactly runs locally?** Face, head-pose and phone detection
+  (MediaPipe), speech-to-text (whisper.cpp), the liveness checks, typing and
+  audio statistics, and on the iPhone, Apple Vision. Gemini only powers the
+  instructor's optional similarity/AI-writing checks and exam generation. Full
+  table: [LOCAL_AI.md](LOCAL_AI.md).
+- **Can it detect earbuds, smart glasses or a smartwatch?** Not in the
+  browser. The browser model (EfficientDet-Lite0) only knows the 80 everyday
+  COCO categories. "Cell phone" is one of them; earbuds, smart glasses and
+  watches aren't. OWL-ViT is "zero-shot", so it can look for anything you name
+  in text, but it's heavier (about 8 s per frame warm) and only runs if
+  `ENABLE_BACKEND_VISION=true`. Small items at webcam resolution are often
+  missed, so these are leads, not proof.
+- **What about privacy?** Camera frames never leave the device; recording is
+  opt-in; the phone sends flags, not pictures; the student sees everything we
+  recorded.
+- **False positives?** Every signal is a lead for a teacher to review, shown to
+  the student too. Liveness has alternatives so nobody is stuck.
+- **Can't a student cheat around it?** Some ways, yes: notes out of frame, a
+  hidden earpiece, special hardware. We block virtual cameras, virtual machines
+  and capture displays, and the optional desk camera covers the desk. We say
+  plainly that it isn't tamper-proof.
+- **Was this built today?** We started from our own earlier prototype and
+  disclosed it: see [EXISTING_CODE.md](EXISTING_CODE.md). Every hackathon change
+  is a separate commit in `git log` and listed in
+  [CHANGELOG.md](../CHANGELOG.md).
 
 ## If something fails
 

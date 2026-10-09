@@ -14,6 +14,8 @@ Every signal is a lead for a human to review. Nothing is an automatic verdict.
 > every known bug at import, is in [docs/AUDIT.md](docs/AUDIT.md).
 > Pre-existing code is disclosed in
 > [docs/EXISTING_CODE.md](docs/EXISTING_CODE.md).
+> Submission answers (local vs cloud, models, disclosures):
+> [docs/SUBMISSION.md](docs/SUBMISSION.md).
 
 ## Local-first AI
 
