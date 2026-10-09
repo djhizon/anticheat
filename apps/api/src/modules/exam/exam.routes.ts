@@ -2,6 +2,7 @@ import {
   DomainError,
   problemFromError,
   type AttemptId,
+  type ExamId,
   type Opaque,
   type ProblemCode,
 } from '@examguard/contracts';
@@ -105,6 +106,7 @@ const phonePresencePattern = /^\/exam\/attempts\/([^/]+)\/phone-presence$/u;
 /** Retired iPhone desk-camera route; answers 410 Gone. */
 const phoneDeskCameraRetiredPath = '/exam/phone-presence/desk-camera';
 const instructorVersionsPath = '/exam/instructor/versions';
+const instructorExamPrivacyPattern = /^\/exam\/instructor\/exams\/([^/]+)\/privacy$/u;
 const instructorAiCheckPattern =
   /^\/exam\/instructor\/versions\/([^/]+)\/questions\/([^/]+)\/ai-check$/u;
 const similarityPattern =
@@ -182,6 +184,7 @@ function isExamPath(path: string): boolean {
     path === instructorCapabilitiesPath ||
     timelinePattern.test(path) ||
     findingsPattern.test(path) ||
+    instructorExamPrivacyPattern.test(path) ||
     similarityPattern.test(path) ||
     instructorAiCheckPattern.test(path) ||
     [
@@ -661,6 +664,36 @@ export class ExamRoutes {
         return jsonResponse(request, this.config.allowedOrigins, 200, findings);
       }
 
+      // ── Instructor: exam privacy settings (retention, recording upload) ──
+      const privacyMatch = instructorExamPrivacyPattern.exec(path);
+      if (privacyMatch !== null && (method === 'GET' || method === 'PATCH')) {
+        const principal = this.requireInstructor(request);
+        const examId = parsePathId<'ExamId'>(privacyMatch[1] ?? '', 'Exam ID');
+        if (method === 'GET') {
+          if (this.service.findExam(examId as ExamId) === null) {
+            throw new DomainError('not_found', 'Exam not found.');
+          }
+          return jsonResponse(request, this.config.allowedOrigins, 200, {
+            privacy: this.service.getExamPrivacy(examId as ExamId),
+          });
+        }
+        this.boundary.validateUnsafe(request, principal);
+        const body = parseObject(request.body, 'Privacy settings required');
+        const retainDays = body.retainDays;
+        const recordingUpload = body.recordingUpload;
+        if (
+          (retainDays !== null && typeof retainDays !== 'number') ||
+          (recordingUpload !== null && typeof recordingUpload !== 'boolean')
+        ) {
+          throw new DomainError('validation_failed', 'Privacy settings are invalid.');
+        }
+        const privacy = this.service.updateExamPrivacy(examId as ExamId, {
+          retainDays: retainDays === undefined ? null : retainDays,
+          recordingUpload: recordingUpload === undefined ? null : recordingUpload,
+        });
+        return jsonResponse(request, this.config.allowedOrigins, 200, { privacy });
+      }
+
       // ── Instructor: attempt list for integrity review ─────────────────────
       if (method === 'GET' && path === instructorAttemptsPath && this.integrity !== null) {
         this.requireInstructor(request);
@@ -972,6 +1005,14 @@ export class ExamRoutes {
             'Recording segments are only accepted while the attempt is in progress.',
           );
         }
+        if (!delivery.exam.privacy.recordingUpload) {
+          // The exam (or RECORDING_UPLOAD=off) keeps recordings on the student's computer.
+          return jsonResponse(request, this.config.allowedOrigins, 403, {
+            code: 'forbidden',
+            message:
+              'Recordings stay on this computer for this exam. Segments are not uploaded; keep saving them locally.',
+          });
+        }
         if (!isRecordingUploadConfigured(this.config)) {
           return jsonResponse(request, this.config.allowedOrigins, 503, {
             code: 'invalid_state',
@@ -1014,6 +1055,7 @@ export class ExamRoutes {
           console.error('Recording segment upload failed.');
           throw new DomainError('invalid_state', 'Recording segment could not be stored.');
         }
+        this.integrity?.recordRecordingSegment(key, principal.user.id, chunkIndex, buffer.length);
 
         return jsonResponse(request, this.config.allowedOrigins, 202, { ok: true });
       }

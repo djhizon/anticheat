@@ -4,8 +4,20 @@ import { AUDIO_CONSENT_TEXT } from '../integrity/audioSession.js';
 export const NO_PAUSE_STATEMENT =
   'Once the exam begins, these checks run until you submit. You cannot pause or stop them yourself.';
 
+/** Consent copy for the screen recording, depending on where the segments go. */
+export function recordingStorageStatement(recordingUpload: boolean): string {
+  return recordingUpload
+    ? "Segments are uploaded to the school's secure OneDrive for exam review. Quality adapts to your connection; if the connection is poor, segments are saved on your computer instead."
+    : 'Recordings stay on this computer: segments are saved to your Downloads folder and are never uploaded. Your instructor may ask you for them.';
+}
+
+export interface ConsentListProps {
+  /** False when the exam keeps recordings on the student's computer only. */
+  readonly recordingUpload?: boolean;
+}
+
 /** Everything the exam monitors; shown in the first setup step. */
-export function ConsentList() {
+export function ConsentList({ recordingUpload = true }: ConsentListProps = {}) {
   return (
     <ul className="consent-list">
       <li>
@@ -72,10 +84,9 @@ export function ConsentList() {
           <strong>Screen Recording (required)</strong>
           <p>
             Your entire screen (not a single window) is recorded, with the built-in microphone, for
-            the whole exam: it starts in a setup step and runs until you submit. Segments are
-            uploaded to the school&apos;s secure OneDrive for exam review. Quality adapts to your
-            connection; if the connection is poor, segments are saved on your computer instead. If
-            recording stops, answering pauses until you resume it.
+            the whole exam: it starts in a setup step and runs until you submit.{' '}
+            {recordingStorageStatement(recordingUpload)} If recording stops, answering pauses until
+            you resume it.
           </p>
         </div>
       </li>

@@ -67,6 +67,9 @@ export function AttemptTimelineDashboard({
         </div>
       )}
       {selected !== '' && (
+        <PrivacySummary attempt={attempts?.find((attempt) => attempt.id === selected)} />
+      )}
+      {selected !== '' && (
         <IntegrityTimeline
           attemptId={selected}
           api={api}
@@ -82,5 +85,29 @@ export function AttemptTimelineDashboard({
         />
       )}
     </section>
+  );
+}
+
+/** Plain-language retention line for one exam-level setting. */
+export function retentionLabel(days: number): string {
+  return days === 0
+    ? 'kept until the attempt is removed'
+    : `deleted after ${days} day${days === 1 ? '' : 's'}`;
+}
+
+/** Read-only view of the exam's privacy settings for the selected attempt. */
+function PrivacySummary({ attempt }: { readonly attempt: InstructorAttemptSummary | undefined }) {
+  const privacy = attempt?.privacy;
+  if (privacy === undefined) return null;
+  const sameWindow = privacy.evidenceRetainDays === privacy.transcriptRetainDays;
+  return (
+    <p className="muted" data-testid="attempt-privacy">
+      Privacy for this exam: photos{sameWindow ? ' and transcripts ' : ' '}
+      {retentionLabel(privacy.evidenceRetainDays)}
+      {sameWindow ? '' : `, transcripts ${retentionLabel(privacy.transcriptRetainDays)}`}
+      {privacy.retainDays === null ? ' (server default)' : ''}; recordings{' '}
+      {privacy.recordingUpload ? 'uploaded to OneDrive' : 'stay on the student’s computer'}.
+      Attempts marked fine lose their photos, transcripts and recordings after 7 days.
+    </p>
   );
 }

@@ -2,7 +2,12 @@ import { randomBytes, randomUUID } from 'node:crypto';
 
 import { DomainError } from '@examguard/contracts';
 import type { GeminiRotatingClient } from './gemini.js';
-import type { InputWindowRow, IntegrityRepository } from './integrityRepository.js';
+import type {
+  InputWindowRow,
+  IntegrityRepository,
+  RecordingSegmentRef,
+} from './integrityRepository.js';
+import { resolveExamPrivacy } from '../exam/examPrivacy.js';
 import {
   CHALLENGE_TYPES,
   generateChallenge,
@@ -27,6 +32,7 @@ import { computeSimilarityReport, SIMILARITY_THRESHOLD } from './similarity.js';
 import {
   EVIDENCE_MAX_PER_ATTEMPT,
   EVIDENCE_MIN_GAP_MS,
+  REVIEWED_FINE_PURGE_DAYS,
   VIRTUAL_CAMERA_LABEL,
 } from '@examguard/contracts/exam';
 import type {
@@ -238,10 +244,15 @@ export class IntegrityService {
     // challenges expire in 90s; set LIVENESS_SECRET to survive restarts.
     private readonly livenessSecret: string = process.env.LIVENESS_SECRET ||
       randomBytes(32).toString('hex'),
-    // Transcript text older than this many days is deleted (AUDIO_RETAIN_DAYS).
+    // Default transcript retention (AUDIO_RETAIN_DAYS) for exams without their own setting.
     private readonly audioRetainDays: number = 30,
-    // Evidence snapshots older than this many days are deleted (EVIDENCE_RETAIN_DAYS); 0 keeps them.
+    // Default evidence/recording-metadata retention (EVIDENCE_RETAIN_DAYS); 0 keeps them.
     private readonly evidenceRetainDays: number = 30,
+    // Default for exams without a recording-upload choice (RECORDING_UPLOAD).
+    private readonly recordingUploadDefault: boolean = true,
+    // Best-effort removal of uploaded segments (OneDrive) once their metadata is swept.
+    private readonly remoteRecordingDeleter:
+      ((segments: readonly RecordingSegmentRef[]) => Promise<void>) | null = null,
   ) {}
 
   /** Whether the Gemini-backed instructor checks can run on this server. */
@@ -593,10 +604,69 @@ export class IntegrityService {
     this.repo.insertAudioTranscript(attemptId, capturedAt.toISOString(), clean);
   }
 
-  /** Deletes transcript text older than the retention window. Returns rows removed. */
+  /** Deletes transcript text older than each exam's retention window. Returns rows removed. */
   sweepExpiredTranscripts(now: Date = new Date()): number {
-    const cutoff = new Date(now.getTime() - this.audioRetainDays * 86_400_000);
-    return this.repo.deleteAudioTranscriptsBefore(cutoff.toISOString());
+    return this.repo.deleteExpiredAudioTranscripts(now.toISOString(), this.audioRetainDays);
+  }
+
+  // ── Screen recording metadata ────────────────────────────────────────────────
+
+  /** Remembers one uploaded segment so retention and "marked fine" sweeps can remove it later. */
+  recordRecordingSegment(
+    attemptId: string,
+    studentId: string,
+    segmentIndex: number,
+    bytes: number,
+    now: Date = new Date(),
+  ): void {
+    this.repo.insertRecordingSegment(attemptId, studentId, segmentIndex, bytes, now.toISOString());
+  }
+
+  /** Forgets uploaded-segment metadata past retention and asks OneDrive to drop the files. */
+  sweepExpiredRecordings(now: Date = new Date()): number {
+    const removed = this.repo.deleteExpiredRecordingSegments(
+      now.toISOString(),
+      this.evidenceRetainDays,
+    );
+    this.forgetRemoteSegments(removed);
+    return removed.length;
+  }
+
+  private forgetRemoteSegments(segments: readonly RecordingSegmentRef[]): void {
+    if (segments.length === 0 || this.remoteRecordingDeleter === null) return;
+    void this.remoteRecordingDeleter(segments).catch(() => {
+      console.warn('[retention] could not remove uploaded recording segments');
+    });
+  }
+
+  /**
+   * Deletes photos, transcripts and recording metadata of attempts a teacher marked "fine" more
+   * than 7 days ago. Findings and timeline rows stay. No-op until the review_decisions table
+   * exists. Returns the number of attempts purged.
+   */
+  sweepReviewedFine(now: Date = new Date()): number {
+    if (!this.repo.hasReviewDecisions()) return 0;
+    const cutoff = new Date(now.getTime() - REVIEWED_FINE_PURGE_DAYS * 86_400_000);
+    const attemptIds = this.repo.listAttemptsMarkedFineBefore(cutoff.toISOString());
+    if (attemptIds.length === 0) return 0;
+    const result = this.repo.purgeAttemptMedia(attemptIds);
+    this.forgetRemoteSegments(result.segments);
+    return attemptIds.length;
+  }
+
+  /** Runs every retention sweep (server start, daily). */
+  sweepRetention(now: Date = new Date()): {
+    transcripts: number;
+    evidence: number;
+    recordings: number;
+    reviewedFine: number;
+  } {
+    return {
+      transcripts: this.sweepExpiredTranscripts(now),
+      evidence: this.sweepExpiredEvidence(now),
+      recordings: this.sweepExpiredRecordings(now),
+      reviewedFine: this.sweepReviewedFine(now),
+    };
   }
 
   // ── Evidence snapshots ───────────────────────────────────────────────────────
@@ -635,11 +705,9 @@ export class IntegrityService {
     return id;
   }
 
-  /** Deletes evidence older than the retention window (0 days keeps everything). */
+  /** Deletes evidence older than each exam's retention window (0 days keeps everything). */
   sweepExpiredEvidence(now: Date = new Date()): number {
-    if (this.evidenceRetainDays <= 0) return 0;
-    const cutoff = new Date(now.getTime() - this.evidenceRetainDays * 86_400_000);
-    return this.repo.deleteEvidenceBefore(cutoff.toISOString());
+    return this.repo.deleteExpiredEvidence(now.toISOString(), this.evidenceRetainDays);
   }
 
   listEvidence(attemptId: string): EvidenceSnapshotMeta[] {
@@ -718,6 +786,14 @@ export class IntegrityService {
         level: findings?.level ?? 'none',
         topReason: findings?.topReason ?? null,
         findingCount: findings?.findings.length ?? 0,
+        privacy: resolveExamPrivacy(
+          { retainDays: row.retain_days, recordingUpload: row.recording_upload },
+          {
+            audioRetainDays: this.audioRetainDays,
+            evidenceRetainDays: this.evidenceRetainDays,
+            recordingUpload: this.recordingUploadDefault,
+          },
+        ),
       };
     });
   }

@@ -108,3 +108,46 @@ export async function uploadRecordingChunk(
     throw new Error(`Failed to upload chunk to Microsoft Graph: ${response.status}`);
   }
 }
+
+/**
+ * Best-effort removal of uploaded segments once their metadata was swept (retention or the
+ * "marked fine" purge). Missing files (404) count as removed; other failures are reported once.
+ */
+export async function deleteRecordingSegments(
+  config: ApiConfig,
+  segments: ReadonlyArray<{
+    readonly student_id: string;
+    readonly attempt_id: string;
+    readonly segment_index: number;
+  }>,
+  fetchImpl: typeof fetch = fetch,
+): Promise<number> {
+  const { msTargetEmail } = config;
+  if (!msTargetEmail || segments.length === 0) return 0;
+  const token = await getGraphToken(config);
+  let removed = 0;
+  let failed = 0;
+  for (const segment of segments) {
+    const path = recordingSegmentPath(
+      segment.student_id,
+      segment.attempt_id,
+      segment.segment_index,
+    );
+    const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(msTargetEmail)}/drive/root:${path}`;
+    try {
+      const response = await fetchImpl(url, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok || response.status === 404) removed += 1;
+      else failed += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  if (failed > 0) {
+    // Counts only: never log paths or Graph error bodies.
+    console.warn(`[retention] ${failed} uploaded recording segment(s) could not be removed.`);
+  }
+  return removed;
+}

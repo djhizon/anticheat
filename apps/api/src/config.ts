@@ -20,6 +20,11 @@ export interface ApiConfig {
   readonly audioRetainDays: number;
   /** Days before evidence snapshots are deleted; 0 keeps them until the attempt is removed. */
   readonly evidenceRetainDays: number;
+  /**
+   * Default for exams without their own setting (`RECORDING_UPLOAD=on|off`): whether screen
+   * recording segments may be uploaded to OneDrive or must stay on the student's computer.
+   */
+  readonly recordingUploadDefault: boolean;
   readonly livenessFlashThreshold: number;
   readonly livenessNoiseThreshold: number;
   readonly livenessJitterThreshold: number;
@@ -61,6 +66,13 @@ function parseBoolean(value: string | undefined, fallback: boolean, name: string
   }
 
   throw new Error(`${name} must be either true or false.`);
+}
+
+function parseRecordingUpload(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase() ?? '';
+  if (normalized === '' || normalized === 'on') return true;
+  if (normalized === 'off') return false;
+  throw new Error('RECORDING_UPLOAD must be either on or off.');
 }
 
 function normalizeOrigin(value: string, httpsOnly: boolean): string {
@@ -196,6 +208,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     evidenceRetainDays: env.EVIDENCE_RETAIN_DAYS
       ? parseInteger(env.EVIDENCE_RETAIN_DAYS, 30, 'EVIDENCE_RETAIN_DAYS')
       : 30,
+    recordingUploadDefault: parseRecordingUpload(env.RECORDING_UPLOAD),
     livenessFlashThreshold: env.LIVENESS_FLASH_THRESHOLD
       ? parseFloat(env.LIVENESS_FLASH_THRESHOLD)
       : 8.0,

@@ -66,10 +66,45 @@ https://github.com/djhizon/examguard
   need no email.
 - **Cloud recording (optional, opt-in):** recording segments upload to the
   school's OneDrive through Microsoft Graph; on a poor connection they are saved
-  locally instead.
+  locally instead. An exam can keep recordings on the student's computer only
+  (`RECORDING_UPLOAD=off` or the exam's setting), and then nothing is uploaded.
 - **First-time model downloads:** MediaPipe models (`npm run vision:prepare`),
   the Whisper model (`npm run setup:whisper`) and OWL-ViT (first use). After
   that, the core works offline.
+
+## What leaves the device
+
+One row per data type. "Cloud" means a third-party service outside the laptop
+and the classroom API; the API itself is the local server (or the Mac app).
+
+| Data type                                                          | Where it is processed                                      | Where it is stored                                                        | Who sees it                                                  | Retention                                                                                                                               | Cloud?                                                                                                           |
+| ------------------------------------------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Camera frames (face, gaze, phone detection)                        | Browser Web Worker on the student's laptop                 | Not stored; only derived events (look-away, no face, phone) go to the API | Student (report), instructor (timeline)                      | Events: until the attempt is removed                                                                                                    | No                                                                                                               |
+| Evidence photos (triggered stills)                                 | Captured in the browser, validated by the local API        | API SQLite database                                                       | Student (transparency report), instructor (Evidence gallery) | Exam retention setting (default `EVIDENCE_RETAIN_DAYS`, 30); deleted 7 days after an attempt is marked "fine"                           | No                                                                                                               |
+| Microphone audio                                                   | Local Whisper.cpp child process of the API                 | Audio is discarded after transcription; only text is kept in SQLite       | Student (report), instructor (timeline)                      | Transcript text: exam retention setting (default `AUDIO_RETAIN_DAYS`, 30); deleted 7 days after "fine"                                  | No                                                                                                               |
+| Screen recording segments                                          | Encoded in the browser (MediaRecorder)                     | Student's Downloads folder, or the school's OneDrive when upload is on    | Instructor (OneDrive); student (local files)                 | Uploaded metadata and files: exam retention setting (default 30 days); deleted 7 days after "fine". Local files: the student keeps them | Only when the exam's "recording upload" is on (`RECORDING_UPLOAD`, default on) and Microsoft Graph is configured |
+| Typing and pointer rhythm                                          | Browser (aggregates only, never keys or text)              | API SQLite (per-window statistics)                                        | Student (report), instructor (timeline)                      | Until the attempt is removed                                                                                                            | No                                                                                                               |
+| Liveness challenges                                                | Browser capture, scored by the local API                   | API SQLite (pass/fail and scores, no images)                              | Student, instructor                                          | Until the attempt is removed                                                                                                            | No                                                                                                               |
+| iPhone presence pings                                              | Companion app on the phone, local API                      | API SQLite (paired, lost, reconnected events)                             | Student, instructor                                          | Until the attempt is removed                                                                                                            | No (LAN only)                                                                                                    |
+| Answers and revisions                                              | Local API                                                  | API SQLite                                                                | Student, instructor                                          | Until the attempt is removed                                                                                                            | Only the instructor aids below                                                                                   |
+| Instructor AI aids (AI-written check, similarity, exam generation) | Google Gemini, only when an instructor runs them           | Results in API SQLite; Gemini receives the saved answer text or the topic | Instructor                                                   | Until the attempt is removed                                                                                                            | Yes, only with `GEMINI_API_KEYS` set; never student media                                                        |
+| Account email and password reset                                   | Supabase Auth (optional) with mail through Microsoft Graph | Supabase stores the email address; local accounts stay in SQLite          | The student, the school admin                                | Supabase account lifetime                                                                                                               | Yes, email address only, and only when `SUPABASE_URL` is set                                                     |
+
+Not in the table because it never exists: continuous webcam video, raw audio
+files, phone camera or microphone data, and keystroke contents.
+
+**Retention controls.** Each exam has one retention setting (`retain_days`,
+migration 0015) that covers evidence photos, uploaded-recording metadata and
+transcripts; when unset, `EVIDENCE_RETAIN_DAYS` and `AUDIO_RETAIN_DAYS` apply,
+and 0 keeps media until the attempt is removed. Sweeps run at API start, daily
+and on read. When a teacher marks an attempt "fine", its photos, transcripts and
+recording metadata (and the OneDrive files, best effort) are deleted 7 days
+later; findings and timeline counts stay. Instructors read and change the
+setting through `GET`/`PATCH /exam/instructor/exams/:examId/privacy`
+(`{ retainDays, recordingUpload }`, `null` = server default), and the attempt
+log shows it. "Keep recordings on this computer" (`recordingUpload: false`, or
+`RECORDING_UPLOAD=off` as the default) makes the recorder save segments locally
+only and the API refuse uploads with a 403.
 
 ## Models used
 

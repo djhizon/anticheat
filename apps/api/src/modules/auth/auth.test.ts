@@ -133,6 +133,7 @@ describe('authentication boundary', () => {
       'phone_enrollments',
       'phone_presence',
       'question_versions',
+      'recording_segments',
       'schema_migrations',
       'sessions',
       'users',

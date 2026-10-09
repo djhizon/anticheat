@@ -4,6 +4,7 @@ import type {
   ExamAnswerValue,
   ExamAssignmentListResponse,
   ExamDeliveryProjection,
+  ExamPrivacyProjection,
   ExamGenerationResponse,
   ExamSubmitRequest,
   ExamSubmitResponse,
@@ -173,7 +174,39 @@ function isDelivery(value: unknown): value is ExamDeliveryProjection {
   );
 }
 
+/** Used when a server does not send privacy settings (older API): upload on, 30-day retention. */
+export const DEFAULT_EXAM_PRIVACY: ExamPrivacyProjection = {
+  retainDays: null,
+  evidenceRetainDays: 30,
+  transcriptRetainDays: 30,
+  recordingUpload: true,
+};
+
+function isRetainDays(value: unknown): value is number {
+  return Number.isSafeInteger(value) && typeof value === 'number' && value >= 0;
+}
+
+/** Copies the exam's privacy settings, falling back to the defaults field by field. */
+export function sanitizePrivacy(value: unknown): ExamPrivacyProjection {
+  if (!isRecord(value)) return DEFAULT_EXAM_PRIVACY;
+  const retainDays = isRetainDays(value.retainDays) ? value.retainDays : null;
+  return {
+    retainDays,
+    evidenceRetainDays: isRetainDays(value.evidenceRetainDays)
+      ? value.evidenceRetainDays
+      : (retainDays ?? DEFAULT_EXAM_PRIVACY.evidenceRetainDays),
+    transcriptRetainDays: isRetainDays(value.transcriptRetainDays)
+      ? value.transcriptRetainDays
+      : (retainDays ?? DEFAULT_EXAM_PRIVACY.transcriptRetainDays),
+    recordingUpload:
+      typeof value.recordingUpload === 'boolean'
+        ? value.recordingUpload
+        : DEFAULT_EXAM_PRIVACY.recordingUpload,
+  };
+}
+
 function sanitizeDelivery(value: ExamDeliveryProjection): ExamDeliveryProjection {
+  const privacy = sanitizePrivacy(value.exam.privacy);
   return {
     exam: {
       id: value.exam.id,
@@ -181,6 +214,7 @@ function sanitizeDelivery(value: ExamDeliveryProjection): ExamDeliveryProjection
       title: value.exam.title,
       versionNumber: value.exam.versionNumber,
       durationSeconds: value.exam.durationSeconds,
+      privacy,
     },
     assignment: {
       id: value.assignment.id,
@@ -191,6 +225,7 @@ function sanitizeDelivery(value: ExamDeliveryProjection): ExamDeliveryProjection
       extraTimeSeconds: value.assignment.extraTimeSeconds,
       attemptId: value.assignment.attemptId,
       attemptStatus: value.assignment.attemptStatus,
+      privacy,
     },
     attempt: {
       id: value.attempt.id,
@@ -227,6 +262,7 @@ function sanitizeAssignmentList(value: ExamAssignmentListResponse): ExamAssignme
       extraTimeSeconds: assignment.extraTimeSeconds,
       attemptId: assignment.attemptId,
       attemptStatus: assignment.attemptStatus,
+      privacy: sanitizePrivacy(assignment.privacy),
     })),
   };
 }

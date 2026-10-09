@@ -11,6 +11,8 @@ import type {
 } from '@examguard/contracts/exam';
 import type { AttemptId, ExamId, Opaque, UserId, UserRole } from '@examguard/contracts';
 
+import type { ExamPrivacyRow } from './examPrivacy.js';
+
 export type ExamVersionStatus = 'draft' | 'published';
 
 export interface ExamRecord {
@@ -317,6 +319,31 @@ export class ExamRepository {
   isStudent(userId: UserId): boolean {
     const row = this.database.prepare('SELECT role FROM users WHERE id = ?').get(userId);
     return row?.role === ('student' satisfies UserRole);
+  }
+
+  /** Privacy settings of one exam (null when the exam does not exist). */
+  getExamPrivacy(id: ExamId): ExamPrivacyRow | null {
+    const row = this.database
+      .prepare('SELECT retain_days, recording_upload FROM exams WHERE id = ?')
+      .get(id);
+    if (row === undefined) {
+      return null;
+    }
+    const retainDays = row.retain_days;
+    const recordingUpload = row.recording_upload;
+    return {
+      retainDays: retainDays === null || retainDays === undefined ? null : Number(retainDays),
+      recordingUpload:
+        recordingUpload === 'on' || recordingUpload === 'off' ? recordingUpload : null,
+    };
+  }
+
+  /** Returns false when the exam does not exist. */
+  setExamPrivacy(id: ExamId, privacy: ExamPrivacyRow): boolean {
+    const result = this.database
+      .prepare('UPDATE exams SET retain_days = ?, recording_upload = ? WHERE id = ?')
+      .run(privacy.retainDays, privacy.recordingUpload, id);
+    return Number(result.changes) > 0;
   }
 
   insertExam(exam: NewExamRecord): void {

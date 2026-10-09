@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ExamApi } from './api.js';
-import { ConsentList, NO_PAUSE_STATEMENT } from './ConsentList.js';
+import { ConsentList, NO_PAUSE_STATEMENT, recordingStorageStatement } from './ConsentList.js';
 import {
   SETUP_STEPS,
   canAdvance,
@@ -61,6 +61,8 @@ export interface ExamSetupProps {
   /** Starts the exam timer. Rejects if it could not be started. */
   readonly onBegin: (result: SetupResult) => Promise<void>;
   readonly onCancel: () => void;
+  /** False when the exam keeps screen recordings on this computer (no OneDrive upload). */
+  readonly recordingUpload?: boolean;
 }
 
 function userAgent(): string {
@@ -133,6 +135,7 @@ export function ExamSetup({
   ensureAttempt,
   onBegin,
   onCancel,
+  recordingUpload = true,
 }: ExamSetupProps): React.ReactElement {
   // Typing-rhythm statistics (no keys, no text) collected while setup is open become the baseline
   // the exam compares against; the capture stops when the student presses Start exam.
@@ -401,7 +404,7 @@ export function ExamSetup({
     setScreenBusy(true);
     setScreenError('');
     try {
-      await startScreenRecording(attemptId, examApi);
+      await startScreenRecording(attemptId, examApi, { localOnly: !recordingUpload });
       setAnnounce('Screen recording is on.');
       void Promise.resolve()
         .then(() => examApi.patchEvents(attemptId, { event: 'recording_started' }))
@@ -506,7 +509,7 @@ export function ExamSetup({
 
         {step === 'consent' && (
           <>
-            <ConsentList />
+            <ConsentList recordingUpload={recordingUpload} />
             <p className="setup-strong">{NO_PAUSE_STATEMENT}</p>
             <label className="consent-checkbox">
               <input
@@ -675,6 +678,7 @@ export function ExamSetup({
               Your entire screen is recorded for the whole exam, together with the built-in
               microphone. Recording starts here and runs until you submit; you cannot pause it.
             </p>
+            {!recordingUpload && <p>{recordingStorageStatement(false)}</p>}
             {desktopAppsBridge() !== undefined ? (
               <p>
                 The app records your main screen automatically. If macOS asks, allow Screen

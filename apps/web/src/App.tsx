@@ -348,6 +348,7 @@ function StudentWorkspace({
         ensureAttempt={() => createSetupAttempt(assignment)}
         onBegin={(result) => beginExam(assignment, result)}
         onCancel={goBack}
+        recordingUpload={assignment.privacy?.recordingUpload !== false}
       />
     );
   }

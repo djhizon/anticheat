@@ -49,6 +49,31 @@ export interface TimelineAttemptListRow {
   readonly exam_title: string;
   readonly status: 'in_progress' | 'submitted' | 'expired';
   readonly started_at: string;
+  /** Exam-level privacy columns (migration 0015); NULL follows the server defaults. */
+  readonly retain_days: number | null;
+  readonly recording_upload: 'on' | 'off' | null;
+}
+
+/** One uploaded recording segment whose bytes live in OneDrive. */
+export interface RecordingSegmentRef {
+  readonly attempt_id: string;
+  readonly segment_index: number;
+  readonly student_id: string;
+}
+
+/**
+ * Per-row retention cutoff: the exam's `retain_days` when set, else the server default. Rows that
+ * cannot be joined to an exam (orphans) use the default. A window of 0 keeps rows indefinitely.
+ * Parameters: ?1 = now (ISO), ?2 = default days.
+ */
+function retentionJoin(alias: string, timestampColumn: string): string {
+  return `LEFT JOIN exam_attempts t ON t.id = ${alias}.attempt_id
+          LEFT JOIN exam_assignments a ON a.id = t.assignment_id
+          LEFT JOIN exam_versions v ON v.id = a.exam_version_id
+          LEFT JOIN exams e ON e.id = v.exam_id
+          WHERE COALESCE(e.retain_days, ?2) > 0
+            AND ${alias}.${timestampColumn} <
+              strftime('%Y-%m-%dT%H:%M:%fZ', ?1, '-' || COALESCE(e.retain_days, ?2) || ' days')`;
 }
 
 /** Raw, unmerged rows for one attempt; `buildTimeline` normalizes and merges them. */
@@ -276,11 +301,109 @@ export class IntegrityRepository {
     return row ?? null;
   }
 
-  deleteEvidenceBefore(cutoffIso: string): number {
+  /** Deletes snapshots older than each exam's retention window (default `defaultDays`). */
+  deleteExpiredEvidence(nowIso: string, defaultDays: number): number {
     const result = this.db
-      .prepare('DELETE FROM evidence_snapshots WHERE created_at < ?')
-      .run(cutoffIso);
+      .prepare(
+        `DELETE FROM evidence_snapshots WHERE id IN (
+           SELECT ev.id FROM evidence_snapshots ev ${retentionJoin('ev', 'created_at')})`,
+      )
+      .run(nowIso, defaultDays);
     return Number(result.changes);
+  }
+
+  // ── Recording segments (metadata only; the bytes are in OneDrive) ───────────
+
+  insertRecordingSegment(
+    attemptId: string,
+    studentId: string,
+    segmentIndex: number,
+    bytes: number,
+    uploadedAt: string,
+  ): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO recording_segments
+           (attempt_id, segment_index, student_id, bytes, uploaded_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(attemptId, segmentIndex, studentId, bytes, uploadedAt);
+  }
+
+  listRecordingSegments(attemptId: string): RecordingSegmentRef[] {
+    return this.db
+      .prepare(
+        `SELECT attempt_id, segment_index, student_id FROM recording_segments
+         WHERE attempt_id = ? ORDER BY segment_index`,
+      )
+      .all(attemptId) as unknown as RecordingSegmentRef[];
+  }
+
+  /** Forgets segment metadata older than each exam's retention window; returns what was removed. */
+  deleteExpiredRecordingSegments(nowIso: string, defaultDays: number): RecordingSegmentRef[] {
+    const select = `SELECT rs.attempt_id, rs.segment_index, rs.student_id FROM recording_segments rs
+       ${retentionJoin('rs', 'uploaded_at')}`;
+    const rows = this.db
+      .prepare(select)
+      .all(nowIso, defaultDays) as unknown as RecordingSegmentRef[];
+    if (rows.length === 0) return rows;
+    this.db
+      .prepare(
+        `DELETE FROM recording_segments WHERE (attempt_id, segment_index) IN (
+           SELECT attempt_id, segment_index FROM (${select}))`,
+      )
+      .run(nowIso, defaultDays);
+    return rows;
+  }
+
+  // ── Review decisions (table owned by a later migration; absent on older databases) ──
+
+  hasReviewDecisions(): boolean {
+    const row = this.db
+      .prepare(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ?`)
+      .get('review_decisions');
+    return row !== undefined;
+  }
+
+  /** Attempts whose latest review decision is "fine" and was made before the ISO cutoff. */
+  listAttemptsMarkedFineBefore(cutoffIso: string): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT r.attempt_id FROM review_decisions r
+          WHERE r.decision = 'fine' AND r.decided_at < ?
+            AND r.decided_at = (
+              SELECT MAX(decided_at) FROM review_decisions WHERE attempt_id = r.attempt_id)
+          ORDER BY r.attempt_id`,
+      )
+      .all(cutoffIso) as unknown as ReadonlyArray<{ attempt_id: string }>;
+    return rows.map((row) => String(row.attempt_id));
+  }
+
+  /**
+   * Deletes the media of the given attempts (evidence photos, transcript text and uploaded
+   * recording metadata). Findings and timeline rows are untouched.
+   */
+  purgeAttemptMedia(attemptIds: readonly string[]): {
+    evidence: number;
+    transcripts: number;
+    segments: RecordingSegmentRef[];
+  } {
+    let evidence = 0;
+    let transcripts = 0;
+    const segments: RecordingSegmentRef[] = [];
+    for (const attemptId of attemptIds) {
+      segments.push(...this.listRecordingSegments(attemptId));
+      evidence += Number(
+        this.db.prepare('DELETE FROM evidence_snapshots WHERE attempt_id = ?').run(attemptId)
+          .changes,
+      );
+      transcripts += Number(
+        this.db.prepare('DELETE FROM audio_transcripts WHERE attempt_id = ?').run(attemptId)
+          .changes,
+      );
+      this.db.prepare('DELETE FROM recording_segments WHERE attempt_id = ?').run(attemptId);
+    }
+    return { evidence, transcripts, segments };
   }
 
   // ── Audio transcripts (text only; raw audio is never stored) ────────────────
@@ -294,11 +417,14 @@ export class IntegrityRepository {
       .run(randomUUID(), attemptId, capturedAt, text);
   }
 
-  /** Deletes transcript rows captured before the ISO cutoff. Returns the number removed. */
-  deleteAudioTranscriptsBefore(cutoffIso: string): number {
+  /** Deletes transcripts older than each exam's retention window (default `defaultDays`). */
+  deleteExpiredAudioTranscripts(nowIso: string, defaultDays: number): number {
     const result = this.db
-      .prepare(`DELETE FROM audio_transcripts WHERE captured_at < ?`)
-      .run(cutoffIso);
+      .prepare(
+        `DELETE FROM audio_transcripts WHERE id IN (
+           SELECT tr.id FROM audio_transcripts tr ${retentionJoin('tr', 'captured_at')})`,
+      )
+      .run(nowIso, defaultDays);
     return Number(result.changes);
   }
 
@@ -524,11 +650,13 @@ export class IntegrityRepository {
   listAttemptsForInstructor(limit = 200): TimelineAttemptListRow[] {
     return this.db
       .prepare(
-        `SELECT t.id, u.email AS student_email, e.title AS exam_title, t.status, t.started_at
+        `SELECT t.id, u.email AS student_email, e.title AS exam_title, t.status, t.started_at,
+                x.retain_days, x.recording_upload
            FROM exam_attempts t
            JOIN exam_assignments a ON a.id = t.assignment_id
            JOIN users u ON u.id = a.student_id
            JOIN exam_versions e ON e.id = a.exam_version_id
+           LEFT JOIN exams x ON x.id = e.exam_id
           ORDER BY t.started_at DESC LIMIT ?`,
       )
       .all(limit) as unknown as TimelineAttemptListRow[];

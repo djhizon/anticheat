@@ -304,9 +304,10 @@ export function createApiServer(
   let sweepTimer: ReturnType<typeof setInterval> | undefined;
   const sweep = (): void => {
     try {
-      exam.integrity?.sweepExpiredTranscripts();
+      // Transcripts, evidence photos, uploaded-recording metadata and "marked fine" attempts.
+      exam.integrity?.sweepRetention();
     } catch (error) {
-      console.warn('[retention] transcript sweep failed', error);
+      console.warn('[retention] sweep failed', error);
     }
   };
   const startTranscriptSweep = (): void => {

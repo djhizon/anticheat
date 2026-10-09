@@ -38,7 +38,15 @@ export interface ScreenRecorderOptions {
   readonly onEnded?: (reason: string) => void;
   /** Running inside the Electron desktop app (default: detected from the user agent). */
   readonly desktop?: boolean;
+  /**
+   * "Keep recordings on this computer only": never probe or upload, every segment is saved
+   * locally (the exam's setting or the server's RECORDING_UPLOAD=off default).
+   */
+  readonly localOnly?: boolean;
 }
+
+export const LOCAL_ONLY_STATUS =
+  'Recordings stay on this computer • segments are saved to your Downloads and never uploaded.';
 
 function isDesktopApp(): boolean {
   return typeof navigator !== 'undefined' && /Electron/iu.test(navigator.userAgent ?? '');
@@ -110,10 +118,13 @@ function blobToBase64(blob: Blob): Promise<string> {
  */
 export function createScreenRecorder(
   attemptId: string,
-  examApi?: ExamApi,
+  api?: ExamApi,
   status: (message: string) => void = () => {},
   options: ScreenRecorderOptions = {},
 ) {
+  const localOnly = options.localOnly === true;
+  // Without an API handle the recorder never probes, uploads or retries the network.
+  const examApi = localOnly ? undefined : api;
   const now = options.now ?? Date.now;
   const desktop = options.desktop ?? isDesktopApp();
   const encode = options.encode ?? blobToBase64;
@@ -151,8 +162,10 @@ export function createScreenRecorder(
   function report() {
     if (mode === 'local') {
       status(
-        notice ||
-          'Recording on this computer • segments are saved to your Downloads, not uploaded.',
+        localOnly
+          ? LOCAL_ONLY_STATUS
+          : notice ||
+              'Recording on this computer • segments are saved to your Downloads, not uploaded.',
       );
       return;
     }

@@ -24,7 +24,9 @@ import type {
   ExamAnswerValue,
   ExamGenerationResponse,
   ExamGenerationSource,
+  ExamPrivacyProjection,
 } from '@examguard/contracts/exam';
+import { EXAM_RETAIN_DAYS_MAX } from '@examguard/contracts/exam';
 
 import type { TokenGenerator } from '../auth/session.js';
 import {
@@ -33,6 +35,11 @@ import {
   type GenerateQuestionsOptions,
   type GeneratedQuestion,
 } from '../integrity/questionGenerator.js';
+import {
+  DEFAULT_EXAM_PRIVACY,
+  resolveExamPrivacy,
+  type ExamPrivacyDefaults,
+} from './examPrivacy.js';
 import {
   ExamRepository,
   type ExamAssignmentListRecord,
@@ -103,6 +110,14 @@ export interface ExamServiceDependencies {
   readonly idGenerator: TokenGenerator;
   readonly questionGenerator?: ExamQuestionGenerator;
   readonly assertPhoneCanAnswer?: (attemptId: string) => void;
+  /** Server defaults for exams without their own privacy settings. */
+  readonly privacyDefaults?: ExamPrivacyDefaults;
+}
+
+/** Instructor input for an exam's privacy settings; `null` means "use the server default". */
+export interface ExamPrivacyUpdateInput {
+  readonly retainDays: number | null;
+  readonly recordingUpload: boolean | null;
 }
 
 interface NormalizedQuestion {
@@ -350,6 +365,42 @@ function stableOrder<T extends { readonly id: string }>(
 
 export class ExamService {
   constructor(private readonly dependencies: ExamServiceDependencies) {}
+
+  findExam(examId: ExamId): { readonly id: ExamId; readonly slug: string } | null {
+    const exam = this.dependencies.repository.findExamById(examId);
+    return exam === null ? null : { id: exam.id, slug: exam.slug };
+  }
+
+  /** Resolved privacy settings for an exam (server defaults when it has none or does not exist). */
+  getExamPrivacy(examId: ExamId): ExamPrivacyProjection {
+    return resolveExamPrivacy(
+      this.dependencies.repository.getExamPrivacy(examId),
+      this.dependencies.privacyDefaults ?? DEFAULT_EXAM_PRIVACY,
+    );
+  }
+
+  /** Sets an exam's retention window and recording-upload choice. */
+  updateExamPrivacy(examId: ExamId, input: ExamPrivacyUpdateInput): ExamPrivacyProjection {
+    const retainDays = input.retainDays;
+    if (
+      retainDays !== null &&
+      (!Number.isSafeInteger(retainDays) || retainDays < 0 || retainDays > EXAM_RETAIN_DAYS_MAX)
+    ) {
+      throw new DomainError('validation_failed', 'Retention days is invalid.');
+    }
+    const recordingUpload = input.recordingUpload;
+    if (recordingUpload !== null && typeof recordingUpload !== 'boolean') {
+      throw new DomainError('validation_failed', 'Recording upload setting is invalid.');
+    }
+    const updated = this.dependencies.repository.setExamPrivacy(examId, {
+      retainDays,
+      recordingUpload: recordingUpload === null ? null : recordingUpload ? 'on' : 'off',
+    });
+    if (!updated) {
+      throw new DomainError('not_found', 'Exam not found.');
+    }
+    return this.getExamPrivacy(examId);
+  }
 
   /** Synthetic fixture/publisher boundary; Pack 2 exposes no unauthenticated seed route. */
   async seedPublishedExam(input: SeedPublishedExamInput): Promise<SeedPublishedExamResult> {
@@ -889,6 +940,7 @@ export class ExamService {
       extraTimeSeconds: record.assignment.extraTimeSeconds,
       attemptId: record.attemptId,
       attemptStatus: record.attemptStatus,
+      privacy: this.getExamPrivacy(record.assignment.examVersion.examId),
     };
   }
 
@@ -902,6 +954,7 @@ export class ExamService {
     const orderedQuestions = awaitingStart
       ? []
       : stableOrder(attempt.attemptSeed, 'questions', record.questions);
+    const privacy = this.getExamPrivacy(examVersion.examId);
 
     return {
       exam: {
@@ -910,6 +963,7 @@ export class ExamService {
         title: examVersion.title,
         versionNumber: examVersion.versionNumber,
         durationSeconds: examVersion.durationSeconds,
+        privacy,
       },
       assignment: {
         id: attempt.assignment.id,
@@ -920,6 +974,7 @@ export class ExamService {
         extraTimeSeconds: attempt.assignment.extraTimeSeconds,
         attemptId: attempt.id,
         attemptStatus: attempt.status,
+        privacy,
       },
       attempt: {
         id: attempt.id,

@@ -9,6 +9,7 @@ import { GeminiRotatingClient } from '../integrity/gemini.js';
 import { IntegrityRepository } from '../integrity/integrityRepository.js';
 import { IntegrityService } from '../integrity/integrityService.js';
 import { detectObjectsRemotely } from '../integrity/backendVision.js';
+import { deleteRecordingSegments, isRecordingUploadConfigured } from '../integrity/graph.js';
 import { ExamRepository } from './exam.repository.js';
 import { ExamRoutes } from './exam.routes.js';
 import { ExamService } from './exam.service.js';
@@ -39,6 +40,11 @@ export function createExamPlugin(
     repository,
     clock: dependencies.clock ?? new SystemClock(),
     idGenerator: dependencies.idGenerator ?? new SecureTokenGenerator(),
+    privacyDefaults: {
+      audioRetainDays: config.audioRetainDays,
+      evidenceRetainDays: config.evidenceRetainDays,
+      recordingUpload: config.recordingUploadDefault,
+    },
     // Phone loss never blocks answering: the student UI shows a banner and the loss is logged.
   });
 
@@ -69,6 +75,10 @@ export function createExamPlugin(
     undefined,
     config.audioRetainDays,
     config.evidenceRetainDays,
+    config.recordingUploadDefault,
+    isRecordingUploadConfigured(config)
+      ? (segments) => deleteRecordingSegments(config, segments).then(() => undefined)
+      : null,
   );
 
   const routes = new ExamRoutes(

@@ -77,7 +77,16 @@ export function subscribeScreenRecording(listener: () => void): () => void {
  * the desktop app only open screen capture for a user gesture. Resolves once recording runs;
  * rejects with a student-facing message otherwise.
  */
-export async function startScreenRecording(attemptId: string, examApi?: ExamApi): Promise<void> {
+export interface StartScreenRecordingOptions {
+  /** The exam keeps recordings on this computer: never upload segments. */
+  readonly localOnly?: boolean;
+}
+
+export async function startScreenRecording(
+  attemptId: string,
+  examApi?: ExamApi,
+  options: StartScreenRecordingOptions = {},
+): Promise<void> {
   if (state.phase === 'running' && state.attemptId === attemptId) return;
   recorder?.stop();
   recorder = null;
@@ -91,6 +100,7 @@ export async function startScreenRecording(attemptId: string, examApi?: ExamApi)
       if (mine === generation) set({ status: message });
     },
     {
+      ...(options.localOnly === true ? { localOnly: true } : {}),
       firstIndex: readIndex(attemptId),
       onSegmentIndex: (next) => writeIndex(attemptId, next),
       onEnded: (reason) => {

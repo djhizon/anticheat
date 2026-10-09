@@ -62,6 +62,7 @@ describe('database migrations', () => {
         { version: 10, name: 'evidence_snapshots' },
         { version: 11, name: 'input_behaviour' },
         { version: 12, name: 'attempt_setup' },
+        { version: 15, name: 'exam_retention' },
       ]);
     } finally {
       database.close();

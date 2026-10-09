@@ -10,6 +10,15 @@ describe('API configuration', () => {
     expect(config.secureCookies).toBe(false);
   });
 
+  it('reads RECORDING_UPLOAD as the default for exams without their own setting', () => {
+    const base = { NODE_ENV: 'test', ALLOWED_ORIGINS: 'http://localhost:5173' };
+    expect(loadConfig(base).recordingUploadDefault).toBe(true);
+    expect(loadConfig({ ...base, RECORDING_UPLOAD: 'on' }).recordingUploadDefault).toBe(true);
+    expect(loadConfig({ ...base, RECORDING_UPLOAD: 'off' }).recordingUploadDefault).toBe(false);
+    expect(loadConfig({ ...base, RECORDING_UPLOAD: 'OFF' }).recordingUploadDefault).toBe(false);
+    expect(() => loadConfig({ ...base, RECORDING_UPLOAD: 'maybe' })).toThrow(/RECORDING_UPLOAD/u);
+  });
+
   it('requires explicit HTTPS origins in production', () => {
     expect(() => loadConfig({ NODE_ENV: 'production', COOKIE_SECURE: 'true' })).toThrow(
       'ALLOWED_ORIGINS must be explicitly configured with HTTPS origins in production.',

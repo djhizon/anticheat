@@ -11,6 +11,13 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+const privacy = {
+  retainDays: 14,
+  evidenceRetainDays: 14,
+  transcriptRetainDays: 14,
+  recordingUpload: false,
+} as const;
+
 const assignment = {
   id: 'assignment-1',
   examVersionId: 'version-1',
@@ -20,6 +27,7 @@ const assignment = {
   extraTimeSeconds: 0,
   attemptId: null,
   attemptStatus: null,
+  privacy,
 } as const;
 
 const delivery = {
@@ -29,6 +37,7 @@ const delivery = {
     title: 'Civics check-in',
     versionNumber: 1,
     durationSeconds: 1800,
+    privacy,
   },
   assignment: { ...assignment, attemptId: 'attempt-1', attemptStatus: 'in_progress' },
   attempt: {

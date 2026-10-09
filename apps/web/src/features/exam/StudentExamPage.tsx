@@ -580,7 +580,9 @@ export function StudentExamPage({
     setRecordingBusy(true);
     setRecordingError('');
     try {
-      await startScreenRecording(attemptIdForRecording, examApi);
+      await startScreenRecording(attemptIdForRecording, examApi, {
+        localOnly: currentDelivery?.exam.privacy?.recordingUpload === false,
+      });
     } catch (failure) {
       setRecordingError(
         failure instanceof Error ? failure.message : 'Screen recording could not start.',

@@ -16,11 +16,14 @@ beforeEach(() => {
 
 afterEach(() => db.close());
 
-it('deletes only audio transcripts older than the cutoff', () => {
+it('deletes only audio transcripts older than the default retention window', () => {
   repo.insertAudioTranscript('a1', '2026-01-01T00:00:00.000Z', 'old');
   repo.insertAudioTranscript('a1', '2026-10-01T00:00:00.000Z', 'new');
-  expect(repo.deleteAudioTranscriptsBefore('2026-09-01T00:00:00.000Z')).toBe(1);
+  // Rows without an exam (orphans) fall back to the default: 30 days before 2026-10-11.
+  expect(repo.deleteExpiredAudioTranscripts('2026-10-11T00:00:00.000Z', 30)).toBe(1);
   expect(repo.getAudioTranscripts('a1').map((r) => r.text)).toEqual(['new']);
+  // A default of 0 keeps everything.
+  expect(repo.deleteExpiredAudioTranscripts('2099-01-01T00:00:00.000Z', 0)).toBe(0);
 });
 
 it('looks up a phone enrollment by attempt id', () => {
@@ -70,6 +73,6 @@ it('stores, lists, reads, counts and expires evidence snapshots', () => {
   expect(repo.getEvidence('a1', 'e3')).toBeNull(); // scoped to its attempt
   expect(repo.countEvidenceSince('a1', 'webcam', 'look_away', '2026-09-01T00:00:00.000Z')).toBe(1);
   expect(repo.countEvidenceSince('a1', 'screen', 'look_away', '2026-09-01T00:00:00.000Z')).toBe(0);
-  expect(repo.deleteEvidenceBefore('2026-09-01T00:00:00.000Z')).toBe(1);
+  expect(repo.deleteExpiredEvidence('2026-10-11T00:00:00.000Z', 30)).toBe(1);
   expect(repo.listEvidence('a1').map((r) => r.id)).toEqual(['e2']);
 });

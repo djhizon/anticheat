@@ -86,6 +86,24 @@ it('without an API it saves local segments and a final partial clip and never ca
   expect(video.stop).toHaveBeenCalled();
   expect(mic.stop).toHaveBeenCalled();
 });
+it('with "keep recordings on this computer" it never probes or uploads even with an API', async () => {
+  const api = {
+    uploadRecordingChunk: vi.fn(),
+    speedtest: vi.fn(),
+  } as unknown as ExamApi & { uploadRecordingChunk: ReturnType<typeof vi.fn> };
+  const probe = vi.fn(async () => 50_000);
+  const status = vi.fn();
+  const recorder = createScreenRecorder('a', api, status, { probe, localOnly: true });
+  await recorder.start();
+  await vi.advanceTimersByTimeAsync(60000);
+  expect(probe).not.toHaveBeenCalled();
+  expect(api.uploadRecordingChunk).not.toHaveBeenCalled();
+  expect(URL.createObjectURL).toHaveBeenCalledOnce();
+  expect(status).toHaveBeenLastCalledWith(expect.stringContaining('stay on this computer'));
+  recorder.stop();
+  await vi.advanceTimersByTimeAsync(400);
+  expect(api.uploadRecordingChunk).not.toHaveBeenCalled();
+});
 it('releases screen capture if native microphone acquisition fails', async () => {
   mocks.acquire.mockRejectedValueOnce(new Error('No built-in microphone'));
   const recorder = createScreenRecorder('a');

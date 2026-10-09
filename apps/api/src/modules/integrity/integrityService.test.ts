@@ -295,23 +295,23 @@ it('words client-scored passes as client-measured, not a confirmed live feed', a
   expect(ok.detail).not.toMatch(/live feed confirmed/);
 });
 
-it('sweeps transcripts older than the retention window', () => {
-  const deleteAudioTranscriptsBefore = vi.fn(() => 2);
+it('sweeps transcripts with the server default as the fallback retention window', () => {
+  const deleteExpiredAudioTranscripts = vi.fn(() => 2);
   const svc = new IntegrityService(
-    { deleteAudioTranscriptsBefore } as unknown as IntegrityRepository,
+    { deleteExpiredAudioTranscripts } as unknown as IntegrityRepository,
     null,
     secret,
     10,
   );
   expect(svc.sweepExpiredTranscripts(new Date('2026-10-11T00:00:00.000Z'))).toBe(2);
-  expect(deleteAudioTranscriptsBefore).toHaveBeenCalledWith('2026-10-01T00:00:00.000Z');
+  expect(deleteExpiredAudioTranscripts).toHaveBeenCalledWith('2026-10-11T00:00:00.000Z', 10);
 });
 
 it('sweeps expired transcripts before returning a transcript', () => {
   const calls: string[] = [];
   const svc = new IntegrityService(
     {
-      deleteAudioTranscriptsBefore: () => (calls.push('sweep'), 0),
+      deleteExpiredAudioTranscripts: () => (calls.push('sweep'), 0),
       getAudioTranscripts: () => (calls.push('read'), []),
     } as unknown as IntegrityRepository,
     null,
@@ -319,4 +319,46 @@ it('sweeps expired transcripts before returning a transcript', () => {
   );
   svc.getTranscript('a');
   expect(calls).toEqual(['sweep', 'read']);
+});
+
+it('skips the "marked fine" purge until the review_decisions table exists', () => {
+  const listAttemptsMarkedFineBefore = vi.fn(() => ['a1']);
+  const purgeAttemptMedia = vi.fn(() => ({ evidence: 0, transcripts: 0, segments: [] }));
+  const svc = new IntegrityService(
+    {
+      hasReviewDecisions: () => false,
+      listAttemptsMarkedFineBefore,
+      purgeAttemptMedia,
+    } as unknown as IntegrityRepository,
+    null,
+    secret,
+  );
+  expect(svc.sweepReviewedFine(new Date('2026-10-11T00:00:00.000Z'))).toBe(0);
+  expect(listAttemptsMarkedFineBefore).not.toHaveBeenCalled();
+  expect(purgeAttemptMedia).not.toHaveBeenCalled();
+});
+
+it('purges media of attempts marked fine more than 7 days ago and forgets uploaded segments', async () => {
+  const segments = [{ attempt_id: 'a1', segment_index: 0, student_id: 's1' }];
+  const purgeAttemptMedia = vi.fn(() => ({ evidence: 1, transcripts: 1, segments }));
+  const remote = vi.fn(async () => undefined);
+  const listAttemptsMarkedFineBefore = vi.fn(() => ['a1']);
+  const svc = new IntegrityService(
+    {
+      hasReviewDecisions: () => true,
+      listAttemptsMarkedFineBefore,
+      purgeAttemptMedia,
+    } as unknown as IntegrityRepository,
+    null,
+    secret,
+    30,
+    30,
+    true,
+    remote,
+  );
+  expect(svc.sweepReviewedFine(new Date('2026-10-11T00:00:00.000Z'))).toBe(1);
+  expect(listAttemptsMarkedFineBefore).toHaveBeenCalledWith('2026-10-04T00:00:00.000Z');
+  expect(purgeAttemptMedia).toHaveBeenCalledWith(['a1']);
+  await Promise.resolve();
+  expect(remote).toHaveBeenCalledWith(segments);
 });

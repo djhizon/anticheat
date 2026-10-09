@@ -852,6 +852,131 @@ describe('exam delivery boundary', () => {
     );
   });
 
+  it('lets instructors set exam privacy and refuses uploads when recordings stay local', async () => {
+    const student = await registerStudent('local-rec@example.test');
+    const instructor = await registerStudent('privacy-teacher@example.test');
+    auth.database
+      .prepare(`UPDATE users SET role = 'instructor' WHERE id = ?`)
+      .run(instructor.userId);
+    const seeded = await seedExam();
+    const privacyPath = `/exam/instructor/exams/${seeded.examId}/privacy`;
+
+    // Defaults come from the server configuration (30 days, upload on).
+    expect((await exam.routes.handle(studentRequest(student, 'GET', privacyPath))).status).toBe(
+      403,
+    );
+    const initial = await exam.routes.handle(studentRequest(instructor, 'GET', privacyPath));
+    expect(initial.status).toBe(200);
+    expect(initial.body).toEqual({
+      privacy: {
+        retainDays: null,
+        evidenceRetainDays: 30,
+        transcriptRetainDays: 30,
+        recordingUpload: true,
+      },
+    });
+    expect(
+      (
+        await exam.routes.handle(
+          studentRequest(instructor, 'GET', '/exam/instructor/exams/missing/privacy'),
+        )
+      ).status,
+    ).toBe(404);
+
+    for (const bad of [
+      { retainDays: -1, recordingUpload: null },
+      { retainDays: 1.5, recordingUpload: null },
+      { retainDays: 4000, recordingUpload: null },
+      { retainDays: null, recordingUpload: 'off' },
+    ]) {
+      expect(
+        (await exam.routes.handle(studentRequest(instructor, 'PATCH', privacyPath, bad))).status,
+      ).toBe(400);
+    }
+    const updated = await exam.routes.handle(
+      studentRequest(instructor, 'PATCH', privacyPath, { retainDays: 7, recordingUpload: false }),
+    );
+    expect(updated.status).toBe(200);
+    expect(updated.body).toEqual({
+      privacy: {
+        retainDays: 7,
+        evidenceRetainDays: 7,
+        transcriptRetainDays: 7,
+        recordingUpload: false,
+      },
+    });
+
+    // Students see the same settings on their assignment and delivery.
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: student.userId,
+    });
+    const assignments = await exam.routes.handle(
+      studentRequest(student, 'GET', '/exam/assignments'),
+    );
+    expect((assignments.body as ExamAssignmentListResponse).assignments[0]?.privacy).toEqual({
+      retainDays: 7,
+      evidenceRetainDays: 7,
+      transcriptRetainDays: 7,
+      recordingUpload: false,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(student, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
+    const delivery = (started.body as ExamDeliveryResponse).delivery;
+    expect(delivery.exam.privacy.recordingUpload).toBe(false);
+
+    // Even with Graph configured, the server refuses the upload politely.
+    const routes = new ExamRoutes(exam.service, auth.boundary, {
+      ...config,
+      msTenantId: 't',
+      msClientId: 'c',
+      msClientSecret: 's',
+      msTargetEmail: 'a@b.test',
+    });
+    const refused = await routes.handle(
+      studentRequest(student, 'POST', `/exam/attempts/${delivery.attempt.id}/recording`, {
+        index: 0,
+        chunk: WEBM,
+      }),
+    );
+    expect(refused.status).toBe(403);
+    expect(refused.body).toMatchObject({
+      message: expect.stringContaining('stay on this computer'),
+    });
+    expect(uploadRecordingChunk).not.toHaveBeenCalled();
+
+    // Back to the server default: uploads are accepted and remembered for retention.
+    await exam.routes.handle(
+      studentRequest(instructor, 'PATCH', privacyPath, { retainDays: null, recordingUpload: null }),
+    );
+    const integrity = new IntegrityService(new IntegrityRepository(auth.database), null);
+    const accepting = new ExamRoutes(
+      exam.service,
+      auth.boundary,
+      {
+        ...config,
+        msTenantId: 't',
+        msClientId: 'c',
+        msClientSecret: 's',
+        msTargetEmail: 'a@b.test',
+      },
+      integrity,
+    );
+    const accepted = await accepting.handle(
+      studentRequest(student, 'POST', `/exam/attempts/${delivery.attempt.id}/recording`, {
+        index: 2,
+        chunk: WEBM,
+      }),
+    );
+    expect(accepted.status).toBe(202);
+    expect(
+      auth.database
+        .prepare('SELECT attempt_id, segment_index, student_id FROM recording_segments')
+        .all(),
+    ).toEqual([{ attempt_id: delivery.attempt.id, segment_index: 2, student_id: student.userId }]);
+  });
+
   describe('recording abuse controls', () => {
     async function setup(email: string) {
       const student = await registerStudent(email);

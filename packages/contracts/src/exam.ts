@@ -30,6 +30,23 @@ export interface ExamQuestionProjection {
   readonly options: readonly QuestionOption[];
 }
 
+/** Longest exam-level retention window, in days. */
+export const EXAM_RETAIN_DAYS_MAX = 3650;
+/** Days after an attempt is marked "fine" before its media is deleted. */
+export const REVIEWED_FINE_PURGE_DAYS = 7;
+
+/** Privacy settings of one exam, resolved against the server defaults. */
+export interface ExamPrivacyProjection {
+  /** Exam-level retention in days; null = server defaults, 0 = keep until the attempt is removed. */
+  readonly retainDays: number | null;
+  /** Effective days evidence photos and uploaded-recording metadata are kept (0 = until removed). */
+  readonly evidenceRetainDays: number;
+  /** Effective days transcript text is kept (0 = until removed). */
+  readonly transcriptRetainDays: number;
+  /** Whether recording segments may be uploaded to OneDrive; false keeps them on the student's computer. */
+  readonly recordingUpload: boolean;
+}
+
 export interface ExamAssignmentProjection {
   readonly id: AssignmentId;
   readonly examVersionId: ExamVersionId;
@@ -39,6 +56,7 @@ export interface ExamAssignmentProjection {
   readonly extraTimeSeconds: number;
   readonly attemptId: AttemptId | null;
   readonly attemptStatus: AttemptStatus | null;
+  readonly privacy: ExamPrivacyProjection;
 }
 
 export interface ExamAttemptProjection {
@@ -69,6 +87,7 @@ export interface ExamDeliveryProjection {
     readonly title: string;
     readonly versionNumber: number;
     readonly durationSeconds: number;
+    readonly privacy: ExamPrivacyProjection;
   };
   readonly assignment: ExamAssignmentProjection;
   readonly attempt: ExamAttemptProjection;
@@ -294,6 +313,7 @@ export interface InstructorAttemptSummary {
   /** Title of the most important finding, or null when there is none. */
   readonly topReason: string | null;
   readonly findingCount: number;
+  readonly privacy: ExamPrivacyProjection;
 }
 
 /** Instructor view of a published exam version and its free-text questions. */
