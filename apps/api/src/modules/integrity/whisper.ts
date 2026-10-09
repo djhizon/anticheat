@@ -156,7 +156,7 @@ export async function transcribeAudio(audioBuffer: Buffer): Promise<string> {
       '-l',
       'auto',
     ];
-    if (process.env.WHISPER_USE_GPU !== '1') args.push('-ng');
+    if (!useWhisperGpu()) args.push('-ng');
     const { stdout } = await execute(whisperBin, args, {
       timeout: 30000,
       maxBuffer: 1024 * 1024,
@@ -169,4 +169,17 @@ export async function transcribeAudio(audioBuffer: Buffer): Promise<string> {
     if (directory) await fs.rm(directory, { recursive: true, force: true }).catch(() => {});
     releaseSlot();
   }
+}
+
+/**
+ * GPU (Metal) only when asked for and on Apple Silicon. On Intel Macs the Metal
+ * backend returns empty or garbage text (e.g. a lone quote), so CPU is forced.
+ */
+export function useWhisperGpu(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): boolean {
+  if (env.WHISPER_USE_GPU !== '1') return false;
+  return !(platform === 'darwin' && arch === 'x64');
 }

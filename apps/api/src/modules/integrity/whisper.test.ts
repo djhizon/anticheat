@@ -134,3 +134,11 @@ describe('bounded local transcription', () => {
     vi.unstubAllEnvs();
   });
 });
+
+it('uses the GPU only when asked for and never on Intel Macs', async () => {
+  const { useWhisperGpu } = await import('./whisper.js');
+  expect(useWhisperGpu({}, 'darwin', 'arm64')).toBe(false);
+  expect(useWhisperGpu({ WHISPER_USE_GPU: '1' }, 'darwin', 'arm64')).toBe(true);
+  expect(useWhisperGpu({ WHISPER_USE_GPU: '1' }, 'darwin', 'x64')).toBe(false);
+  expect(useWhisperGpu({ WHISPER_USE_GPU: '1' }, 'linux', 'x64')).toBe(true);
+});
