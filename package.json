@@ -25,6 +25,7 @@
     "setup:whisper": "bash scripts/setup-whisper.sh",
     "build:whisper-portable": "bash scripts/build-whisper-portable.sh",
     "setup:vision": "bash scripts/setup-vision.sh",
+    "ios:device": "bash scripts/ios-device-run.sh",
     "setup:desktop": "node node_modules/electron/install.js && npm run build --workspace @exam-anti-cheat/desktop",
     "supabase:templates": "node scripts/apply-supabase-templates.mjs",
     "supabase:mailer-templates": "node scripts/build-mailer-templates.mjs",
