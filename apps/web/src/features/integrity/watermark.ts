@@ -3,8 +3,8 @@ export function embedWatermark(text: string, attemptId: string): string {
   const encoder = new TextEncoder();
   const bytes = encoder.encode(attemptId);
   let binaryString = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binaryString += bytes[i].toString(2).padStart(8, '0');
+  for (const byte of bytes) {
+    binaryString += byte.toString(2).padStart(8, '0');
   }
   
   let watermark = '';

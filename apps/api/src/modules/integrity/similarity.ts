@@ -3,21 +3,11 @@
  * Run post-exam by instructor. Clusters answers per question and flags close pairs.
  */
 
+import type { SimilarityPair, SimilarityReportResponse } from '@exam-anti-cheat/contracts/exam';
+
 import type { GeminiRotatingClient } from './gemini.js';
 
-export interface SimilarityPair {
-  readonly studentAId: string;
-  readonly studentBId: string;
-  readonly score: number; // 0.0 – 1.0
-  readonly flagged: boolean; // score > threshold
-}
-
-export interface SimilarityReport {
-  readonly questionId: string;
-  readonly pairs: readonly SimilarityPair[];
-  readonly threshold: number;
-  readonly generatedAt: string;
-}
+export type SimilarityReport = SimilarityReportResponse;
 
 const SIMILARITY_THRESHOLD = 0.92;
 

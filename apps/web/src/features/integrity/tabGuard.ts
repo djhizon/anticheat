@@ -11,7 +11,8 @@ export type ViolationType =
   | 'page_hidden'
   | 'fullscreen_exit'
   | 'paste_detected'
-  | 'overlay_detected';
+  | 'overlay_detected'
+  | 'keystroke_violation';
 
 export interface ViolationEvent {
   readonly type: ViolationType;
@@ -101,6 +102,7 @@ export const VIOLATION_KICK_THRESHOLD: Record<ViolationType, number> = {
   fullscreen_exit: 3,  // 3 fullscreen exits = kick
   paste_detected: 10,  // 10 pastes = kick (already blocked but logged)
   overlay_detected: 1, // 1 transparent iframe = instant kick
+  keystroke_violation: Infinity, // bot-like typing is flagged for review, never auto-kicked
 };
 
 export function shouldKick(violations: readonly ViolationEvent[]): ViolationEvent | null {

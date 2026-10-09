@@ -116,3 +116,19 @@ export interface ExamSubmitResponse {
 }
 
 export type ExamStudentId = UserId;
+
+/** One pair of students whose answers to the same question are semantically close. */
+export interface SimilarityPair {
+  readonly studentAId: string;
+  readonly studentBId: string;
+  readonly score: number; // 0.0 – 1.0 cosine similarity
+  readonly flagged: boolean; // score > threshold
+}
+
+/** Instructor-only collusion report for one question. */
+export interface SimilarityReportResponse {
+  readonly questionId: string;
+  readonly pairs: readonly SimilarityPair[];
+  readonly threshold: number;
+  readonly generatedAt: string;
+}
