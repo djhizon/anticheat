@@ -64,6 +64,7 @@ vi.mock('electron', () => ({
   dialog: { showMessageBox: mocks.showMessageBox },
 }));
 
+import { screen } from 'electron';
 import { createWindow } from './main.js';
 const flush = async () => {
   for (let i = 0; i < 8; i++) await Promise.resolve();
@@ -114,6 +115,30 @@ describe('native window recovery', () => {
       cancelId: 0,
     });
     expect(callback).toHaveBeenCalledExactlyOnceWith({ video: source });
+  });
+  it('records the primary screen without a picker after the in-app opt-in click', async () => {
+    await createWindow();
+    const primary = { id: 'screen:2', name: 'Main', display_id: '2' };
+    mocks.getSources.mockResolvedValue([
+      { id: 'screen:1', name: 'Other', display_id: '1' },
+      primary,
+    ]);
+    (screen as unknown as { getPrimaryDisplay: () => { id: number } }).getPrimaryDisplay = () => ({
+      id: 2,
+    });
+    const handler = mocks.displayHandler.mock.calls[0]![0];
+    const callback = vi.fn();
+    handler(displayRequest(), callback);
+    await flush();
+    expect(mocks.showMessageBox).not.toHaveBeenCalled();
+    expect(callback).toHaveBeenCalledExactlyOnceWith({ video: primary });
+    for (const change of [{ userGesture: false }, { audioRequested: true }, { frame: null }]) {
+      const denied = vi.fn();
+      handler({ ...displayRequest(), ...change }, denied);
+      await flush();
+      expect(denied).toHaveBeenCalledExactlyOnceWith({});
+    }
+    delete (screen as unknown as Record<string, unknown>).getPrimaryDisplay;
   });
   it('denies cancelled selection and requests without a click, from subframes or for audio', async () => {
     await createWindow();

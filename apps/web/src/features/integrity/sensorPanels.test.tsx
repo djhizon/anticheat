@@ -40,6 +40,66 @@ it('keeps an inactive camera off without false readings or a CPU checkbox', asyn
   expect(container.querySelector('input')).toBeNull();
   expect(container.querySelector('button')!.disabled).toBe(true);
 });
+const camera = vi.hoisted(() => ({ start: vi.fn(async (_value: boolean) => {}) }));
+vi.mock('./cameraSession.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./cameraSession.js')>();
+  return {
+    ...original,
+    createCameraSession: () => ({
+      start: camera.start,
+      stop: vi.fn(),
+      destroy: vi.fn(),
+      calibrate: vi.fn(),
+    }),
+  };
+});
+const attempt = (active: boolean) => ({ id: 'a', active, deadline: Date.now() + 60000 });
+
+it('auto-starts camera checks once for an in-progress consented attempt', async () => {
+  await act(async () => root.render(<CameraIntegrityPanel attempt={attempt(true)} autoStart />));
+  expect(camera.start).toHaveBeenCalledOnce();
+});
+it('does not auto-start the camera without consent or for a submitted attempt', async () => {
+  await act(async () => root.render(<CameraIntegrityPanel attempt={attempt(true)} />));
+  await act(async () => root.render(<CameraIntegrityPanel attempt={attempt(false)} autoStart />));
+  expect(camera.start).not.toHaveBeenCalled();
+});
+it('auto-starts audio about one second after mount and does not retry a failure', async () => {
+  vi.useFakeTimers();
+  try {
+    mocks.acquire.mockRejectedValue(new Error('Microphone busy'));
+    await act(async () => root.render(<AudioPanel attemptId="a" active autoStart />));
+    expect(mocks.acquire).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(mocks.acquire).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain('Microphone busy');
+    expect(container.textContent).toContain('Retry audio');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000);
+    });
+    expect(mocks.acquire).toHaveBeenCalledOnce();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+it('does not auto-start audio for a submitted attempt or without consent', async () => {
+  vi.useFakeTimers();
+  try {
+    await act(async () => root.render(<AudioPanel attemptId="a" active={false} autoStart />));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    await act(async () => root.render(<AudioPanel attemptId="a" active />));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(mocks.acquire).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
 it('explains why consent alone cannot enable a QR and never sends invalid enrollment', async () => {
   const requirePhonePresence = vi.fn();
   await act(async () =>

@@ -1,7 +1,9 @@
 # Responsive local demo
 
-Camera checks start automatically for an active exam after the consent gate.
-Audio transcription and local screen recording retain explicit Start/Stop controls.
+Camera and audio checks start automatically for an active exam after the consent gate
+(camera first, audio about 1 s later so permission prompts and model loading do not
+collide; both panels are lazy-loaded and still have Stop/Start buttons, and a failed
+auto-start is not retried). The liveness check and screen recording stay user-initiated.
 This is a demonstration mode, not a guarantee of continuous monitoring.
 
 - **Camera:** face and available object processing, at most 1 inference/second.
@@ -30,11 +32,11 @@ This is a demonstration mode, not a guarantee of continuous monitoring.
 ## User-run checks
 
 1. Restart the API/Vite servers; reopen the rebuilt desktop app. Camera checks start
-   after consent; audio and recording remain manually started.
+   after consent, audio about a second later; recording remains manually started.
 2. Wait for camera checks, calibrate facing forward, then turn left/right/up/down.
    Verify direction against your physical movement; camera-relative signs may differ
    from a mirrored preview. OBS must not replace the selected physical camera.
-3. Start audio, confirm the built-in label, and speak a synthetic test sentence during
+3. Confirm audio started on its own, confirm the built-in label, and speak a synthetic test sentence during
    capture. Check transcript or actionable error, then Stop. Test permission denial.
 4. Enter the printed private Wi-Fi origin, consent, create QR and scan with the
    installed iPhone app. Complete both iPhone toggles for HTTP, then Connect.

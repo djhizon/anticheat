@@ -275,7 +275,10 @@ export async function createWindow(): Promise<void> {
   session.defaultSession.setPermissionCheckHandler(() => true);
 
   // Electron needs a source-selection handler; granting generic media permission
-  // alone does not implement getDisplayMedia. Never silently choose a screen.
+  // alone does not implement getDisplayMedia. The request is only honoured for a
+  // trusted app frame with a user gesture (the student's explicit "Start recording"
+  // click inside the consented exam). In that case the primary screen is used
+  // without a second picker; if it cannot be identified, the picker is shown.
   let screenPickerOpen = false;
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     if (screenPickerOpen) {
@@ -315,6 +318,16 @@ export async function createWindow(): Promise<void> {
           fetchWindowIcons: false,
         });
         if (!trusted() || sources.length === 0) return finish({});
+        let primaryId: string | null = null;
+        try {
+          primaryId = String(screen.getPrimaryDisplay().id);
+        } catch {
+          /* Fall back to the explicit picker. */
+        }
+        const primary = primaryId
+          ? sources.find((source) => source.display_id === primaryId)
+          : undefined;
+        if (primary) return finish({ video: primary }); // No system/loopback audio.
         const choice = await dialog.showMessageBox(window, {
           type: 'question',
           title: 'Exam screen recording',

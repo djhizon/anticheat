@@ -36,6 +36,8 @@ export interface StudentExamPageProps {
   readonly loading: boolean;
   readonly onBack: () => void;
   readonly examApi?: ExamApi;
+  /** True only after the consent checkbox and camera/microphone grant in the consent modal. */
+  readonly sensorsConsented?: boolean;
   readonly violations?: import('../integrity/tabGuard.js').ViolationEvent[];
   readonly onViolation?: (event: import('../integrity/tabGuard.js').ViolationEvent) => void;
 }
@@ -64,6 +66,7 @@ export function StudentExamPage({
   loading,
   onBack,
   examApi,
+  sensorsConsented = false,
   violations = [],
   onViolation,
 }: StudentExamPageProps): React.ReactElement {
@@ -918,7 +921,7 @@ export function StudentExamPage({
             <div className="sidebar-section">
               <p className="sidebar-label">📷 Camera &amp; Detection</p>
               <Suspense fallback={<p className="sidebar-loading">Loading…</p>}>
-                <CameraIntegrityPanel attempt={attemptProps} />
+                <CameraIntegrityPanel attempt={attemptProps} autoStart={sensorsConsented} />
               </Suspense>
             </div>
           </aside>
@@ -1059,6 +1062,7 @@ export function StudentExamPage({
                 <AudioPanel
                   attemptId={visibleDelivery.attempt.id}
                   active={isActive}
+                  autoStart={sensorsConsented}
                   {...(examApi ? { examApi } : {})}
                 />
               </Suspense>

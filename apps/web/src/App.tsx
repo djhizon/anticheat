@@ -303,6 +303,7 @@ function StudentWorkspace({
         delivery={delivery}
         error={error}
         examApi={examApi}
+        sensorsConsented={consentChecked && permissionsGranted}
         loading={examLoading}
         onBack={goBack}
         violations={violations}
@@ -328,7 +329,8 @@ function StudentWorkspace({
                   <strong>Camera &amp; Face Detection</strong>
                   <p>
                     Your face will be monitored throughout the exam to verify your identity and
-                    detect phone use.
+                    detect phone use. Camera checks start automatically when the exam opens; you can
+                    stop and restart them from the sidebar.
                   </p>
                 </div>
               </li>
@@ -338,7 +340,9 @@ function StudentWorkspace({
                   <strong>Audio Monitoring</strong>
                   <p>
                     Microphone access is requested to detect voices other than your own during the
-                    exam.
+                    exam. Audio checks start automatically a moment after the camera and can be
+                    stopped from the sidebar. The face-liveness check and screen recording are never
+                    started automatically.
                   </p>
                 </div>
               </li>

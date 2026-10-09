@@ -34,8 +34,8 @@ features come last and are optional.
 1. **Consent (about 30s).** Sign in as the student and start the exam. A "Before
    you begin" modal lists every monitor. Say: nothing starts until the student
    reads it and ticks the checkbox, and the core AI runs on this laptop.
-2. **On-device camera, native webcam only (about 45s).** Click **Start camera
-   checks**. Show face landmarks, head pose and phone detection. Say: MediaPipe
+2. **On-device camera, native webcam only (about 45s).** Camera checks start by themselves when the exam opens (Stop/Start
+   camera checks remain in the sidebar). Show face landmarks, head pose and phone detection. Say: MediaPipe
    runs in the browser; no frame leaves the machine. Say: the camera must be a
    native webcam, so OBS, Camo, DroidCam and other virtual cameras are refused,
    and the desktop shell also refuses virtual machines and capture displays.
@@ -49,8 +49,8 @@ features come last and are optional.
    **I can't do the visual check** (say three random words, checked by local
    Whisper). Say: a student can always pass.
 4. **Keystroke and tab signals (about 45s).** Type an answer; answers autosave.
-   Switch tabs, lose focus or paste to show the violation banner. Optionally
-   choose **Start audio** and speak to show the local Whisper transcript. Say:
+   Switch tabs, lose focus or paste to show the violation banner. Audio checks also start
+   automatically; speak to show the local Whisper transcript. Say:
    typing rhythm is plain statistics computed in the browser, and every signal
    is shown to the student.
 5. **Optional: desk camera on iPhone (about 45s).** Choose **Require iPhone** to

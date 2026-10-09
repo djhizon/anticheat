@@ -4,7 +4,14 @@ import { createCameraSession, emptyCamera } from './cameraSession.js';
 import { cameraEnvironment } from './cameraEnvironment.js';
 import { faceDirection } from './faceDirection.js';
 
-export function CameraIntegrityPanel({ attempt }: { readonly attempt: AttemptContext }) {
+export function CameraIntegrityPanel({
+  attempt,
+  autoStart = false,
+}: {
+  readonly attempt: AttemptContext;
+  /** Start once on mount when consent was given; a failure is never retried. */
+  readonly autoStart?: boolean;
+}) {
   const video = useRef<HTMLVideoElement>(null);
   const current = useRef(attempt);
   current.current = attempt;
@@ -27,14 +34,14 @@ export function CameraIntegrityPanel({ attempt }: { readonly attempt: AttemptCon
     controller.current = session;
     setSnapshot(emptyCamera());
     setLowLight(false);
-    // This panel mounts only after the exam consent gate. Capture stays bounded
-    // to one outstanding frame so model work cannot accumulate behind the UI.
-    if (attempt.active) void session.start(true);
+    // Auto-start runs once per attempt (never from a retry loop). Capture stays
+    // bounded to one outstanding frame so model work cannot accumulate.
+    if (autoStart && attempt.active) void session.start(true).catch(() => {});
     return () => {
       session.destroy();
       controller.current = null;
     };
-  }, [attempt.id, attempt.active, objects]);
+  }, [attempt.id, attempt.active, autoStart, objects]);
 
   useEffect(() => {
     if (!live) {
@@ -77,8 +84,8 @@ export function CameraIntegrityPanel({ attempt }: { readonly attempt: AttemptCon
         </button>
       </div>
       <p className="muted">
-        Camera checks start after consent and run at most once per second. Missing models are not
-        treated as clear results.
+        Camera checks start automatically when the exam opens (you can stop and restart them) and
+        run at most once per second. Missing models are not treated as clear results.
       </p>
       <div className="cam-preview">
         <video

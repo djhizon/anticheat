@@ -4,14 +4,19 @@ import { createAudioRecorder } from './audioRecorder.js';
 import { acquireBuiltInMicrophone } from './builtInMicrophone.js';
 import type { ExamApi } from '../exam/api.js';
 
+export const AUTO_START_DELAY_MS = 1000;
+
 export function AudioPanel({
   attemptId,
   active,
   examApi,
+  autoStart = false,
 }: {
   readonly attemptId: string;
   readonly active: boolean;
   readonly examApi?: ExamApi;
+  /** Start once, shortly after the camera, when consent was given. Never retried. */
+  readonly autoStart?: boolean;
 }) {
   const [enabled, setEnabled] = useState(false);
   const [snapshot, setSnapshot] = useState<AudioSnapshot | null>(null);
@@ -23,6 +28,14 @@ export function AudioPanel({
     setEnabled(false);
     setTranscript([]);
   }, [attemptId]);
+  useEffect(() => {
+    // Deliberately independent of `enabled`/`error`: a failed start leaves the
+    // manual button and error visible instead of retrying. Delay lets the camera
+    // permission prompt and model loading finish first.
+    if (!autoStart || !active) return;
+    const timer = setTimeout(() => setEnabled(true), AUTO_START_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [autoStart, active, attemptId]);
   useEffect(() => {
     if (!active || !enabled) return;
     let cancelled = false;
