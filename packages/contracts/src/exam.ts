@@ -166,3 +166,22 @@ export interface SimilarityRunResponse {
   /** Student id → email, so instructors can recognise who wrote each answer. */
   readonly students: Readonly<Record<string, string>>;
 }
+
+/** Gemini's read on whether one student's answer looks AI-generated. */
+export interface AiCheckResult {
+  readonly studentId: string;
+  readonly email: string;
+  /** 0.0 clearly human … 1.0 very likely AI. Meaningless when `available` is false. */
+  readonly score: number;
+  readonly flags: readonly { readonly phrase: string; readonly reason: string }[];
+  readonly summary: string;
+  readonly available: boolean;
+}
+
+export interface AiCheckRunResponse {
+  readonly questionId: string;
+  readonly checkedAt: string;
+  readonly results: readonly AiCheckResult[];
+  /** True when more answers existed than one run checks. */
+  readonly truncated: boolean;
+}

@@ -16,6 +16,8 @@ export interface AiCheckReport {
   readonly flags: readonly AiCheckFlag[];
   readonly summary: string;
   readonly checkedAt: string;
+  /** False when Gemini could not be reached or returned unusable output. */
+  readonly available: boolean;
 }
 
 const SYSTEM_PROMPT = `You are an academic integrity assistant reviewing student exam answers.
@@ -68,6 +70,7 @@ STUDENT ANSWER: ${answer}`;
         : [],
       summary: String(parsed.summary ?? 'No summary available.'),
       checkedAt: new Date().toISOString(),
+      available: true,
     };
   } catch (error) {
     return {
@@ -75,6 +78,7 @@ STUDENT ANSWER: ${answer}`;
       flags: [],
       summary: `AI check unavailable: ${error instanceof Error ? error.message : 'unknown error'}`,
       checkedAt: new Date().toISOString(),
+      available: false,
     };
   }
 }

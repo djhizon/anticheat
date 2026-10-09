@@ -12,9 +12,11 @@ import {
   type ChallengeType,
   type GeneratedChallenge,
 } from './liveness.js';
-import { checkForAiGeneration, type AiCheckReport } from './aiCheck.js';
+import { checkForAiGeneration } from './aiCheck.js';
 import { computeSimilarityReport, SIMILARITY_THRESHOLD } from './similarity.js';
 import type {
+  AiCheckResult,
+  AiCheckRunResponse,
   InstructorExamVersion,
   SimilarityRunResponse,
   TransparencyEvent,
@@ -31,6 +33,8 @@ export interface PhoneEnrollResponse {
   readonly qrData: string;
   readonly expiresAt: string;
 }
+
+export const AI_CHECK_MAX_ANSWERS = 30;
 
 export interface TelemetryCounts {
   readonly keystrokes: number;
@@ -214,26 +218,25 @@ export class IntegrityService {
 
   // ── AI Check ─────────────────────────────────────────────────────────────────
 
-  async runAiCheck(question: string, answer: string): Promise<AiCheckReport> {
-    return checkForAiGeneration(this.requireGemini(), question, answer);
-  }
-
   // ── Instructor: cross-student similarity ─────────────────────────────────────
 
   listInstructorVersions(): InstructorExamVersion[] {
     return this.repo.listVersionsWithTextQuestions();
   }
 
-  async runSimilarity(examVersionId: string, questionId: string): Promise<SimilarityRunResponse> {
-    const version = this.repo
+  private requireTextQuestion(examVersionId: string, questionId: string) {
+    const question = this.repo
       .listVersionsWithTextQuestions()
-      .find((candidate) => candidate.id === examVersionId);
-    if (
-      version === undefined ||
-      !version.questions.some((question) => question.id === questionId)
-    ) {
+      .find((candidate) => candidate.id === examVersionId)
+      ?.questions.find((candidate) => candidate.id === questionId);
+    if (question === undefined) {
       throw new DomainError('not_found', 'The exam question was not found.');
     }
+    return question;
+  }
+
+  async runSimilarity(examVersionId: string, questionId: string): Promise<SimilarityRunResponse> {
+    this.requireTextQuestion(examVersionId, questionId);
     const answers = this.repo.listTextAnswers(examVersionId, questionId);
     // Fewer than two answers needs no embeddings, so it works without Gemini keys too.
     const report =
@@ -249,6 +252,37 @@ export class IntegrityService {
       report,
       students: Object.fromEntries(answers.map((answer) => [answer.studentId, answer.email])),
     };
+  }
+
+  /**
+   * Instructor-only: ask Gemini whether each student's saved answer to one
+   * question reads as AI-generated. Sequential and capped to stay inside the
+   * Gemini rate limits; results are leads for review, never penalties.
+   */
+  async runAiCheckForQuestion(
+    examVersionId: string,
+    questionId: string,
+    limit = AI_CHECK_MAX_ANSWERS,
+  ): Promise<AiCheckRunResponse> {
+    const question = this.requireTextQuestion(examVersionId, questionId);
+    const answers = this.repo.listTextAnswers(examVersionId, questionId);
+    const checkedAt = new Date().toISOString();
+    if (answers.length === 0) return { questionId, checkedAt, results: [], truncated: false };
+    const gemini = this.requireGemini();
+    const results: AiCheckResult[] = [];
+    for (const answer of answers.slice(0, limit)) {
+      const report = await checkForAiGeneration(gemini, question.prompt, answer.text);
+      results.push({
+        studentId: answer.studentId,
+        email: answer.email,
+        score: report.score,
+        flags: report.flags,
+        summary: report.summary,
+        available: report.available,
+      });
+    }
+    results.sort((a, b) => b.score - a.score);
+    return { questionId, checkedAt, results, truncated: answers.length > limit };
   }
 
   // ── Phone Enrollment ─────────────────────────────────────────────────────────

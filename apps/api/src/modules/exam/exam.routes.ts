@@ -38,7 +38,6 @@ const answersPattern = /^\/exam\/attempts\/([^/]+)\/answers$/u;
 const submitPattern = /^\/exam\/attempts\/([^/]+)\/submit$/u;
 // Pack 8: integrity routes
 const audioPattern = /^\/exam\/attempts\/([^/]+)\/audio$/u;
-const aiCheckPattern = /^\/exam\/attempts\/([^/]+)\/ai-check$/u;
 const livChallengePattern = /^\/exam\/attempts\/([^/]+)\/liveness-challenge$/u;
 const livVerifyPattern = /^\/exam\/attempts\/([^/]+)\/liveness-verify$/u;
 const eventsPattern = /^\/exam\/attempts\/([^/]+)\/events$/u;
@@ -52,6 +51,8 @@ const recordingPattern = /^\/exam\/attempts\/([^/]+)\/recording$/u;
 const speedtestPattern = /^\/exam\/speedtest$/u;
 const phonePresencePattern = /^\/exam\/attempts\/([^/]+)\/phone-presence$/u;
 const instructorVersionsPath = '/exam/instructor/versions';
+const instructorAiCheckPattern =
+  /^\/exam\/instructor\/versions\/([^/]+)\/questions\/([^/]+)\/ai-check$/u;
 const similarityPattern =
   /^\/exam\/instructor\/versions\/([^/]+)\/questions\/([^/]+)\/similarity$/u;
 
@@ -123,6 +124,7 @@ function isExamPath(path: string): boolean {
     path === '/exam/speedtest' ||
     path === instructorVersionsPath ||
     similarityPattern.test(path) ||
+    instructorAiCheckPattern.test(path) ||
     [
       '/exam/phone-presence/claim',
       '/exam/phone-presence/challenge',
@@ -135,7 +137,6 @@ function isExamPath(path: string): boolean {
     answersPattern.test(path) ||
     submitPattern.test(path) ||
     audioPattern.test(path) ||
-    aiCheckPattern.test(path) ||
     livChallengePattern.test(path) ||
     livVerifyPattern.test(path) ||
     eventsPattern.test(path) ||
@@ -421,29 +422,6 @@ export class ExamRoutes {
         return jsonResponse(request, this.config.allowedOrigins, 200, result);
       }
 
-      // ── Pack 8: AI Check ───────────────────────────────────────────────────
-      const aiCheckMatch = aiCheckPattern.exec(path);
-      if (method === 'POST' && aiCheckMatch !== null && this.integrity !== null) {
-        const principal = this.requireStudent(request);
-        this.boundary.validateUnsafe(request, principal);
-        const body = parseObject(request.body, 'AI check body required');
-        // Only check the caller's own saved answer; never arbitrary client-supplied text.
-        const delivery = await this.service.getAttemptDelivery(
-          parsePathId<'AttemptId'>(aiCheckMatch[1] ?? '', 'Attempt ID') as AttemptId,
-          principal.user.id,
-        );
-        const question = delivery.questions.find((candidate) => candidate.id === body.questionId);
-        const answer = question === undefined ? undefined : delivery.answers.answers[question.id];
-        if (question === undefined || typeof answer !== 'string' || answer.trim() === '') {
-          throw new DomainError(
-            'validation_failed',
-            'A saved text answer is required for an AI check.',
-          );
-        }
-        const report = await this.integrity.runAiCheck(question.prompt, answer);
-        return jsonResponse(request, this.config.allowedOrigins, 200, report);
-      }
-
       // ── Pack 8: Native companion events ───────────────────────────────────
       const eventsMatch = eventsPattern.exec(path);
       if (method === 'PATCH' && eventsMatch !== null && this.integrity !== null) {
@@ -553,6 +531,17 @@ export class ExamRoutes {
           status: result.status,
           detections: threats.map((threat) => ({ label: threat.label, score: threat.score })),
         });
+      }
+
+      const instructorAiCheckMatch = instructorAiCheckPattern.exec(path);
+      if (method === 'POST' && instructorAiCheckMatch !== null && this.integrity !== null) {
+        const principal = this.requireInstructor(request);
+        this.boundary.validateUnsafe(request, principal);
+        const result = await this.integrity.runAiCheckForQuestion(
+          parsePathId<'ExamVersionId'>(instructorAiCheckMatch[1] ?? '', 'Exam version ID'),
+          parsePathId<'QuestionVersionId'>(instructorAiCheckMatch[2] ?? '', 'Question ID'),
+        );
+        return jsonResponse(request, this.config.allowedOrigins, 200, result);
       }
 
       // ── Pack 8: Phone enrollment ──────────────────────────────────────────

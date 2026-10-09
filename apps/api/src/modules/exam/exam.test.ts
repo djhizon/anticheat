@@ -594,66 +594,72 @@ describe('exam delivery boundary', () => {
     expect(integrity.recordAppEvent).toHaveBeenCalledWith(attemptId, 'Discord', 2);
   });
 
-  it("runs AI checks only on the caller's own saved answers", async () => {
-    const owner = await registerStudent('aicheck@example.test');
-    const other = await registerStudent('other@example.test');
+  it('runs instructor-only AI checks across every saved answer to a question', async () => {
     const seeded = await seedExam();
-    const assignmentId = await exam.service.assignExam({
-      examVersionId: seeded.examVersionId,
-      studentId: owner.userId,
-    });
-    const started = await exam.routes.handle(
-      studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`),
-    );
-    const delivery = (started.body as ExamDeliveryResponse).delivery;
-    const attemptId = delivery.attempt.id;
-    const shortAnswer = delivery.questions.find((question) => question.type === 'short_answer')!;
-    const integrity = {
-      runAiCheck: vi.fn(async () => ({ score: 0.1, flags: [], summary: 'ok', checkedAt: 'now' })),
+    const instructor = await registerStudent('ai-teacher@example.test');
+    auth.database
+      .prepare(`UPDATE users SET role = 'instructor' WHERE id = ?`)
+      .run(instructor.userId);
+    let shortAnswer = { id: '', prompt: '' };
+    let studentAttempt = '';
+    let student!: StudentSession;
+    for (const [index, text] of [
+      'In conclusion, it is important to note…',
+      'i think tcp acks',
+    ].entries()) {
+      student = await registerStudent(`ai-student${index}@example.test`);
+      const assignmentId = await exam.service.assignExam({
+        examVersionId: seeded.examVersionId,
+        studentId: student.userId,
+      });
+      const start = await exam.service.startAttempt(assignmentId, student.userId);
+      studentAttempt = start.delivery.attempt.id;
+      shortAnswer = start.delivery.questions.find((q) => q.type === 'short_answer')!;
+      await exam.service.saveAnswers(start.delivery.attempt.id, student.userId, {
+        revision: 0,
+        idempotencyKey: `ai-check-save-${index}-key`,
+        answers: Object.fromEntries(
+          start.delivery.questions.map((q) => [q.id, q.id === shortAnswer.id ? text : null]),
+        ),
+      });
+    }
+    const gemini = {
+      generateContent: vi.fn(async (prompt: string) =>
+        JSON.stringify({
+          score: prompt.includes('STUDENT ANSWER: In conclusion') ? 0.9 : 0.1,
+          flags: prompt.includes('STUDENT ANSWER: In conclusion')
+            ? [{ phrase: 'In conclusion', reason: 'templated' }]
+            : [],
+          summary: 'assessed',
+        }),
+      ),
     };
-    const routes = new ExamRoutes(
-      exam.service,
-      auth.boundary,
-      config,
-      integrity as unknown as IntegrityService,
+    const integrity = new IntegrityService(
+      new IntegrityRepository(auth.database),
+      gemini as unknown as GeminiRotatingClient,
     );
-    const path = `/exam/attempts/${attemptId}/ai-check`;
+    const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity);
+    const path = `/exam/instructor/versions/${seeded.examVersionId}/questions/${shortAnswer.id}/ai-check`;
 
-    expect(
-      (await routes.handle(studentRequest(other, 'POST', path, { questionId: shortAnswer.id })))
-        .status,
-    ).toBe(404);
+    expect((await routes.handle(studentRequest(student, 'POST', path))).status).toBe(403);
     expect(
       (
         await routes.handle(
-          studentRequest(owner, 'POST', path, { question: 'q', answer: 'arbitrary text' }),
+          studentRequest(student, 'POST', `/exam/attempts/${studentAttempt}/ai-check`),
         )
       ).status,
-    ).toBe(400);
-    expect(
-      (await routes.handle(studentRequest(owner, 'POST', path, { questionId: shortAnswer.id })))
-        .status,
-    ).toBe(400);
-    expect(integrity.runAiCheck).not.toHaveBeenCalled();
-
-    const saved = await exam.routes.handle(
-      studentRequest(owner, 'PUT', `/exam/attempts/${attemptId}/answers`, {
-        revision: 0,
-        idempotencyKey: 'ai-check-save-key-1',
-        answers: Object.fromEntries(
-          delivery.questions.map((question) => [
-            question.id,
-            question.id === shortAnswer.id ? 'my own words' : null,
-          ]),
-        ),
-      }),
-    );
-    expect(saved.status).toBe(200);
-    const checked = await routes.handle(
-      studentRequest(owner, 'POST', path, { questionId: shortAnswer.id, answer: 'ignored' }),
-    );
-    expect(checked.status).toBe(200);
-    expect(integrity.runAiCheck).toHaveBeenCalledWith(shortAnswer.prompt, 'my own words');
+    ).toBe(404);
+    const run = await routes.handle(studentRequest(instructor, 'POST', path));
+    expect(run.status).toBe(200);
+    expect(run.body).toMatchObject({
+      truncated: false,
+      results: [
+        { email: 'ai-student0@example.test', score: 0.9, available: true },
+        { email: 'ai-student1@example.test', score: 0.1, available: true },
+      ],
+    });
+    expect(gemini.generateContent).toHaveBeenCalledTimes(2);
+    expect(gemini.generateContent.mock.calls[0]?.[0]).toContain(shortAnswer.prompt);
   });
 
   it('scopes liveness verification, revisions and recordings to the attempt owner', async () => {
@@ -703,7 +709,7 @@ describe('exam delivery boundary', () => {
   it('answers CORS preflight for every browser-called exam route', async () => {
     const paths = [
       '/exam/speedtest',
-      ...['recording', 'vision-check', 'telemetry', 'transparency', 'events', 'ai-check'].map(
+      ...['recording', 'vision-check', 'telemetry', 'transparency', 'events'].map(
         (route) => `/exam/attempts/attempt-1/${route}`,
       ),
     ];
