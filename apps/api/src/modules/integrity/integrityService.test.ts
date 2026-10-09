@@ -1,23 +1,28 @@
-import { expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
 import { IntegrityService } from './integrityService.js';
 import type { IntegrityRepository } from './integrityRepository.js';
 import type { GeminiRotatingClient } from './gemini.js';
 import { signNonce } from './liveness.js';
-vi.mock('./handDetector.js', () => {
-  throw new Error('Native library unavailable');
-});
+import { transcribeAudio } from './whisper.js';
+
+vi.mock('./whisper.js', () => ({ transcribeAudio: vi.fn() }));
 
 const secret = 'test-liveness-secret';
 const expiresAt = new Date(Date.now() + 60000).toISOString();
+const label = 'FaceTime HD Camera';
 
-function gestureRepo() {
+const colourData = JSON.stringify({ kind: 'colour_flash', sequence: ['red', 'green', 'blue'] });
+const turnData = JSON.stringify({ kind: 'head_turn', sequence: ['left', 'right'] });
+const wordData = JSON.stringify({ kind: 'spoken_words', words: ['apple', 'river', 'table'] });
+
+function repoFor(data: string, storage = 'flash') {
   return {
     getLivenessChallenge: () => ({
       attempt_id: 'a',
       used: false,
       expires_at: expiresAt,
-      challenge_type: 'gesture',
-      challenge_data: '{"gesture":"fingers_1"}',
+      challenge_type: storage,
+      challenge_data: data,
     }),
     insertLivenessChallenge: vi.fn(),
     markLivenessChallengeUsed: vi.fn(),
@@ -25,7 +30,7 @@ function gestureRepo() {
   };
 }
 
-function service(repo: ReturnType<typeof gestureRepo>) {
+function service(repo: ReturnType<typeof repoFor>) {
   return new IntegrityService(
     repo as unknown as IntegrityRepository,
     {} as GeminiRotatingClient,
@@ -33,94 +38,187 @@ function service(repo: ReturnType<typeof gestureRepo>) {
   );
 }
 
-const validSignature = signNonce(
-  { attemptId: 'a', nonce: 'nonce', type: 'gesture', expiresAt },
-  secret,
-);
+function sign(type: string, data: string) {
+  return signNonce({ attemptId: 'a', nonce: 'nonce', type, expiresAt, data }, secret);
+}
 
-it('records an unavailable lazy gesture engine without passing or reusing the challenge', async () => {
-  const repo = gestureRepo();
+const colourPayload = {
+  baseline: { r: 120, g: 100, b: 90 },
+  frames: [
+    { r: 150, g: 103, b: 91 },
+    { r: 122, g: 130, b: 92 },
+    { r: 121, g: 102, b: 118 },
+  ],
+};
+
+beforeEach(() => vi.mocked(transcribeAudio).mockReset());
+
+it('rejects missing or forged signatures without consuming the challenge', async () => {
+  const repo = repoFor(colourData);
+  const forged = [
+    undefined,
+    'garbage',
+    sign('head_turn', colourData),
+    // Valid signature for another sequence: the client cannot pick its own colours.
+    sign('colour_flash', JSON.stringify({ kind: 'colour_flash', sequence: ['red', 'red', 'red'] })),
+  ];
+  for (const signature of forged) {
+    const result = await service(repo).verifyLiveness(
+      'a',
+      'nonce',
+      3,
+      colourPayload,
+      undefined,
+      signature,
+      label,
+    );
+    expect(result).toMatchObject({ passed: false, detail: 'Challenge signature invalid' });
+  }
+  expect(repo.markLivenessChallengeUsed).not.toHaveBeenCalled();
+});
+
+it('issues signed challenges that cover the random sequence and are stored under a legal type', () => {
+  const repo = repoFor(colourData);
+  const challenge = service(repo).issueLivenessChallenge('a');
+  expect(challenge.type).toBe('colour_flash');
+  expect(repo.insertLivenessChallenge).toHaveBeenCalledWith(
+    challenge.nonce,
+    'a',
+    'flash',
+    JSON.stringify(challenge.data),
+    challenge.expiresAt,
+  );
+  expect(challenge.signature).toBe(
+    signNonce({ attemptId: 'a', ...challenge, data: JSON.stringify(challenge.data) }, secret),
+  );
+  expect(service(repo).issueLivenessChallenge('a', 'head_turn').type).toBe('head_turn');
+  expect(service(repo).issueLivenessChallenge('a', 'spoken_words').type).toBe('spoken_words');
+});
+
+it('rejects OBS and other virtual cameras, and missing camera labels, for every challenge', async () => {
+  for (const [data, storage] of [
+    [colourData, 'flash'],
+    [turnData, 'gesture'],
+    [wordData, 'word'],
+  ] as const) {
+    for (const camera of ['OBS Virtual Camera', 'Camo', 'DroidCam Source 3', undefined]) {
+      const result = await service(repoFor(data, storage)).verifyLiveness(
+        'a',
+        'nonce',
+        3,
+        colourPayload,
+        undefined,
+        sign(JSON.parse(data).kind, data),
+        camera,
+        'AAAA',
+      );
+      expect(result.passed).toBe(false);
+      expect(result.detail).toMatch(/virtual camera|No native camera/i);
+    }
+  }
+  expect(transcribeAudio).not.toHaveBeenCalled();
+});
+
+it('scores a colour flash from the measured readings', async () => {
+  const signature = sign('colour_flash', colourData);
+  const ok = await service(repoFor(colourData)).verifyLiveness(
+    'a',
+    'nonce',
+    3,
+    colourPayload,
+    undefined,
+    signature,
+    label,
+  );
+  expect(ok.passed).toBe(true);
+  const flatPayload = {
+    baseline: colourPayload.baseline,
+    frames: [colourPayload.baseline, colourPayload.baseline, colourPayload.baseline],
+  };
+  const flat = await service(repoFor(colourData)).verifyLiveness(
+    'a',
+    'nonce',
+    3,
+    flatPayload,
+    undefined,
+    signature,
+    label,
+  );
+  expect(flat.passed).toBe(false);
+});
+
+it('verifies head turns', async () => {
+  const samples = [0, -20, 0, 22, 0, 0].map((yaw, i) => ({ t: i * 250, yaw }));
+  const result = await service(repoFor(turnData, 'gesture')).verifyLiveness(
+    'a',
+    'nonce',
+    3,
+    { samples },
+    undefined,
+    sign('head_turn', turnData),
+    label,
+  );
+  expect(result.passed).toBe(true);
+});
+
+it('verifies spoken words through the mocked transcriber and consumes the challenge', async () => {
+  vi.mocked(transcribeAudio).mockResolvedValueOnce('Apple... table, thanks');
+  const repo = repoFor(wordData, 'word');
+  const audio = Buffer.from('audio').toString('base64');
   const result = await service(repo).verifyLiveness(
     'a',
     'nonce',
     3,
     {},
     undefined,
-    validSignature,
-    'FaceTime HD Camera',
+    sign('spoken_words', wordData),
+    label,
+    audio,
   );
-  expect(result.passed).toBe(false);
-  expect(result.detail).toContain('Gesture engine unavailable');
+  expect(result.passed).toBe(true);
+  expect(transcribeAudio).toHaveBeenCalledOnce();
   expect(repo.markLivenessChallengeUsed).toHaveBeenCalledWith('nonce');
-  expect(repo.insertLivenessEvent).toHaveBeenCalledOnce();
+  expect(JSON.stringify(repo.insertLivenessEvent.mock.calls)).not.toContain(audio);
 });
 
-it('rejects missing or forged signatures without consuming the challenge', async () => {
-  const repo = gestureRepo();
-  const forged = signNonce({ attemptId: 'a', nonce: 'nonce', type: 'flash', expiresAt }, secret);
-  for (const signature of [undefined, 'garbage', forged]) {
-    const result = await service(repo).verifyLiveness('a', 'nonce', 3, {}, undefined, signature);
-    expect(result).toMatchObject({ passed: false, detail: 'Challenge signature invalid' });
-  }
-  expect(repo.markLivenessChallengeUsed).not.toHaveBeenCalled();
-});
-
-it('issues challenges signed for their attempt', () => {
-  const repo = gestureRepo();
-  const challenge = service(repo).issueLivenessChallenge('a', new Date().toISOString());
-  expect(challenge.signature).toBe(signNonce({ attemptId: 'a', ...challenge }, secret));
-  expect(challenge.signature).not.toBe(signNonce({ attemptId: 'other', ...challenge }, secret));
-});
-
-function flashRepo() {
-  return {
-    ...gestureRepo(),
-    getLivenessChallenge: () => ({
-      ...gestureRepo().getLivenessChallenge(),
-      challenge_type: 'flash',
-    }),
-  };
-}
-const flashSignature = signNonce(
-  { attemptId: 'a', nonce: 'nonce', type: 'flash', expiresAt },
-  secret,
-);
-
-it('rejects OBS and other virtual cameras, and missing camera labels', async () => {
-  for (const label of ['OBS Virtual Camera', 'Camo', 'DroidCam Source 3', undefined]) {
-    const result = await service(flashRepo()).verifyLiveness(
-      'a',
-      'nonce',
-      3,
-      { brightnessDelta: 30 },
-      undefined,
-      flashSignature,
-      label,
-    );
-    expect(result.passed).toBe(false);
-    expect(result.detail).toMatch(/virtual camera|No native camera/i);
-  }
-});
-
-it('passes a flash challenge only when the measured brightness rises on a native webcam', async () => {
-  const lit = await service(flashRepo()).verifyLiveness(
+it('fails spoken words on few matches or transcription errors, never passing', async () => {
+  const signature = sign('spoken_words', wordData);
+  vi.mocked(transcribeAudio).mockResolvedValueOnce('only apple');
+  const few = await service(repoFor(wordData, 'word')).verifyLiveness(
     'a',
     'nonce',
     3,
-    { brightnessDelta: 14.2 },
+    {},
     undefined,
-    flashSignature,
-    'FaceTime HD Camera',
+    signature,
+    label,
+    'AAAA',
   );
-  expect(lit.passed).toBe(true);
-  const flat = await service(flashRepo()).verifyLiveness(
+  expect(few.passed).toBe(false);
+  vi.mocked(transcribeAudio).mockRejectedValueOnce(new Error('whisper missing'));
+  const broken = await service(repoFor(wordData, 'word')).verifyLiveness(
     'a',
     'nonce',
     3,
-    { brightnessDelta: 0.4 },
+    {},
     undefined,
-    flashSignature,
-    'FaceTime HD Camera',
+    signature,
+    label,
+    'AAAA',
   );
-  expect(flat.passed).toBe(false);
+  expect(broken).toMatchObject({ passed: false });
+});
+
+it('treats retired gesture challenges as unknown', async () => {
+  const legacy = JSON.stringify({ gesture: 'fingers_1' });
+  const result = await service(repoFor(legacy, 'gesture')).verifyLiveness(
+    'a',
+    'nonce',
+    3,
+    {},
+    undefined,
+    sign('unknown', legacy),
+    label,
+  );
+  expect(result).toMatchObject({ passed: false, detail: 'Unknown challenge type' });
 });

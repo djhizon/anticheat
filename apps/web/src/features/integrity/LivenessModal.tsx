@@ -1,6 +1,10 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import type { LivenessColour, LivenessTurnDirection } from '@exam-anti-cheat/contracts/exam';
+
 import type { ExamApi, LivenessChallenge } from '../exam/api.js';
-import { captureLivenessEvidence } from './livenessCapture.js';
+import { captureHeadTurn } from './headTurn.js';
+import { captureColourFlash } from './livenessCapture.js';
+import { captureSpokenWords } from './spokenWords.js';
 
 interface LivenessModalProps {
   readonly attemptId: string;
@@ -8,189 +12,237 @@ interface LivenessModalProps {
   readonly onComplete: (success: boolean) => void;
 }
 
-export function LivenessModal({ attemptId, examApi, onComplete }: LivenessModalProps) {
-  const [loading, setLoading] = useState(true);
-  const [challenge, setChallenge] = useState<LivenessChallenge | null>(null);
-  const [timeLeft, setTimeLeft] = useState(30);
-  const [submitting, setSubmitting] = useState(false);
-  const [resultMsg, setResultMsg] = useState<string | null>(null);
+type Preferred = 'head_turn' | 'spoken_words' | undefined;
+type Phase = 'loading' | 'ready' | 'running' | 'done';
 
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+const asList = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
+
+const button = (background: string): React.CSSProperties => ({
+  background,
+  color: 'white',
+  border: 'none',
+  padding: '0.9rem 2rem',
+  fontSize: '1.1rem',
+  borderRadius: '8px',
+  cursor: 'pointer',
+  fontWeight: 'bold',
+});
+
+const linkButton: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  color: '#93c5fd',
+  textDecoration: 'underline',
+  cursor: 'pointer',
+  fontSize: '1rem',
+  padding: '0.4rem',
+};
+
+export function LivenessModal({ attemptId, examApi, onComplete }: LivenessModalProps) {
+  const [phase, setPhase] = useState<Phase>('loading');
+  const [challenge, setChallenge] = useState<LivenessChallenge | null>(null);
+  const [status, setStatus] = useState('');
+  const [passed, setPassed] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const closing = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const alive = useRef(true);
+
+  const load = useCallback(
+    (preferred?: Preferred) => {
+      setPhase('loading');
+      setPassed(null);
+      setStatus('');
+      setError(null);
+      examApi
+        .postLivenessChallenge(attemptId, preferred)
+        .then((res) => {
+          if (!alive.current) return;
+          setChallenge(res);
+          setPhase('ready');
+        })
+        .catch(() => {
+          if (!alive.current) return;
+          setError('Could not get a check from the server. Close this and try again.');
+          setPhase('done');
+          setPassed(false);
+        });
+    },
+    [attemptId, examApi],
+  );
 
   useEffect(() => {
-    examApi
-      .postLivenessChallenge(attemptId)
-      .then((res) => {
-        setChallenge(res);
-        setLoading(false);
-        // Start 30s countdown
-        timerRef.current = setInterval(() => {
-          setTimeLeft((t) => {
-            if (t <= 1) {
-              clearInterval(timerRef.current!);
-              handleCapture(res); // auto capture at 0
-              return 0;
-            }
-            return t - 1;
-          });
-        }, 1000);
-      })
-      .catch(() => {
-        onComplete(false);
-      });
-
+    alive.current = true;
+    load();
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      alive.current = false;
+      if (closing.current) clearTimeout(closing.current);
     };
-  }, [attemptId, examApi]);
+  }, [load]);
 
-  const handleCapture = async (activeChallenge: LivenessChallenge | null = challenge) => {
-    if (!activeChallenge) return;
-    if (timerRef.current) clearInterval(timerRef.current);
-    setSubmitting(true);
-
+  const run = async () => {
+    if (!challenge) return;
+    setPhase('running');
+    setError(null);
     try {
-      // Opens the native webcam itself; OBS/virtual cameras are refused here.
-      const evidence = await captureLivenessEvidence(activeChallenge.type);
+      let request: Record<string, unknown>;
+      if (challenge.type === 'colour_flash') {
+        setStatus('Look at the screen and keep still. The screen will change colour briefly.');
+        const evidence = await captureColourFlash(
+          asList(challenge.data.sequence) as LivenessColour[],
+        );
+        request = {
+          payload: { baseline: evidence.baseline, frames: evidence.frames },
+          camera: { label: evidence.cameraLabel },
+        };
+      } else if (challenge.type === 'head_turn') {
+        const evidence = await captureHeadTurn(
+          asList(challenge.data.sequence) as LivenessTurnDirection[],
+          setStatus,
+        );
+        request = {
+          payload: { samples: evidence.samples },
+          camera: { label: evidence.cameraLabel },
+        };
+      } else {
+        setStatus('Getting the microphone ready…');
+        const evidence = await captureSpokenWords(undefined, () =>
+          setStatus(`Recording… say: ${asList(challenge.data.words).join(', ')}`),
+        );
+        request = {
+          payload: {},
+          audioBase64: evidence.audioBase64,
+          camera: { label: evidence.cameraLabel },
+        };
+      }
+      setStatus('Checking on this computer…');
       const res = await examApi.postLivenessVerify(attemptId, {
-        nonce: activeChallenge.nonce,
-        signature: activeChallenge.signature,
+        nonce: challenge.nonce,
+        signature: challenge.signature,
         layer: 3,
-        payload:
-          evidence.brightnessDelta === undefined
-            ? {}
-            : { brightnessDelta: evidence.brightnessDelta },
-        imageBase64: evidence.imageBase64,
-        camera: { label: evidence.cameraLabel },
+        ...request,
       });
-
-      setResultMsg(res.passed ? '✅ Verification Passed!' : `❌ ${res.detail}`);
-      setTimeout(() => onComplete(res.passed), 2500);
-    } catch (error) {
-      setResultMsg(
-        `❌ ${error instanceof Error ? error.message : 'Error submitting verification'}`,
-      );
-      setTimeout(() => onComplete(false), 3000);
+      if (!alive.current) return;
+      setPassed(res.passed);
+      setStatus(res.detail);
+      setPhase('done');
+      if (res.passed) closing.current = setTimeout(() => onComplete(true), 1800);
+    } catch (e) {
+      if (!alive.current) return;
+      setPassed(false);
+      setStatus('');
+      setError(e instanceof Error ? e.message : 'The check could not be completed.');
+      setPhase('done');
     }
   };
 
-  const radius = 50;
-  const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (timeLeft / 30) * circumference;
+  const words = challenge?.type === 'spoken_words' ? asList(challenge.data.words) : [];
+  const busy = phase === 'loading' || phase === 'running';
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="liveness-title"
       style={{
         position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
+        inset: 0,
         backgroundColor: 'rgba(0,0,0,0.85)',
         zIndex: 100000,
         display: 'flex',
-        flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
         color: '#fff',
-        backdropFilter: 'blur(10px)',
       }}
     >
       <div
         style={{
           background: '#1e1e1e',
-          padding: '3rem',
+          padding: '2.5rem',
           borderRadius: '16px',
           border: '1px solid #333',
           textAlign: 'center',
-          maxWidth: '500px',
+          maxWidth: '520px',
           width: '100%',
         }}
       >
-        <h2 style={{ marginBottom: '0.5rem', color: '#60a5fa' }}>Random Liveness Check</h2>
-        <p style={{ color: '#aaa', marginBottom: '2rem' }}>
-          Please complete this challenge to verify your presence. The exam timer is paused.
+        <h2 id="liveness-title" style={{ marginBottom: '0.5rem', color: '#60a5fa' }}>
+          Quick presence check
+        </h2>
+        <p style={{ color: '#aaa', marginBottom: '1.5rem' }}>
+          Done on this computer. The exam timer is paused.
         </p>
 
-        {loading ? (
-          <p>Generating challenge...</p>
-        ) : submitting ? (
-          <p>{resultMsg || 'Verifying with AI...'}</p>
-        ) : challenge ? (
+        <div aria-live="polite" style={{ minHeight: '5rem', marginBottom: '1.5rem' }}>
+          {phase === 'loading' && <p>Preparing your check…</p>}
+          {phase === 'ready' && challenge?.type === 'colour_flash' && (
+            <p style={{ fontSize: '1.15rem' }}>
+              Face the screen and keep still. The screen will show three quick colours for about two
+              seconds. If flashing colours bother you, choose another option below.
+            </p>
+          )}
+          {phase === 'ready' && challenge?.type === 'head_turn' && (
+            <p style={{ fontSize: '1.15rem' }}>
+              You will be asked to turn your head{' '}
+              <strong>{asList(challenge.data.sequence).join(', then ')}</strong>, facing the screen
+              again between turns.
+            </p>
+          )}
+          {phase === 'ready' && challenge?.type === 'spoken_words' && (
+            <p style={{ fontSize: '1.15rem' }}>
+              When recording starts, say these words clearly: <strong>{words.join(', ')}</strong>
+            </p>
+          )}
+          {phase === 'running' && <p style={{ fontSize: '1.15rem' }}>{status}</p>}
+          {phase === 'done' && (
+            <p style={{ fontSize: '1.15rem', color: passed ? '#34d399' : '#fca5a5' }}>
+              {passed ? 'Verified. Thank you.' : (error ?? status)}
+            </p>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+          {phase === 'ready' && (
+            <button type="button" onClick={() => void run()} style={button('#10b981')}>
+              Start
+            </button>
+          )}
+          {phase === 'done' && !passed && (
+            <button type="button" onClick={() => load(undefined)} style={button('#2563eb')}>
+              Try again
+            </button>
+          )}
+          {phase === 'done' && passed && (
+            <button type="button" onClick={() => onComplete(true)} style={button('#10b981')}>
+              Continue
+            </button>
+          )}
+        </div>
+
+        {!busy && !passed && (
           <div
-            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2rem' }}
+            style={{
+              marginTop: '1rem',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+            }}
           >
-            {/* Circular Timer */}
-            <div style={{ position: 'relative', width: '120px', height: '120px' }}>
-              <svg width="120" height="120" style={{ transform: 'rotate(-90deg)' }}>
-                <circle cx="60" cy="60" r={radius} stroke="#333" strokeWidth="8" fill="none" />
-                <circle
-                  cx="60"
-                  cy="60"
-                  r={radius}
-                  stroke="#3b82f6"
-                  strokeWidth="8"
-                  fill="none"
-                  strokeDasharray={circumference}
-                  strokeDashoffset={strokeDashoffset}
-                  style={{ transition: 'stroke-dashoffset 1s linear' }}
-                />
-              </svg>
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '2rem',
-                  fontWeight: 'bold',
-                }}
-              >
-                {timeLeft}
-              </div>
-            </div>
-
-            <div
-              style={{ background: '#2563eb', padding: '1rem', borderRadius: '8px', width: '100%' }}
-            >
-              {challenge.type === 'gesture' && (
-                <>
-                  <p style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>
-                    Perform this gesture to the camera:
-                  </p>
-                  <p style={{ fontSize: '1.5rem', textTransform: 'uppercase' }}>
-                    {String(challenge.data.gesture ?? '').replace('_', ' ')}
-                  </p>
-                </>
-              )}
-              {challenge.type === 'flash' && (
-                <p style={{ fontSize: '1.2rem' }}>
-                  Look directly at the screen. A bright flash will occur.
-                </p>
-              )}
-            </div>
-
-            <button
-              onClick={() => void handleCapture()}
-              style={{
-                background: '#10b981',
-                color: 'white',
-                border: 'none',
-                padding: '1rem 3rem',
-                fontSize: '1.2rem',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: 'bold',
-              }}
-            >
-              Verify Now
+            {challenge?.type !== 'head_turn' && (
+              <button type="button" style={linkButton} onClick={() => load('head_turn')}>
+                Try head turn instead
+              </button>
+            )}
+            {challenge?.type !== 'spoken_words' && (
+              <button type="button" style={linkButton} onClick={() => load('spoken_words')}>
+                I can&apos;t do the visual check
+              </button>
+            )}
+            <button type="button" style={linkButton} onClick={() => onComplete(false)}>
+              Close
             </button>
           </div>
-        ) : null}
+        )}
       </div>
     </div>
   );

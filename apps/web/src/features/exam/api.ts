@@ -7,6 +7,7 @@ import type {
   ExamGenerationResponse,
   ExamSubmitRequest,
   ExamSubmitResponse,
+  LivenessChallengeType,
   TransparencyEvent,
 } from '@exam-anti-cheat/contracts/exam';
 
@@ -32,7 +33,7 @@ export type CsrfTokenProvider = () => Promise<string>;
 
 export interface LivenessChallenge {
   readonly nonce: string;
-  readonly type: string;
+  readonly type: LivenessChallengeType;
   readonly data: Readonly<Record<string, unknown>>;
   readonly expiresAt: string;
   readonly signature: string;
@@ -257,7 +258,10 @@ export interface ExamApi {
   getAttempt(attemptId: string): Promise<ExamDeliveryProjection>;
   saveAnswers(attemptId: string, request: ExamAnswerSaveRequest): Promise<ExamAnswerSaveResponse>;
   submitAttempt(attemptId: string, request: ExamSubmitRequest): Promise<ExamSubmitResponse>;
-  postLivenessChallenge(attemptId: string): Promise<LivenessChallenge>;
+  postLivenessChallenge(
+    attemptId: string,
+    preferred?: Exclude<LivenessChallengeType, 'colour_flash'>,
+  ): Promise<LivenessChallenge>;
   postLivenessVerify(
     attemptId: string,
     body: Record<string, unknown>,
@@ -389,17 +393,20 @@ export class BrowserExamApi implements ExamApi {
     };
   }
 
-  async postLivenessChallenge(attemptId: string): Promise<LivenessChallenge> {
+  async postLivenessChallenge(
+    attemptId: string,
+    preferred?: Exclude<LivenessChallengeType, 'colour_flash'>,
+  ): Promise<LivenessChallenge> {
     const body = await this.request(
       `/exam/attempts/${encodeURIComponent(attemptId)}/liveness-challenge`,
       'POST',
-      undefined,
+      preferred === undefined ? undefined : { preferred },
       true,
     );
     if (
       !isRecord(body) ||
       !isString(body.nonce) ||
-      !isString(body.type) ||
+      (body.type !== 'colour_flash' && body.type !== 'head_turn' && body.type !== 'spoken_words') ||
       !isRecord(body.data) ||
       !isString(body.expiresAt) ||
       !isString(body.signature)

@@ -1,15 +1,27 @@
+import type { LivenessColour, LivenessRgb } from '@exam-anti-cheat/contracts/exam';
+
 import { acquirePhysicalCamera } from './physicalCamera.js';
 
-export interface LivenessEvidence {
-  readonly imageBase64: string;
+export interface ColourEvidence {
   readonly cameraLabel: string;
-  /** Mean-luminance rise (0–255) between a baseline frame and a frame during the white flash. */
-  readonly brightnessDelta?: number;
+  readonly baseline: LivenessRgb;
+  readonly frames: readonly LivenessRgb[];
 }
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Mean perceived luminance (Rec. 601) of RGBA pixel data, 0–255. */
+/** How long each colour stays on screen before its frame is read. */
+export const FLASH_MS = 350;
+/** Neutral gap between colours keeps the sequence under ~2 flashes per second. */
+export const GAP_MS = 150;
+
+const FLASH_CSS: Record<LivenessColour, string> = {
+  red: '#ff0000',
+  green: '#00ff00',
+  blue: '#0000ff',
+};
+
+/** Mean luminance (Rec. 601) of RGBA pixel data, 0-255. */
 export function meanLuminance(pixels: Uint8ClampedArray): number {
   let total = 0;
   const count = pixels.length / 4;
@@ -19,7 +31,35 @@ export function meanLuminance(pixels: Uint8ClampedArray): number {
   return count === 0 ? 0 : total / count;
 }
 
-function grab(video: HTMLVideoElement): { luminance: number; jpeg: string } {
+/** Mean RGB of the centre 50% (by width and height) of an RGBA image. */
+export function centreMeanRgb(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+): LivenessRgb {
+  const x0 = Math.floor(width * 0.25);
+  const x1 = Math.ceil(width * 0.75);
+  const y0 = Math.floor(height * 0.25);
+  const y1 = Math.ceil(height * 0.75);
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let count = 0;
+  for (let y = y0; y < y1; y += 1) {
+    for (let x = x0; x < x1; x += 1) {
+      const i = (y * width + x) * 4;
+      r += pixels[i]!;
+      g += pixels[i + 1]!;
+      b += pixels[i + 2]!;
+      count += 1;
+    }
+  }
+  if (count === 0) return { r: 0, g: 0, b: 0 };
+  const round = (value: number) => Math.round((value / count) * 100) / 100;
+  return { r: round(r), g: round(g), b: round(b) };
+}
+
+function grab(video: HTMLVideoElement): LivenessRgb {
   const canvas = document.createElement('canvas');
   canvas.width = video.videoWidth || 640;
   canvas.height = video.videoHeight || 480;
@@ -27,51 +67,65 @@ function grab(video: HTMLVideoElement): { luminance: number; jpeg: string } {
   if (!context) throw new Error('Camera frames cannot be read in this browser.');
   context.drawImage(video, 0, 0, canvas.width, canvas.height);
   const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
-  return {
-    luminance: meanLuminance(data),
-    jpeg: canvas.toDataURL('image/jpeg', 0.8).split(',')[1] ?? '',
-  };
+  return centreMeanRgb(data, canvas.width, canvas.height);
 }
 
-/**
- * Capture liveness evidence from the native webcam only. The camera is opened
- * through the same physical-camera check as the exam gate, so OBS and other
- * virtual sources are refused. For a flash challenge the screen turns white
- * and the real brightness change on the student's face is measured: a looped
- * recording or virtual feed does not light up with the screen.
- */
-export async function captureLivenessEvidence(
-  type: string,
-  acquire: () => Promise<MediaStream> = acquirePhysicalCamera,
-): Promise<LivenessEvidence> {
-  const stream = await acquire();
+async function openVideo(stream: MediaStream): Promise<HTMLVideoElement> {
   const video = document.createElement('video');
   video.muted = true;
   video.playsInline = true;
   video.srcObject = stream;
+  await video.play();
+  return video;
+}
+
+/** Opens the native webcam only (OBS/virtual cameras are refused) and returns its label. */
+export async function readCameraLabel(
+  acquire: () => Promise<MediaStream> = acquirePhysicalCamera,
+): Promise<string> {
+  const stream = await acquire();
   try {
-    await video.play();
+    return stream.getVideoTracks()[0]?.label ?? '';
+  } finally {
+    stream.getTracks().forEach((track) => track.stop());
+  }
+}
+
+/**
+ * Shows each requested colour full-screen and reads the mean RGB of the centre
+ * of the native webcam frame during it, plus a baseline taken beforehand. All
+ * processing is on-device; only the numbers are sent. A looped recording or
+ * virtual feed does not change colour with the screen.
+ */
+export async function captureColourFlash(
+  sequence: readonly LivenessColour[],
+  acquire: () => Promise<MediaStream> = acquirePhysicalCamera,
+): Promise<ColourEvidence> {
+  const stream = await acquire();
+  let video: HTMLVideoElement | null = null;
+  const overlay = document.createElement('div');
+  overlay.setAttribute('aria-hidden', 'true');
+  try {
+    video = await openVideo(stream);
     await wait(600); // let auto-exposure settle
     const cameraLabel = stream.getVideoTracks()[0]?.label ?? '';
+    // Baseline under the same neutral grey the gaps use, so only the colour differs.
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#808080';
+    document.body.append(overlay);
+    await wait(400);
     const baseline = grab(video);
-    if (type !== 'flash') return { imageBase64: baseline.jpeg, cameraLabel };
-
-    const flash = document.createElement('div');
-    flash.style.cssText = 'position:fixed;inset:0;background:#fff;z-index:2147483647';
-    document.body.append(flash);
-    try {
-      await wait(350);
-      const lit = grab(video);
-      return {
-        imageBase64: lit.jpeg,
-        cameraLabel,
-        brightnessDelta: Math.round((lit.luminance - baseline.luminance) * 10) / 10,
-      };
-    } finally {
-      flash.remove();
+    const frames: LivenessRgb[] = [];
+    for (const colour of sequence) {
+      overlay.style.background = '#808080';
+      await wait(GAP_MS);
+      overlay.style.background = FLASH_CSS[colour];
+      await wait(FLASH_MS);
+      frames.push(grab(video));
     }
+    return { cameraLabel, baseline, frames };
   } finally {
-    video.srcObject = null;
+    overlay.remove();
+    if (video) video.srcObject = null;
     stream.getTracks().forEach((track) => track.stop());
   }
 }

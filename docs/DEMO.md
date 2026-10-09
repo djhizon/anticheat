@@ -39,9 +39,12 @@ optional.
    frame leaves the machine. Look away or hold up a phone to show the signal.
 3. **Liveness, native webcam only.** Click **🙋 Verify I'm here** in the top
    bar. It opens the native webcam itself (no need to start the camera panel
-   first), flashes the screen white and measures the brightness rise. Say: the
-   challenge is HMAC-signed by the server so it cannot be forged or replayed,
-   and OBS or other virtual cameras are rejected.
+   first), shows three random full-screen colours and checks that each one is
+   reflected on the face. Say: the colour sequence is HMAC-signed by the server
+   so it cannot be forged or replayed, everything is processed on this laptop,
+   and OBS or other virtual cameras are rejected. Then show the alternatives:
+   **Try head turn instead** (on-device MediaPipe head pose) and **I can't do
+   the visual check** (say three random words, transcribed by local Whisper).
 4. **Local Whisper transcript.** In the audio panel choose "Start audio". Speak,
    and show the local clip transcript. Say: Whisper.cpp runs on this machine;
    audio is not sent to a cloud service.
@@ -52,7 +55,7 @@ optional.
 6. **Optional: pull the network cable.** Turn Wi-Fi off (after
    `npm run vision:prepare` and `npm run setup:whisper`). Repeat beat 2 or 4 to
    show that they still work. Say: if cloud services disappear, the core still
-   runs. Gemini features and the hand-gesture challenge will not; see
+   runs. Gemini features will not; see
    [LOCAL_AI.md](LOCAL_AI.md). Turn Wi-Fi back on afterwards.
 7. **Submit and transparency report.** Submit the exam and open the "What
    monitoring recorded" report. Say: the student sees every recorded event in

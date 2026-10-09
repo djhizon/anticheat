@@ -765,6 +765,56 @@ describe('exam delivery boundary', () => {
     );
   });
 
+  it('passes the preferred liveness challenge and spoken audio through to the integrity service', async () => {
+    const owner = await registerStudent('liveness-prefs@example.test');
+    const seeded = await seedExam();
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: owner.userId,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
+    const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
+    const integrity = {
+      issueLivenessChallenge: vi.fn(() => ({ nonce: 'n', type: 'head_turn' })),
+      verifyLiveness: vi.fn(async () => ({ passed: true, layer: 3, detail: 'ok' })),
+    };
+    const routes = new ExamRoutes(
+      exam.service,
+      auth.boundary,
+      config,
+      integrity as unknown as IntegrityService,
+    );
+    const base = `/exam/attempts/${attemptId}`;
+    await routes.handle(
+      studentRequest(owner, 'POST', `${base}/liveness-challenge`, { preferred: 'head_turn' }),
+    );
+    expect(integrity.issueLivenessChallenge).toHaveBeenLastCalledWith(attemptId, 'head_turn');
+    await routes.handle(studentRequest(owner, 'POST', `${base}/liveness-challenge`));
+    expect(integrity.issueLivenessChallenge).toHaveBeenLastCalledWith(attemptId, undefined);
+    await routes.handle(
+      studentRequest(owner, 'POST', `${base}/liveness-verify`, {
+        nonce: 'n',
+        layer: 3,
+        signature: 's',
+        payload: { samples: [] },
+        audioBase64: 'QUJD',
+        camera: { label: 'FaceTime HD Camera' },
+      }),
+    );
+    expect(integrity.verifyLiveness).toHaveBeenCalledWith(
+      attemptId,
+      'n',
+      3,
+      { samples: [] },
+      undefined,
+      's',
+      'FaceTime HD Camera',
+      'QUJD',
+    );
+  });
+
   it('answers CORS preflight for every browser-called exam route', async () => {
     const paths = [
       '/exam/speedtest',

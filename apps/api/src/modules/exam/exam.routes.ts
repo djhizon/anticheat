@@ -420,7 +420,7 @@ export class ExamRoutes {
         );
         const challenge = this.integrity.issueLivenessChallenge(
           delivery.attempt.id,
-          delivery.attempt.startedAt,
+          isRecord(request.body) ? request.body.preferred : undefined,
         );
         return jsonResponse(request, this.config.allowedOrigins, 200, challenge);
       }
@@ -443,6 +443,7 @@ export class ExamRoutes {
           isRecord(body.camera) && typeof body.camera.label === 'string'
             ? body.camera.label
             : undefined,
+          typeof body.audioBase64 === 'string' ? body.audioBase64 : undefined,
         );
         return jsonResponse(request, this.config.allowedOrigins, 200, result);
       }

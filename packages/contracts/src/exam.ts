@@ -200,3 +200,19 @@ export interface DeskCameraStatus {
   readonly handsVisible: boolean;
   readonly framingOk: boolean;
 }
+
+/** Liveness challenge kinds. `colour_flash` is the default; the others are opt-in. */
+export type LivenessChallengeType = 'colour_flash' | 'head_turn' | 'spoken_words';
+export type LivenessColour = 'red' | 'green' | 'blue';
+export type LivenessTurnDirection = 'left' | 'right';
+export interface LivenessRgb {
+  readonly r: number;
+  readonly g: number;
+  readonly b: number;
+}
+export interface LivenessYawSample {
+  /** Milliseconds since the first sample. */
+  readonly t: number;
+  /** Degrees relative to the starting pose; positive is the student's right. */
+  readonly yaw: number;
+}

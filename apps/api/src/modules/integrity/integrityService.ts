@@ -4,14 +4,22 @@ import { DomainError } from '@exam-anti-cheat/contracts';
 import type { GeminiRotatingClient } from './gemini.js';
 import type { IntegrityRepository } from './integrityRepository.js';
 import {
+  CHALLENGE_TYPES,
   generateChallenge,
+  scoreColourResponse,
   selectChallengeType,
   signNonce,
-  verifyFlashChallenge,
+  storageType,
+  verifyHeadTurns,
   verifyNonceSignature,
+  verifySpokenWords,
   type ChallengeType,
+  type Colour,
   type GeneratedChallenge,
+  type TurnDirection,
+  type VerifyResult,
 } from './liveness.js';
+import { transcribeAudio } from './whisper.js';
 import { checkForAiGeneration } from './aiCheck.js';
 import { computeSimilarityReport, SIMILARITY_THRESHOLD } from './similarity.js';
 import { VIRTUAL_CAMERA_LABEL } from '@exam-anti-cheat/contracts/exam';
@@ -147,18 +155,44 @@ export class IntegrityService {
 
   // ── Liveness ─────────────────────────────────────────────────────────────────
 
-  issueLivenessChallenge(attemptId: string, attemptStartedAt: string): GeneratedChallenge {
-    const type: ChallengeType = selectChallengeType(attemptStartedAt);
+  issueLivenessChallenge(attemptId: string, preferred?: unknown): GeneratedChallenge {
+    const type: ChallengeType = selectChallengeType(preferred);
     const challenge = generateChallenge(type);
+    const data = JSON.stringify(challenge.data);
     this.repo.insertLivenessChallenge(
       challenge.nonce,
       attemptId,
-      challenge.type,
-      JSON.stringify(challenge.data),
+      storageType(type),
+      data,
       challenge.expiresAt,
     );
-    const signature = signNonce({ attemptId, ...challenge }, this.livenessSecret);
+    const signature = signNonce({ attemptId, ...challenge, data }, this.livenessSecret);
     return { ...challenge, signature };
+  }
+
+  private async scoreLiveness(
+    kind: ChallengeType,
+    data: Record<string, unknown>,
+    payload: Record<string, unknown>,
+    audioBase64?: string,
+  ): Promise<VerifyResult> {
+    if (kind === 'colour_flash') {
+      return scoreColourResponse(data.sequence as Colour[], payload.baseline, payload.frames);
+    }
+    if (kind === 'head_turn') {
+      return verifyHeadTurns(data.sequence as TurnDirection[], payload.samples);
+    }
+    // spoken_words: transcribed on this machine; audio is never stored or sent out.
+    try {
+      const buffer = Buffer.from(audioBase64 ?? '', 'base64');
+      const transcript = await transcribeAudio(buffer);
+      return verifySpokenWords(data.words as string[], transcript);
+    } catch {
+      return {
+        passed: false,
+        detail: 'Speech could not be transcribed. Check the microphone and retry.',
+      };
+    }
   }
 
   async verifyLiveness(
@@ -169,12 +203,22 @@ export class IntegrityService {
     imageBase64?: string,
     signature?: unknown,
     cameraLabel?: string,
+    audioBase64?: string,
   ): Promise<LivenessVerifyResponse> {
+    void imageBase64; // frames stay on the device; only measurements are scored
     const row = this.repo.getLivenessChallenge(nonce);
     if (!row || row.attempt_id !== attemptId || row.used) {
       return { passed: false, layer, detail: 'Challenge invalid or used' };
     }
-    const signed = { attemptId, nonce, type: row.challenge_type, expiresAt: row.expires_at };
+    // The signature covers type and data (sequence/words) as stored, and is
+    // checked before the challenge is consumed so forgeries never burn one.
+    const signed = {
+      attemptId,
+      nonce,
+      type: this.kindOf(row.challenge_data),
+      expiresAt: row.expires_at,
+      data: row.challenge_data,
+    };
     if (!verifyNonceSignature(signed, signature, this.livenessSecret)) {
       return { passed: false, layer, detail: 'Challenge signature invalid' };
     }
@@ -183,7 +227,8 @@ export class IntegrityService {
     }
     this.repo.markLivenessChallengeUsed(nonce);
 
-    let result: { passed: boolean; detail: string };
+    let result: VerifyResult;
+    const kind = this.kindOf(row.challenge_data);
     if (!cameraLabel || VIRTUAL_CAMERA_LABEL.test(cameraLabel)) {
       // Only a native hardware webcam counts; OBS and other virtual feeds fail.
       result = {
@@ -192,25 +237,13 @@ export class IntegrityService {
           ? `Virtual camera "${cameraLabel.slice(0, 60)}" is not allowed. Use the built-in webcam.`
           : 'No native camera was identified. Use the built-in webcam.',
       };
-    } else if (row.challenge_type === 'flash') {
-      const brightnessDelta = Number(payload.brightnessDelta ?? 0);
-      result = verifyFlashChallenge(brightnessDelta);
-    } else if (row.challenge_type === 'gesture') {
-      // TensorFlow's native runtime is expensive; load it only for a requested
-      // gesture check, never on server startup or ordinary exam requests.
-      try {
-        const { verifyGestureLocally } = await import('./handDetector.js');
-        const challengeData = JSON.parse(row.challenge_data) as { gesture: string };
-        result = await verifyGestureLocally(imageBase64 || '', challengeData.gesture);
-      } catch {
-        // Preserve one-use challenges, but record an unavailable engine honestly
-        // rather than losing the event or treating infrastructure failure as a pass.
-        result = {
-          passed: false,
-          detail:
-            'Gesture engine unavailable. Check the local model installation and request a fresh challenge.',
-        };
-      }
+    } else if ((CHALLENGE_TYPES as readonly string[]).includes(kind)) {
+      result = await this.scoreLiveness(
+        kind as ChallengeType,
+        JSON.parse(row.challenge_data) as Record<string, unknown>,
+        payload,
+        audioBase64,
+      );
     } else {
       result = { passed: false, detail: 'Unknown challenge type' };
     }
@@ -220,10 +253,23 @@ export class IntegrityService {
       layer,
       result.passed ? 'pass' : 'fail',
       nonce,
-      JSON.stringify({ ...payload, camera: cameraLabel ?? null, detail: result.detail }),
+      JSON.stringify({
+        kind,
+        camera: cameraLabel ?? null,
+        detail: result.detail,
+      }),
     );
 
     return { passed: result.passed, layer, detail: result.detail };
+  }
+
+  private kindOf(challengeData: string): string {
+    try {
+      const parsed = JSON.parse(challengeData) as { kind?: unknown };
+      return typeof parsed.kind === 'string' ? parsed.kind : 'unknown';
+    } catch {
+      return 'unknown';
+    }
   }
 
   // ── AI Check ─────────────────────────────────────────────────────────────────
