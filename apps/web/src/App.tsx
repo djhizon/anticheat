@@ -5,6 +5,7 @@ import type {
   ExamDeliveryProjection,
 } from '@exam-anti-cheat/contracts/exam';
 
+import { AiCheckDashboard } from './features/admin/AiCheckDashboard.js';
 import { createInstructorApi } from './features/admin/api.js';
 import { SimilarityDashboard } from './features/admin/SimilarityDashboard.js';
 import { AuthProvider, useAuth } from './features/auth/AuthProvider.js';
@@ -83,6 +84,7 @@ function InstructorWorkspace({
         <h1>Integrity review</h1>
       </section>
       <SimilarityDashboard api={instructorApi} />
+      <AiCheckDashboard api={instructorApi} />
     </main>
   );
 }

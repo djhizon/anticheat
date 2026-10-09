@@ -2291,3 +2291,49 @@ dd {
   color: #b91c1c;
   font-size: 0.85rem;
 }
+
+/* ── Instructor AI-written answer check ──────────────────────────────── */
+.ai-check-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+.ai-check-item {
+  padding: 0.7rem 0.9rem;
+  border-radius: 10px;
+  background: #f8fafc;
+  border-left: 4px solid #22c55e;
+  overflow-wrap: anywhere;
+}
+.ai-check-item--medium {
+  border-left-color: #f59e0b;
+}
+.ai-check-item--high {
+  border-left-color: #dc2626;
+  background: #fef2f2;
+}
+.ai-check-item--unavailable {
+  border-left-color: #94a3b8;
+}
+.ai-check-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.ai-check-summary {
+  margin: 0.35rem 0 0;
+  color: #475569;
+  font-size: 0.9rem;
+}
+.ai-check-flags {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: #7f1d1d;
+}
+.admin-dashboard + .admin-dashboard {
+  margin-top: 1.5rem;
+}

@@ -25,6 +25,7 @@ it('runs a similarity check for the selected question and labels students by ema
         questions: [{ id: 'q1', prompt: 'Explain TCP.', type: 'short_answer' }],
       },
     ]),
+    runAiCheck: vi.fn(),
     runSimilarity: vi.fn(async () => ({
       report: {
         questionId: 'q1',
@@ -61,6 +62,7 @@ it('shows a clear error when the check cannot run', async () => {
         questions: [{ id: 'q1', prompt: 'P', type: 'short_answer' }],
       },
     ],
+    runAiCheck: vi.fn(),
     runSimilarity: async () => {
       throw new Error('Check that GEMINI_API_KEYS is configured.');
     },

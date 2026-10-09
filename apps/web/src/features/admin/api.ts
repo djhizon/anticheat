@@ -1,4 +1,8 @@
-import type { InstructorExamVersion, SimilarityRunResponse } from '@exam-anti-cheat/contracts/exam';
+import type {
+  AiCheckRunResponse,
+  InstructorExamVersion,
+  SimilarityRunResponse,
+} from '@exam-anti-cheat/contracts/exam';
 
 import type { FetchLike } from '../auth/api.js';
 import type { CsrfTokenProvider } from '../exam/api.js';
@@ -6,6 +10,7 @@ import type { CsrfTokenProvider } from '../exam/api.js';
 export interface InstructorApi {
   listVersions(): Promise<readonly InstructorExamVersion[]>;
   runSimilarity(versionId: string, questionId: string): Promise<SimilarityRunResponse>;
+  runAiCheck(versionId: string, questionId: string): Promise<AiCheckRunResponse>;
 }
 
 export class InstructorApiError extends Error {}
@@ -58,6 +63,16 @@ export function createInstructorApi(
         throw new InstructorApiError('Unexpected response.');
       }
       return body as unknown as SimilarityRunResponse;
+    },
+    async runAiCheck(versionId, questionId) {
+      const body = await request(
+        `/exam/instructor/versions/${encodeURIComponent(versionId)}/questions/${encodeURIComponent(questionId)}/ai-check`,
+        'POST',
+      );
+      if (!isRecord(body) || !Array.isArray(body.results) || typeof body.truncated !== 'boolean') {
+        throw new InstructorApiError('Unexpected response.');
+      }
+      return body as unknown as AiCheckRunResponse;
     },
   };
 }

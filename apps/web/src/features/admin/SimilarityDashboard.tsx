@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
-import type { InstructorExamVersion, SimilarityRunResponse } from '@exam-anti-cheat/contracts/exam';
+import { useState } from 'react';
+import type { SimilarityRunResponse } from '@exam-anti-cheat/contracts/exam';
 
 import type { InstructorApi } from './api.js';
+import { QuestionPicker, useInstructorQuestions } from './QuestionPicker.js';
 
 /**
  * Instructor review of cross-student answer similarity. Answers are embedded
@@ -9,41 +10,21 @@ import type { InstructorApi } from './api.js';
  * read side by side — never an automatic penalty.
  */
 export function SimilarityDashboard({ api }: { readonly api: InstructorApi }) {
-  const [versions, setVersions] = useState<readonly InstructorExamVersion[] | null>(null);
-  const [selection, setSelection] = useState('');
+  const { versions, selection, setSelection, picked, loadError } = useInstructorQuestions(api);
   const [result, setResult] = useState<SimilarityRunResponse | null>(null);
   const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    api
-      .listVersions()
-      .then((loaded) => {
-        if (!active) return;
-        setVersions(loaded);
-        const first = loaded[0];
-        const firstQuestion = first?.questions[0];
-        if (first && firstQuestion) setSelection(`${first.id}|${firstQuestion.id}`);
-      })
-      .catch((cause: unknown) => {
-        if (active) setError(cause instanceof Error ? cause.message : 'Could not load exams.');
-      });
-    return () => {
-      active = false;
-    };
-  }, [api]);
+  const [runError, setRunError] = useState<string | null>(null);
+  const error = runError ?? loadError;
 
   async function run() {
-    const [versionId, questionId] = selection.split('|');
-    if (!versionId || !questionId) return;
+    if (picked === null) return;
     setRunning(true);
-    setError(null);
+    setRunError(null);
     setResult(null);
     try {
-      setResult(await api.runSimilarity(versionId, questionId));
+      setResult(await api.runSimilarity(picked.versionId, picked.questionId));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'The similarity check failed.');
+      setRunError(cause instanceof Error ? cause.message : 'The similarity check failed.');
     } finally {
       setRunning(false);
     }
@@ -66,25 +47,12 @@ export function SimilarityDashboard({ api }: { readonly api: InstructorApi }) {
       )}
       {versions !== null && versions.length > 0 && (
         <div className="similarity-controls">
-          <label htmlFor="similarity-question">Question</label>
-          <select
+          <QuestionPicker
             id="similarity-question"
-            value={selection}
-            onChange={(event) => setSelection(event.target.value)}
-          >
-            {versions.map((version) => (
-              <optgroup key={version.id} label={`${version.title} (v${version.versionNumber})`}>
-                {version.questions.map((question, index) => (
-                  <option key={question.id} value={`${version.id}|${question.id}`}>
-                    Q{index + 1}:{' '}
-                    {question.prompt.length > 80
-                      ? `${question.prompt.slice(0, 80)}…`
-                      : question.prompt}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
+            versions={versions}
+            selection={selection}
+            onChange={setSelection}
+          />
           <button
             className="submit-button"
             type="button"
