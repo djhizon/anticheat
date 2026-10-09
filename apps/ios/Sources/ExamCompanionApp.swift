@@ -3,7 +3,7 @@ import SwiftUI
 @main struct ExamCompanionApp: App {
     @StateObject private var controller = PresenceController()
     var body: some Scene {
-        WindowGroup { CompanionView(controller: controller) }
+        WindowGroup { CompanionView(controller: controller).placementGuide(controller: controller) }
     }
 }
 

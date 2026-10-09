@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import type { ExamApi, PhonePresenceStatus } from '../exam/api.js';
 import { nativePhoneUrl } from './nativePhoneUrl.js';
+import { PhonePlacementCard } from './PhonePlacementCard.js';
 
 export function NativePhoneModal({
   attemptId,
@@ -196,6 +197,7 @@ export function NativePhoneModal({
             {desk?.on ? (desk.framingOk ? ', framing OK' : ', adjust framing') : ''}
           </p>
         </section>
+        <PhonePlacementCard />
         <p>
           Connection loss is not a cheating verdict. Only the latest pairing works; a new QR
           disconnects the previous phone.
