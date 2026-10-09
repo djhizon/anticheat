@@ -1,10 +1,12 @@
-/* global fetch, setTimeout, Buffer */
+/* global fetch, setTimeout */
 // `npm run phone:lab -- --auto`: play the iPhone's part over HTTP (same requests as
-// apps/ios PresenceController) and verify the instructor's timeline shows each result.
-import { evidenceItems } from './phone-lab-lib.mjs';
+// apps/ios PresenceController): claim, a few heartbeats, a simulated loss (heartbeats stop past
+// the lease), then a reconnect that also reports the app was backgrounded. Verifies the
+// instructor's timeline shows paired, lost, reconnected and phone_left_app.
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
-const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 0xff, 0xd9]);
+/** Server lease is 8 s; wait a little longer so the loss is unambiguous. */
+const LOSS_WAIT_MS = 9500;
 
 /** Same shape as the iPhone app: JSON, no cookies, no Origin, straight through the web proxy. */
 async function phonePost(webPort, path, body) {
@@ -43,13 +45,14 @@ export async function runAuto({
     try {
       const outcome = await fn();
       if (outcome === true) record(name, 'PASS');
-      else if (outcome === 'SKIP') record(name, 'SKIP', 'endpoint not available on this build');
       else record(name, 'FAIL', String(outcome));
     } catch (error) {
       record(name, 'FAIL', error instanceof Error ? error.message : String(error));
     }
   };
   const post = (path, body) => phonePost(webPort, path, body);
+  const presence = async () =>
+    (await studentClient.call('GET', `/exam/attempts/${attemptId}/phone-presence`)).data;
 
   say(tag('\n--auto: simulating the iPhone', 'cyan'));
   let credential = '';
@@ -64,73 +67,54 @@ export async function runAuto({
     say(tag('\nauto check: FAILED', 'red'));
     return true;
   }
-  await step('heartbeat accepted', async () => {
+  const heartbeat = async (extra = {}) => {
     const challenge = await post('/exam/phone-presence/challenge', { credential });
     const beat = await post('/exam/phone-presence/heartbeat', {
       credential,
       challenge: challenge.data?.challenge,
       sequence: challenge.data?.sequence,
       active: true,
+      ...extra,
     });
     return (
       (beat.status === 200 && beat.data?.ok === true) || `HTTP ${challenge.status}/${beat.status}`
     );
+  };
+  await step('heartbeats accepted (3 x 2 s)', async () => {
+    for (let i = 0; i < 3; i += 1) {
+      const ok = await heartbeat();
+      if (ok !== true) return ok;
+      if (i < 2) await sleep(2000);
+    }
+    return true;
   });
-  const desk = (people, handsVisible) =>
-    post('/exam/phone-presence/desk-camera', { credential, people, handsVisible, framingOk: true });
-  await step('desk camera: one person, hands visible', async () => {
-    const report = await desk(1, true);
-    const status = await studentClient.call('GET', `/exam/attempts/${attemptId}/phone-presence`);
-    const state = status.data?.deskCamera;
-    return (
-      (report.status === 200 && state?.on && state.people === 1 && state.handsVisible === true) ||
-      `HTTP ${report.status}, state ${JSON.stringify(state)}`
-    );
+  await step('laptop sees the phone as present', async () => {
+    const state = await presence();
+    return (state?.required === true && state.active === true) || JSON.stringify(state);
   });
-  await sleep(2200); // the server rejects desk reports closer than 2 s
-  await step('desk camera: extra person report', async () => {
-    const report = await desk(2, true);
-    return report.status === 200 || `HTTP ${report.status}`;
-  });
-  await sleep(2200);
-  await step('desk camera: left frame report', async () => {
-    const report = await desk(0, false);
-    return report.status === 200 || `HTTP ${report.status}`;
+  await step('retired desk-camera route answers 410 Gone', async () => {
+    const gone = await post('/exam/phone-presence/desk-camera', { credential, people: 1 });
+    return gone.status === 410 || `HTTP ${gone.status}`;
   });
 
-  let uploaded = false;
-  await step('evidence upload with phone credential', async () => {
-    const upload = await post(`/exam/attempts/${attemptId}/evidence`, {
-      credential,
-      source: 'desk_camera',
-      trigger: 'extra_person',
-      capturedAt: new Date().toISOString(),
-      imageJpegBase64: JPEG.toString('base64'),
-    });
-    if (upload.status === 404) return 'SKIP';
-    uploaded = upload.status === 201;
-    return uploaded || `HTTP ${upload.status}`;
+  say(tag(`Simulating a lost phone: no heartbeats for ${LOSS_WAIT_MS / 1000} s…`, 'dim'));
+  await sleep(LOSS_WAIT_MS);
+  await step('laptop sees the phone as lost', async () => {
+    const state = await presence();
+    return (state?.required === true && state.active === false) || JSON.stringify(state);
   });
-  if (uploaded) {
-    await step('evidence listed for instructor and JPEG downloads intact', async () => {
-      const list = await instructorClient.call('GET', `/exam/attempts/${attemptId}/evidence`);
-      const item = evidenceItems(list.data).find((e) => e.trigger === 'extra_person');
-      if (!item) return 'not listed';
-      const image = await instructorClient.call(
-        'GET',
-        `/exam/attempts/${attemptId}/evidence/${encodeURIComponent(item.id)}`,
-        undefined,
-        { binary: true },
-      );
-      return (image.status === 200 && image.data.equals(JPEG)) || `HTTP ${image.status}`;
-    });
-  }
+  await step('phone reconnects (reporting it left the app)', () => heartbeat({ leftApp: true }));
+  await step('laptop sees the phone again', async () => {
+    const state = await presence();
+    return state?.active === true || JSON.stringify(state);
+  });
 
   const expected = [
     ['attempt_started', 'timeline shows attempt start'],
     ['iphone_paired', 'timeline shows iPhone paired'],
-    ['desk_extra_person', 'timeline shows desk-camera extra person'],
-    ['desk_left_frame', 'timeline shows desk-camera left frame'],
+    ['iphone_lost', 'timeline shows iPhone lost'],
+    ['iphone_reconnected', 'timeline shows iPhone reconnected'],
+    ['phone_left_app', 'timeline shows phone left the app'],
   ];
   let kinds = new Set();
   for (let i = 0; i < 6; i += 1) {

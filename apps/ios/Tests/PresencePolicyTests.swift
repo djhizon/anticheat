@@ -6,11 +6,11 @@ import XCTest
 final class ReliabilityPolicyTests: XCTestCase {
     func testFailureClassification() {
         for code in [401, 403, 404, 410] { XCTAssertEqual(FailurePolicy.classify(statusCode: code), .definiteRejection) }
-        for code in [408, 409, 429, 500, 502, 503] { XCTAssertEqual(FailurePolicy.classify(statusCode: code), .transient) }
+        for code in [400, 408, 409, 429, 500, 502, 503] { XCTAssertEqual(FailurePolicy.classify(statusCode: code), .transient) }
     }
-    func testPairingRetrySchedule() {
-        XCTAssertEqual((1...5).map { PairingRetryPolicy.delayAfter(attempt: $0) }, [1, 2, 4, 4, nil])
-        XCTAssertNil(PairingRetryPolicy.delayAfter(attempt: 0))
+    func testPairingGivesUpAfterFiveSeconds() {
+        XCTAssertEqual(PairingTimeout.seconds, 5)
+        XCTAssertLessThan(PairingTimeout.retryDelay, PairingTimeout.seconds)
     }
     func testHeartbeatSchedulesFixedPeriod() {
         XCTAssertEqual(HeartbeatSchedule.sleepSeconds(elapsed: 0.3), 1.7, accuracy: 1e-9)
@@ -26,10 +26,41 @@ final class ReliabilityPolicyTests: XCTestCase {
         XCTAssertEqual(tracker.recordRejection(), .retryOnce)
     }
     func testIdleTimer() {
-        XCTAssertTrue(IdleTimerPolicy.keepAwake(active: true, paired: true, reconnecting: false))
-        XCTAssertTrue(IdleTimerPolicy.keepAwake(active: true, paired: false, reconnecting: true))
-        XCTAssertFalse(IdleTimerPolicy.keepAwake(active: true, paired: false, reconnecting: false))
-        XCTAssertFalse(IdleTimerPolicy.keepAwake(active: false, paired: true, reconnecting: true))
+        XCTAssertTrue(IdleTimerPolicy.keepAwake(active: true, paired: true, connecting: false))
+        XCTAssertTrue(IdleTimerPolicy.keepAwake(active: true, paired: false, connecting: true))
+        XCTAssertFalse(IdleTimerPolicy.keepAwake(active: true, paired: false, connecting: false))
+        XCTAssertFalse(IdleTimerPolicy.keepAwake(active: false, paired: true, connecting: true))
+    }
+    func testLinkHealthTurnsIntoLaptopNotRespondingAfterTheLease() {
+        let now = Date()
+        XCTAssertEqual(LinkHealthPolicy.health(latestOK: true, lastAcknowledged: nil, now: now), .connected)
+        XCTAssertEqual(LinkHealthPolicy.health(latestOK: false, lastAcknowledged: now.addingTimeInterval(-3), now: now), .reconnecting)
+        XCTAssertEqual(LinkHealthPolicy.health(latestOK: false, lastAcknowledged: now.addingTimeInterval(-8), now: now), .laptopNotResponding)
+        XCTAssertEqual(LinkHealthPolicy.health(latestOK: false, lastAcknowledged: nil, now: now), .laptopNotResponding)
+    }
+}
+
+final class LeftAppTrackerTests: XCTestCase {
+    func testOnlyBackgroundingWhilePairedIsReported() {
+        var tracker = LeftAppTracker()
+        tracker.phaseChanged(.background, paired: false)
+        XCTAssertFalse(tracker.pending, "not paired yet: nothing to report")
+        tracker.phaseChanged(.inactive, paired: true)
+        XCTAssertFalse(tracker.pending, "Control Center or a notification is not leaving the app")
+        tracker.phaseChanged(.background, paired: true)
+        tracker.phaseChanged(.active, paired: true)
+        XCTAssertTrue(tracker.pending)
+    }
+    func testFlagStaysUntilAHeartbeatCarryingItIsAcknowledged() {
+        var tracker = LeftAppTracker()
+        tracker.phaseChanged(.background, paired: true)
+        tracker.phaseChanged(.active, paired: true)
+        XCTAssertTrue(tracker.pending) // a failed heartbeat leaves it pending for the next one
+        tracker.reported()
+        XCTAssertFalse(tracker.pending)
+        tracker.phaseChanged(.background, paired: true)
+        tracker.reset()
+        XCTAssertFalse(tracker.pending, "unpairing drops an unreported flag")
     }
 }
 
@@ -58,5 +89,15 @@ final class PresencePolicyTests: XCTestCase {
         XCTAssertThrowsError(try PairingLink(link + "&code=duplicate", allowHTTP: true))
         XCTAssertThrowsError(try PairingLink(link.replacingOccurrences(of: code, with: "short"), allowHTTP: true))
         XCTAssertNoThrow(try PairingLink("examcompanion://pair?origin=https://exam.example.test&code=\(code)", allowHTTP: false))
+    }
+    func testScannedNonPairingCodesAreRejected() {
+        for text in ["https://example.test", "hello", "", "examcompanion://other?x=1"] {
+            XCTAssertThrowsError(try PairingLink(text, allowHTTP: true), text)
+        }
+    }
+    func testSameLinkComparesEqualSoRepeatedScansAreIgnored() throws {
+        let code = String(repeating: "b", count: 43)
+        let text = "examcompanion://pair?origin=https://exam.example.test&code=\(code)"
+        XCTAssertEqual(try PairingLink(text, allowHTTP: false), try PairingLink(text, allowHTTP: false))
     }
 }

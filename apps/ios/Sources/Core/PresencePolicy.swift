@@ -11,7 +11,7 @@ struct ForegroundGate {
     func permits(_ generation: Int) -> Bool { active && self.generation == generation }
 }
 
-struct PairingLink {
+struct PairingLink: Equatable {
     let origin: URL
     let code: String
     var isHTTP: Bool { origin.scheme == "http" }
@@ -58,20 +58,32 @@ enum FailurePolicy {
     }
 }
 
-/// Pairing probe/claim retry schedule: 1 s, 2 s, 4 s, 4 s between at most 5 tries.
-enum PairingRetryPolicy {
-    static let maxAttempts = 5
-    /// Seconds to wait after the given failed attempt (1-based), or nil when out of tries.
-    static func delayAfter(attempt: Int) -> TimeInterval? {
-        guard attempt >= 1, attempt < maxAttempts else { return nil }
-        return min(pow(2, Double(attempt - 1)), 4)
-    }
+/// "Connecting to laptop…" gives up after this long and offers a retry. Transient failures inside
+/// the window are retried every `retryDelay` seconds.
+enum PairingTimeout {
+    static let seconds: TimeInterval = 5
+    static let retryDelay: TimeInterval = 1
 }
 
 /// Heartbeats are scheduled against a fixed period, not period + round-trip time.
 enum HeartbeatSchedule {
     static let interval: TimeInterval = 2
+    /// Matches the server lease: after this long without an acknowledgement the laptop has paused.
+    static let laptopLease: TimeInterval = 8
     static func sleepSeconds(elapsed: TimeInterval) -> TimeInterval { max(0, interval - max(0, elapsed)) }
+}
+
+/// What the paired screen tells the student about the link to the laptop.
+enum LinkHealth: Equatable { case connected, reconnecting, laptopNotResponding }
+
+enum LinkHealthPolicy {
+    /// A failed check is a short blip until the laptop's lease would have run out; after that the
+    /// student is told plainly that the laptop is not responding (retries continue either way).
+    static func health(latestOK: Bool, lastAcknowledged: Date?, now: Date) -> LinkHealth {
+        if latestOK { return .connected }
+        guard let lastAcknowledged else { return .laptopNotResponding }
+        return now.timeIntervalSince(lastAcknowledged) >= HeartbeatSchedule.laptopLease ? .laptopNotResponding : .reconnecting
+    }
 }
 
 /// The server keeps credentials in its database, so an API restart does not invalidate them, and a
@@ -87,9 +99,23 @@ struct RejectionTracker {
     mutating func recordSuccess() { consecutive = 0 }
 }
 
+/// Report-only: the app went to the background while paired (phone picked up and used, Home
+/// pressed, another app opened). The next acknowledged heartbeat carries `leftApp: true` once.
+/// Brief interruptions that only make the app inactive (Control Center, a notification) don't count.
+struct LeftAppTracker {
+    enum Phase { case active, inactive, background }
+    private(set) var pending = false
+    mutating func phaseChanged(_ phase: Phase, paired: Bool) {
+        if phase == .background && paired { pending = true }
+    }
+    /// Call only after the server acknowledged a heartbeat that carried the flag.
+    mutating func reported() { pending = false }
+    mutating func reset() { pending = false }
+}
+
 enum IdleTimerPolicy {
-    /// Stay awake while active and a pairing exists, including while reconnecting.
-    static func keepAwake(active: Bool, paired: Bool, reconnecting: Bool) -> Bool {
-        active && (paired || reconnecting)
+    /// Stay awake while active and paired or connecting, including while reconnecting.
+    static func keepAwake(active: Bool, paired: Bool, connecting: Bool) -> Bool {
+        active && (paired || connecting)
     }
 }

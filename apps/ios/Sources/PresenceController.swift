@@ -1,7 +1,7 @@
 import Foundation
 import Combine
+import SwiftUI
 import UIKit
-import os
 
 private final class NoRedirects: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -10,25 +10,30 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
     }
 }
 
+/// The phone only proves it is present by pinging the laptop while this app is open.
+/// Flow: scan QR -> claim (5 s budget) -> heartbeats every 2 s until unpaired or the exam ends.
 @MainActor final class PresenceController: ObservableObject {
-    @Published private(set) var status = "Scan the pairing QR on your laptop."
-    @Published private(set) var pending: PairingLink?
-    @Published private(set) var paired = false
-    @Published private(set) var connected = false
-    @Published private(set) var busy = false
+    enum Screen: Equatable { case scanning, connecting, connectFailed, paired }
+
+    @Published private(set) var screen: Screen = .scanning
+    @Published private(set) var link: LinkHealth = .reconnecting
+    @Published private(set) var status = PresenceController.scanPrompt
+    /// Shown on the scanner screen after a bad, expired or ended pairing.
+    @Published private(set) var scanHint: String?
     @Published private(set) var lastAcknowledged: Date?
-    /// Optional, opt-in, additive. Heartbeat behaviour does not depend on it.
-    @Published private(set) var deskCameraWanted = false
-    let deskCamera = DeskCameraController()
-    private var lastDeskSend: Date?
-    private var lastDeskStatus: DeskCameraStatus?
-    private var attemptId: String?
-    private static let log = Logger(subsystem: "com.djhizon.examcompanion", category: "desk-camera")
+    @Published private(set) var appActive = false
+
+    static let scanPrompt = "Point the camera at the QR code on your laptop."
+    private var pending: PairingLink?
     private var gate = ForegroundGate()
+    private var leftApp = LeftAppTracker()
     private var task: Task<Void, Never>?
+    private var watchdog: Task<Void, Never>?
     private var session: URLSession?
     private var origin: URL?
     private var credential: String?
+
+    var paired: Bool { screen == .paired }
 
     static var allowsDemoHTTP: Bool {
         #if DEBUG
@@ -38,106 +43,211 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
         #endif
     }
 
-    func setDeskCamera(_ on: Bool) {
-        deskCameraWanted = on
-        lastDeskSend = nil; lastDeskStatus = nil
-        if on && gate.active && paired { startDeskCamera() } else { deskCamera.stop() }
-    }
+    // MARK: - Inputs
 
-    private func startDeskCamera() {
-        deskCamera.onStatus = { [weak self] status in self?.sendDesk(status) }
-        deskCamera.onEvidence = { [weak self] trigger, jpeg in self?.sendEvidence(trigger: trigger, jpeg: jpeg) }
-        deskCamera.start()
-    }
-
-    /// Flags only, same credential as the heartbeat, at most every 5 s. Failures are ignored:
-    /// the heartbeat loop owns connection status and the desk camera is best-effort.
-    private func sendDesk(_ status: DeskCameraStatus) {
-        let now = Date()
-        guard DeskCameraPolicy.shouldSend(now: now, lastSent: lastDeskSend, changed: status != lastDeskStatus),
-              let session, let origin, let credential, paired, gate.active else { return }
-        lastDeskSend = now
-        lastDeskStatus = status
-        Task { [weak self] in
-            guard let self else { return }
-            let _: Acknowledgement? = try? await self.post(session, origin, "desk-camera", [
-                "credential": credential, "people": status.people,
-                "handsVisible": status.handsVisible, "framingOk": status.framingOk,
-                "extraPerson": status.extraPerson, "extraHands": status.extraHands,
-                "handCount": status.handCount, "leftHands": status.leftHands, "rightHands": status.rightHands,
-                "textVisible": status.textVisible, "objectHints": status.objectHints,
-                "cameraObstructed": status.cameraObstructed
-            ])
+    /// From the in-app scanner, a tapped `examcompanion://` link, or the pasted-link fallback.
+    func acceptLink(_ value: String) {
+        let link: PairingLink
+        do { link = try PairingLink(value, allowHTTP: Self.allowsDemoHTTP) } catch {
+            if screen == .scanning || screen == .connectFailed {
+                scanHint = "That isn't an exam pairing code. Scan the QR code shown on your laptop."
+            }
+            return
         }
+        // The scanner reports the same code many times a second; ignore repeats of the one in flight.
+        if link == pending && screen == .connecting { return }
+        forgetPairing()
+        pending = link
+        connect()
     }
 
-    /// One still photo when a debounced flag fires (rate-limited by the camera controller).
-    /// Contract: POST exam/attempts/:attemptId/evidence. Authenticated with the pairing credential,
-    /// like the flag posts. A missing route (404) or any failure is logged and dropped.
-    private func sendEvidence(trigger: String, jpeg: Data) {
-        guard let session, let origin, let credential, let attemptId, paired, gate.active else { return }
-        let body: [String: Any] = [
-            "source": "desk_camera", "trigger": trigger,
-            "capturedAt": ISO8601DateFormatter().string(from: Date()),
-            "imageJpegBase64": jpeg.base64EncodedString(), "credential": credential
-        ]
-        Task {
+    func retry() {
+        if pending == nil { scanAgain() } else { connect() }
+    }
+
+    func scanAgain(hint: String? = nil) {
+        forgetPairing()
+        screen = .scanning
+        scanHint = hint
+        status = Self.scanPrompt
+        updateIdleTimer()
+    }
+
+    func scenePhaseChanged(_ phase: ScenePhase) {
+        let active = phase == .active
+        leftApp.phaseChanged(phase == .background ? .background : active ? .active : .inactive,
+                             paired: credential != nil)
+        appActive = active
+        gate.transition(active: active)
+        cancelWork()
+        if !active {
+            if paired {
+                link = .reconnecting
+                status = "Paused: open this app again so your laptop keeps answering."
+            }
+        } else if let origin, let credential {
+            startHeartbeats(origin: origin, credential: credential)
+        } else if pending != nil && screen == .connecting {
+            connect() // e.g. resumed after the Local Network permission alert
+        }
+        updateIdleTimer()
+    }
+
+    // MARK: - Pairing
+
+    private func connect() {
+        guard let pending else { return }
+        cancelWork()
+        screen = .connecting
+        scanHint = nil
+        status = "Connecting to laptop…"
+        updateIdleTimer()
+        // A cold launch from a tapped link delivers the URL before the scene is active;
+        // scenePhaseChanged(.active) resumes from here.
+        guard gate.active else { return }
+        let generation = gate.generation
+        let session = makeSession()
+        self.session = session
+        watchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(PairingTimeout.seconds * 1e9))
+            guard let self, !Task.isCancelled, self.gate.permits(generation), self.screen == .connecting else { return }
+            self.cancelWork()
+            self.screen = .connectFailed
+            self.status = "Couldn't reach your laptop. Check that both are on the same Wi-Fi and the pairing QR is still showing, then try again."
+            self.updateIdleTimer()
+        }
+        task = Task { [weak self] in
+            guard let self else { return }
             do {
-                let _: Acknowledgement? = try await self.post(session, origin, "exam/attempts/\(attemptId)/evidence", body)
+                let secret = try await self.claim(session, pending, generation)
+                self.watchdog?.cancel()
+                self.pending = nil
+                self.origin = pending.origin
+                self.credential = secret
+                self.leftApp.reset()
+                self.lastAcknowledged = nil
+                self.screen = .paired
+                self.link = .reconnecting
+                self.status = "Paired. Checking the connection…"
+                self.updateIdleTimer()
+                await self.heartbeatLoop(session, pending.origin, secret, generation)
+            } catch PairingError.rejected {
+                guard self.gate.permits(generation), !Task.isCancelled else { return }
+                self.scanAgain(hint: "This QR code has expired or was already used. Show a fresh QR code on your laptop and scan it.")
             } catch {
-                Self.log.info("evidence for \(trigger, privacy: .public) not delivered (\(String(describing: error), privacy: .public)); dropped")
+                // Cancelled: backgrounded, replaced, or the watchdog fired.
             }
         }
     }
 
-    func acceptLink(_ value: String) {
-        do {
-            let link = try PairingLink(value, allowHTTP: Self.allowsDemoHTTP)
-            stopAndForget()
-            pending = link
-            status = "Confirm the laptop address, then connect."
-        } catch { status = "That pairing link didn't work. Scan a fresh QR code from the exam on your laptop and try again." }
-    }
-
-    func setActive(_ active: Bool) {
-        gate.transition(active: active)
-        cancelWork()
-        if !active { deskCamera.stop() }
-        if !active {
-            status = paired ? "Paused — app is not active. Laptop will pause answering." : "Open the app to pair."
-        } else if let origin, let credential {
-            begin(origin: origin, credential: credential, pairingCode: nil)
-        } else {
-            status = pending == nil ? "Scan the laptop QR to pair." : "Confirm the laptop address, then connect."
+    /// Probe + claim, retried every second until it works, is rejected, or the watchdog cancels it.
+    private func claim(_ session: URLSession, _ pending: PairingLink, _ generation: Int) async throws -> String {
+        while true {
+            do {
+                // The Local Network permission alert can make the scene inactive.
+                // Trigger it without the one-use code, then recheck before claiming.
+                var probe = URLRequest(url: pending.origin)
+                probe.httpMethod = "HEAD"
+                _ = try await session.data(for: probe)
+                try check(generation)
+                let claim: Claim = try await post(session, pending.origin, "claim", ["code": pending.code])
+                try check(generation)
+                guard claim.credential.range(of: "^[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil else {
+                    throw PairingError.rejected
+                }
+                return claim.credential
+            } catch PairingError.rejected {
+                throw PairingError.rejected
+            } catch {
+                try check(generation)
+                try await Task.sleep(nanoseconds: UInt64(PairingTimeout.retryDelay * 1e9))
+                try check(generation)
+            }
         }
-        UIApplication.shared.isIdleTimerDisabled = IdleTimerPolicy.keepAwake(active: active, paired: paired, reconnecting: busy || credential != nil)
-        if active && paired && deskCameraWanted { startDeskCamera() }
     }
 
-    func connect(acceptInsecureDemo: Bool) {
-        guard gate.active, !busy, let pending, !pending.isHTTP || acceptInsecureDemo else { return }
-        begin(origin: pending.origin, credential: nil, pairingCode: pending.code)
-    }
+    // MARK: - Heartbeats
 
-    func stopAndForget() {
-        gate.transition(active: gate.active)
+    private func startHeartbeats(origin: URL, credential: String) {
         cancelWork()
-        deskCamera.stop(); deskCameraWanted = false
-        credential = nil; origin = nil; pending = nil; paired = false; lastAcknowledged = nil
-        attemptId = nil; deskCamera.resetEvidenceBudget()
-        UIApplication.shared.isIdleTimerDisabled = false
-        status = "Stopped. Laptop answering pauses after its timeout. Re-pair to connect again."
+        let generation = gate.generation
+        let session = makeSession()
+        self.session = session
+        link = .reconnecting
+        status = "Reconnecting…"
+        task = Task { [weak self] in
+            await self?.heartbeatLoop(session, origin, credential, generation)
+        }
+    }
+
+    private func heartbeatLoop(_ session: URLSession, _ origin: URL, _ secret: String, _ generation: Int) async {
+        var rejections = RejectionTracker()
+        let clock = ContinuousClock()
+        while gate.permits(generation) && !Task.isCancelled {
+            let started = clock.now
+            do {
+                let challenge: Challenge = try await post(session, origin, "challenge", ["credential": secret])
+                try check(generation)
+                var body: [String: Any] = [
+                    "credential": secret, "challenge": challenge.challenge, "sequence": challenge.sequence, "active": true
+                ]
+                let reportingLeftApp = leftApp.pending
+                if reportingLeftApp { body["leftApp"] = true }
+                let ack: Acknowledgement = try await post(session, origin, "heartbeat", body)
+                try check(generation)
+                guard ack.ok else { throw PairingError.rejected }
+                if reportingLeftApp { leftApp.reported() }
+                rejections.recordSuccess()
+                lastAcknowledged = Date()
+                show(latestOK: true)
+            } catch PairingError.rejected {
+                guard gate.permits(generation), !Task.isCancelled else { return }
+                if rejections.recordRejection() == .giveUp {
+                    scanAgain(hint: "Your laptop ended this pairing (new QR code, or the exam finished). Scan the new QR code to pair again.")
+                    return
+                }
+                show(latestOK: false)
+            } catch {
+                guard gate.permits(generation), !Task.isCancelled else { return }
+                show(latestOK: false) // network blip: keep retrying on schedule
+            }
+            let elapsed = started.duration(to: clock.now)
+            let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+            do { try await Task.sleep(nanoseconds: UInt64(HeartbeatSchedule.sleepSeconds(elapsed: seconds) * 1e9)) } catch { return }
+        }
+    }
+
+    private func show(latestOK: Bool) {
+        link = LinkHealthPolicy.health(latestOK: latestOK, lastAcknowledged: lastAcknowledged, now: Date())
+        switch link {
+        case .connected: status = "Connected to your laptop"
+        case .reconnecting: status = "Reconnecting…"
+        case .laptopNotResponding:
+            status = "Your laptop isn't responding. Check the exam is still open on the laptop and both are on the same Wi-Fi. Retrying automatically…"
+        }
+    }
+
+    // MARK: - Plumbing
+
+    private func forgetPairing() {
+        cancelWork()
+        pending = nil; credential = nil; origin = nil; lastAcknowledged = nil
+        leftApp.reset()
+        link = .reconnecting
     }
 
     private func cancelWork() {
+        watchdog?.cancel(); watchdog = nil
         task?.cancel(); task = nil
         session?.invalidateAndCancel(); session = nil
-        busy = false; connected = false
     }
 
-    private func begin(origin: URL, credential: String?, pairingCode: String?) {
-        cancelWork()
-        let generation = gate.generation
+    private func updateIdleTimer() {
+        UIApplication.shared.isIdleTimerDisabled = IdleTimerPolicy.keepAwake(
+            active: gate.active, paired: paired, connecting: screen == .connecting)
+    }
+
+    private func makeSession() -> URLSession {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 3
         config.timeoutIntervalForResource = 4
@@ -147,109 +257,14 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
         #if DEBUG
         if MockLaptop.enabled { config.protocolClasses = [MockLaptopProtocol.self] }
         #endif
-        let session = URLSession(configuration: config, delegate: NoRedirects(), delegateQueue: nil)
-        self.session = session
-        busy = true
-        status = pairingCode == nil ? "Reconnecting…" : "Pairing…"
-        UIApplication.shared.isIdleTimerDisabled = IdleTimerPolicy.keepAwake(active: gate.active, paired: paired, reconnecting: true)
-        task = Task { [weak self] in
-            guard let self else { return }
-            do {
-                var secret = credential
-                if let pairingCode {
-                    secret = try await self.claimWithRetry(session, origin, pairingCode, generation)
-                    self.pending = nil
-                }
-                guard let secret else { throw PairingError.rejected }
-                self.credential = secret; self.origin = origin; self.paired = true; self.busy = false
-                UIApplication.shared.isIdleTimerDisabled = true
-                var rejections = RejectionTracker()
-                let clock = ContinuousClock()
-                while self.gate.permits(generation) && !Task.isCancelled {
-                    let started = clock.now
-                    do {
-                        try self.check(generation)
-                        let challenge: Challenge = try await self.post(session, origin, "challenge", ["credential": secret])
-                        try self.check(generation)
-                        let ack: Acknowledgement = try await self.post(session, origin, "heartbeat", [
-                            "credential": secret, "challenge": challenge.challenge, "sequence": challenge.sequence, "active": true
-                        ])
-                        try self.check(generation)
-                        guard ack.ok else { throw PairingError.rejected }
-                        rejections.recordSuccess()
-                        self.connected = true; self.lastAcknowledged = Date()
-                        self.status = "Connected — keep this app open."
-                    } catch PairingError.rejected {
-                        // Credentials survive an API restart and a claim code is single-use, so the only
-                        // thing the protocol allows is one fresh challenge before giving up.
-                        try self.check(generation)
-                        if rejections.recordRejection() == .giveUp { throw PairingError.rejected }
-                        self.connected = false
-                        self.status = "Reconnecting…"
-                    } catch {
-                        try self.check(generation)
-                        self.connected = false
-                        self.status = "Connection lost — check Wi-Fi and laptop servers. Retrying while open…"
-                    }
-                    let elapsed = started.duration(to: clock.now)
-                    let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
-                    try await Task.sleep(nanoseconds: UInt64(HeartbeatSchedule.sleepSeconds(elapsed: seconds) * 1e9))
-                }
-            } catch PairingError.network {
-                // Pairing never completed (retries exhausted); keep the unused QR so the user can tap Connect again.
-                guard self.gate.permits(generation), !Task.isCancelled else { return }
-                self.busy = false; self.connected = false
-                self.status = "Could not reach the laptop. Check Wi-Fi, then tap Connect to try again."
-                UIApplication.shared.isIdleTimerDisabled = IdleTimerPolicy.keepAwake(active: self.gate.active, paired: self.paired, reconnecting: false)
-            } catch {
-                guard self.gate.permits(generation), !Task.isCancelled else { return }
-                self.busy = false; self.connected = false
-                self.status = "Pairing expired, was replaced, or was rejected. Create a new QR on the laptop."
-                self.credential = nil; self.paired = false; self.pending = nil
-                self.deskCamera.stop()
-                UIApplication.shared.isIdleTimerDisabled = false
-            }
-        }
-    }
-
-    /// Probe + claim. Transient failures retry with backoff while the QR stays pending; only a definite
-    /// rejection (401/403/404/410) surfaces as `.rejected`.
-    private func claimWithRetry(_ session: URLSession, _ origin: URL, _ code: String, _ generation: Int) async throws -> String {
-        var attempt = 1
-        while true {
-            do {
-                // The Local Network permission alert can make the scene inactive.
-                // Trigger it without a one-use secret, then recheck before claiming.
-                var probe = URLRequest(url: origin)
-                probe.httpMethod = "HEAD"
-                _ = try await session.data(for: probe)
-                try check(generation)
-                let claim: Claim = try await post(session, origin, "claim", ["code": code])
-                try check(generation)
-                guard claim.credential.range(of: "^[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil else { throw PairingError.rejected }
-                // Optional (older servers omit it): needed only for evidence snapshots. Strictly validated
-                // because it becomes a URL path component.
-                attemptId = claim.attemptId.flatMap { $0.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil ? $0 : nil }
-                deskCamera.resetEvidenceBudget()
-                return claim.credential
-            } catch PairingError.rejected {
-                throw PairingError.rejected
-            } catch {
-                try check(generation)
-                guard let delay = PairingRetryPolicy.delayAfter(attempt: attempt) else { throw PairingError.network }
-                status = "Reconnecting…"
-                try await Task.sleep(nanoseconds: UInt64(delay * 1e9))
-                try check(generation)
-                attempt += 1
-            }
-        }
+        return URLSession(configuration: config, delegate: NoRedirects(), delegateQueue: nil)
     }
 
     private func check(_ generation: Int) throws {
         guard gate.permits(generation), !Task.isCancelled else { throw CancellationError() }
     }
     private func post<T: Decodable>(_ session: URLSession, _ origin: URL, _ path: String, _ body: [String: Any]) async throws -> T {
-        var request = URLRequest(url: origin.appendingPathComponent(path.hasPrefix("exam/") ? path : "exam/phone-presence/\(path)"))
+        var request = URLRequest(url: origin.appendingPathComponent("exam/phone-presence/\(path)"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -259,7 +274,7 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
         guard response.statusCode == 200 else { throw PairingError.network }
         return try JSONDecoder().decode(T.self, from: data)
     }
-    private struct Claim: Decodable { let credential: String; let attemptId: String? }
+    private struct Claim: Decodable { let credential: String }
     private struct Challenge: Decodable { let challenge: String; let sequence: Int }
     private struct Acknowledgement: Decodable { let ok: Bool }
 }

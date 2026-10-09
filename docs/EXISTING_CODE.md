@@ -71,7 +71,7 @@ Every item is its own commit; see [CHANGELOG.md](../CHANGELOG.md) and
 - Recording: opt-in adaptive cloud recording that measures uplink, picks a quality tier and uploads segments in the background with local fallback.
 - Liveness: passive random colour flash, with head-turn and spoken-word alternatives; hand-gesture challenge and TensorFlow dependencies removed.
 - Device rules: native-webcam-only, VM and capture-display blocking, and a mid-exam camera guard.
-- iPhone desk camera: on-device Apple Vision counts people and hands; only flags leave the phone.
+- iPhone presence: two-step setup (install, scan QR); the phone only pings the laptop (the earlier desk camera was removed).
 - Sharing and setup: `npm run share` (ngrok static domain), `npm run setup:desktop`, `npm run supabase:templates`.
 - Quality: green typecheck, lint and tests, CI on every push, docs and demo
   script.

@@ -12,15 +12,15 @@ import type { NetworkInterfaceInfo } from 'os';
  *
  * The main exam server only listens on 127.0.0.1, so a phone on the same Wi-Fi cannot reach it.
  * While pairing is active this second listener is bound to the Mac's private IPv4 address and
- * serves ONLY the few endpoints the phone uses (claim, challenge, heartbeat, desk-camera and the
- * credential-authenticated evidence upload). Everything else answers 404, every request must
+ * serves ONLY the three presence endpoints the phone uses (claim, challenge, heartbeat).
+ * Everything else answers 404, every request must
  * carry the exact LAN Host, bodies are small JSON, and callers are rate limited. Requests are
  * forwarded to the loopback API with only a fixed set of headers (never cookies).
  */
 
 export const PHONE_LAN_PORT = 3443;
-/** Largest accepted request body: a desk-camera JPEG (<= ~150 KB) base64-encoded plus JSON. */
-export const PHONE_MAX_BODY_BYTES = 512 * 1024;
+/** Largest accepted request body: presence pings are tiny JSON. */
+export const PHONE_MAX_BODY_BYTES = 16 * 1024;
 const UPSTREAM_TIMEOUT_MS = 15_000;
 const MAX_CONNECTIONS = 32;
 
@@ -28,21 +28,18 @@ const PHONE_POST_PATHS: ReadonlySet<string> = new Set([
   '/exam/phone-presence/claim',
   '/exam/phone-presence/challenge',
   '/exam/phone-presence/heartbeat',
-  '/exam/phone-presence/desk-camera',
 ]);
-const EVIDENCE_PATH = /^\/exam\/attempts\/[A-Za-z0-9_-]{1,64}\/evidence$/u;
 
 /** True only for the exact POST routes the iPhone app uses; no query strings, no other methods. */
 export function isPhoneRoute(method: string | undefined, url: string | undefined): boolean {
   if (method !== 'POST' || url === undefined || url.includes('?') || url.includes('#'))
     return false;
-  return PHONE_POST_PATHS.has(url) || EVIDENCE_PATH.test(url);
+  return PHONE_POST_PATHS.has(url);
 }
 
 /** Rate-limit bucket for a phone route. */
-export function routeBucket(url: string): 'claim' | 'evidence' | 'other' {
+export function routeBucket(url: string): 'claim' | 'other' {
   if (url === '/exam/phone-presence/claim') return 'claim';
-  if (EVIDENCE_PATH.test(url)) return 'evidence';
   return 'other';
 }
 
@@ -166,7 +163,6 @@ export function createPhoneLanServer(options: PhoneLanServerOptions): Server {
   const now = options.now ?? Date.now;
   const limits = {
     claim: createRateLimiter(10, 60_000, now),
-    evidence: createRateLimiter(12, 60_000, now),
     other: createRateLimiter(60, 10_000, now),
   };
   const server = createServer((request, response) => {

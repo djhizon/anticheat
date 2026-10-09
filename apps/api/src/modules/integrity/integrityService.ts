@@ -37,6 +37,7 @@ import type {
   AiCheckRunResponse,
   EvidenceSnapshotMeta,
   EvidenceSource,
+  StoredEvidenceSource,
   EvidenceTrigger,
   InstructorExamVersion,
   SimilarityRunResponse,
@@ -638,7 +639,7 @@ export class IntegrityService {
     this.sweepExpiredEvidence();
     return this.repo.listEvidence(attemptId).map((row) => ({
       id: row.id,
-      source: row.source as EvidenceSource,
+      source: row.source as StoredEvidenceSource,
       trigger: row.trigger as EvidenceTrigger,
       capturedAt: row.captured_at,
     }));

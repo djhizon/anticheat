@@ -16,8 +16,6 @@ describe('phone route allowlist', () => {
     '/exam/phone-presence/claim',
     '/exam/phone-presence/challenge',
     '/exam/phone-presence/heartbeat',
-    '/exam/phone-presence/desk-camera',
-    '/exam/attempts/abc_DEF-123/evidence',
   ])('allows POST %s', (path) => {
     expect(isPhoneRoute('POST', path)).toBe(true);
   });
@@ -30,6 +28,8 @@ describe('phone route allowlist', () => {
     ['POST', '/exam/assignments'],
     ['POST', '/exam/attempts/abc/answers'],
     ['POST', '/exam/attempts/abc/submit'],
+    ['POST', '/exam/phone-presence/desk-camera'],
+    ['POST', '/exam/attempts/abc_DEF-123/evidence'],
     ['POST', '/exam/attempts/a/b/evidence'],
     ['POST', '/exam/attempts//evidence'],
     ['GET', '/exam/attempts/abc/evidence'],
@@ -202,7 +202,7 @@ describe('phone LAN server (loopback fixtures)', () => {
     ).toBe(415);
     expect(
       (
-        await call('/exam/phone-presence/desk-camera', {
+        await call('/exam/phone-presence/heartbeat', {
           body: 'x'.repeat(PHONE_MAX_BODY_BYTES + 1),
         }).catch(() => ({ status: 413 }))
       ).status,

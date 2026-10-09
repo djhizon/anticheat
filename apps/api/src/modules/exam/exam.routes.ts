@@ -101,6 +101,8 @@ const base64Pattern = /^[A-Za-z0-9+/]+={0,2}$/u;
 const recordingPattern = /^\/exam\/attempts\/([^/]+)\/recording$/u;
 const speedtestPattern = /^\/exam\/speedtest$/u;
 const phonePresencePattern = /^\/exam\/attempts\/([^/]+)\/phone-presence$/u;
+/** Retired iPhone desk-camera route; answers 410 Gone. */
+const phoneDeskCameraRetiredPath = '/exam/phone-presence/desk-camera';
 const instructorVersionsPath = '/exam/instructor/versions';
 const instructorAiCheckPattern =
   /^\/exam\/instructor\/versions\/([^/]+)\/questions\/([^/]+)\/ai-check$/u;
@@ -184,7 +186,7 @@ function isExamPath(path: string): boolean {
       '/exam/phone-presence/claim',
       '/exam/phone-presence/challenge',
       '/exam/phone-presence/heartbeat',
-      '/exam/phone-presence/desk-camera',
+      phoneDeskCameraRetiredPath,
     ].includes(path) ||
     phonePresencePattern.test(path) ||
     path === '/exam/generate' ||
@@ -348,6 +350,13 @@ export class ExamRoutes {
             : this.phonePresence.status(attemptId),
         );
       }
+      if (method === 'POST' && path === phoneDeskCameraRetiredPath) {
+        // Retired: the iPhone only proves presence by pinging. Old app builds ignore failures here.
+        return jsonResponse(request, this.config.allowedOrigins, 410, {
+          code: 'gone',
+          message: 'The iPhone desk camera was removed. The phone only sends presence heartbeats.',
+        });
+      }
       if (method === 'POST' && this.phonePresence && path.startsWith('/exam/phone-presence/')) {
         const body = parseObject(request.body, 'Phone presence body required');
         // Native endpoints authenticate only the scoped credential, never browser cookies.
@@ -367,20 +376,6 @@ export class ExamRoutes {
             this.phonePresence.challenge(body.credential),
           );
         }
-        if (path === '/exam/phone-presence/desk-camera') {
-          return jsonResponse(
-            request,
-            this.config.allowedOrigins,
-            200,
-            this.phonePresence.deskCamera(
-              body.credential,
-              body.people,
-              body.handsVisible,
-              body.framingOk,
-              body,
-            ),
-          );
-        }
         if (path === '/exam/phone-presence/heartbeat') {
           return jsonResponse(
             request,
@@ -391,6 +386,7 @@ export class ExamRoutes {
               body.challenge,
               body.sequence,
               body.active,
+              body.leftApp,
             ),
           );
         }
@@ -1036,29 +1032,19 @@ export class ExamRoutes {
       throw new DomainError('validation_failed', 'Evidence trigger is not allowed.');
     }
 
-    // Authenticate first. Laptop sources use the student session + CSRF; the paired
-    // phone has no cookies and presents its scoped credential (as for desk-camera flags).
-    if (source === 'desk_camera') {
-      if (this.phonePresence === null) {
-        throw new DomainError('unauthorized', 'Phone pairing is invalid or expired.');
-      }
-      const owner = this.phonePresence.attemptIdForCredential(body.credential);
-      if (owner !== attemptId) {
-        throw new DomainError('forbidden', 'That phone is not paired to this attempt.');
-      }
-    } else {
-      const principal = this.requireStudent(request);
-      this.boundary.validateUnsafe(request, principal);
-      const delivery = await this.service.getAttemptDelivery(
-        attemptId as AttemptId,
-        principal.user.id,
+    // Authenticate first: evidence comes only from the laptop (student session + CSRF).
+    // The paired iPhone sends heartbeats only and cannot upload photos.
+    const principal = this.requireStudent(request);
+    this.boundary.validateUnsafe(request, principal);
+    const delivery = await this.service.getAttemptDelivery(
+      attemptId as AttemptId,
+      principal.user.id,
+    );
+    if (delivery.attempt.status !== 'in_progress') {
+      throw new DomainError(
+        'conflict',
+        'Evidence is only accepted while the attempt is in progress.',
       );
-      if (delivery.attempt.status !== 'in_progress') {
-        throw new DomainError(
-          'conflict',
-          'Evidence is only accepted while the attempt is in progress.',
-        );
-      }
     }
 
     const image = body.imageJpegBase64;

@@ -27,15 +27,10 @@ targets:
         CFBundleDisplayName: Exam Companion
         UILaunchScreen: {}
         UIApplicationSupportsIndirectInputEvents: true
-        UISupportedInterfaceOrientations:
-          [
-            UIInterfaceOrientationPortrait,
-            UIInterfaceOrientationLandscapeLeft,
-            UIInterfaceOrientationLandscapeRight,
-          ]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIRequiresFullScreen: true
         NSLocalNetworkUsageDescription: Connect to your exam laptop on Wi-Fi to send foreground-only presence checks.
-        NSCameraUsageDescription: Optional desk camera. Your phone analyses the picture on the device to count people and hands, spot text or objects on the desk, and notice a covered lens. Only yes/no flags and counts are sent, plus one still photo to your instructor if something unusual is detected. No video is recorded or sent.
+        NSCameraUsageDescription: Used only to scan the pairing QR code from your laptop
         # ATS: NSAllowsLocalNetworking exempts LAN/.local hosts only; internet hosts stay HTTPS-only.
         # Release builds additionally refuse http:// pairing links in app code (PresenceController.allowsDemoHTTP).
         NSAppTransportSecurity:
@@ -46,7 +41,7 @@ targets:
   ExamCompanionTests:
     type: bundle.unit-test
     platform: iOS
-    # Pure policy/aggregation tests: the Core sources are compiled straight into the test bundle,
+    # Pure policy tests: the Core sources are compiled straight into the test bundle,
     # so no host app or camera is needed. `swift test` runs the same files against PresenceCore.
     sources: [Tests, Sources/Core]
     settings:

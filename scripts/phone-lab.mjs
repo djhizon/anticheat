@@ -1,8 +1,9 @@
 /* global console, process, fetch, setTimeout, URL, Buffer */
-// Phone lab: one command to test the real iPhone desk camera against this laptop.
+// Phone lab: one command to test the real iPhone presence app against this laptop.
 // Starts an isolated API (:3600) and web server (:5773) on the LAN, seeds demo data, starts the
 // demo student's exam attempt, prints a pairing QR for the iPhone, then watches the attempt's
-// integrity timeline and evidence snapshots live as an instructor. Local trusted Wi-Fi only.
+// integrity timeline (paired, lost, reconnected, left the app) and the laptop's evidence
+// snapshots live as an instructor. `--auto` plays the phone's part instead. Trusted Wi-Fi only.
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { networkInterfaces, tmpdir } from 'node:os';

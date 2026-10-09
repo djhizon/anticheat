@@ -1,70 +1,181 @@
 import SwiftUI
+import UIKit
 
 @main struct ExamCompanionApp: App {
     @StateObject private var controller = PresenceController()
     var body: some Scene {
-        WindowGroup { CompanionView(controller: controller).placementGuide(controller: controller) }
+        WindowGroup { RootView(controller: controller) }
     }
 }
 
-struct CompanionView: View {
+/// Two steps for the student: install the app, scan the QR on the laptop. Everything else is automatic.
+struct RootView: View {
     @Environment(\.scenePhase) private var phase
     @ObservedObject var controller: PresenceController
-    @State private var pastedLink = ""
-    @State private var consent = false
-    @State private var insecureDemo = false
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    Image(systemName: controller.connected ? "checkmark.shield.fill" : "iphone")
-                        .font(.system(size: 58)).foregroundStyle(controller.connected ? .green : .blue)
-                    Text("Stay here during your exam").font(.largeTitle.bold())
-                    Text(controller.status).font(.headline).accessibilityIdentifier("presence-status")
-                    #if DEBUG
-                    if MockLaptop.enabled { MockLaptopLog() }
-                    #endif
-                    Text("Pings are sent only while this app is active. Going Home, locking, or closing it stops pings. Your laptop pauses answering after 8 seconds without a fresh ping. Network interruptions have the same effect; they are not proof of cheating.")
-                    if let date = controller.lastAcknowledged {
-                        Text("Last acknowledged: \(date.formatted(date: .omitted, time: .standard))").font(.caption)
-                    }
-                    if let pairing = controller.pending {
-                        Text("Laptop: \(pairing.origin.absoluteString)").font(.callout.monospaced()).textSelection(.enabled)
-                        Toggle("I agree to foreground connection checks. No phone audio/video is monitored.", isOn: $consent)
-                        if pairing.isHTTP {
-                            Toggle("Trusted Wi-Fi demo: I understand HTTP pairing is unencrypted. Use synthetic exam data only.", isOn: $insecureDemo)
-                        }
-                        Button("Connect to laptop") { controller.connect(acceptInsecureDemo: insecureDemo) }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(!consent || controller.busy || (pairing.isHTTP && !insecureDemo))
-                    }
-                    if controller.paired {
-                        DeskCameraSection(controller: controller)
-                        Button("Stop and forget pairing", role: .destructive) { controller.stopAndForget() }
-                        Text("This does not disable the laptop requirement. Force-quitting also forgets pairing; scan a fresh QR to reconnect.").font(.caption)
-                    } else {
-                        Text("Install this app, then use the iPhone Camera app to scan the laptop QR and tap the link. Come back here to confirm the address.")
-                        DisclosureGroup("Enter pairing link manually") {
-                            TextField("examcompanion://pair?…", text: $pastedLink)
-                                .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            Button("Use pairing link") {
-                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                                controller.acceptLink(pastedLink); pastedLink = ""; consent = false; insecureDemo = false
-                            }
-                        }
-                    }
-                    Text("The exam deadline keeps running. Keep the phone charged. An incoming call or Control Center may briefly make the app inactive.").font(.footnote)
-                }.padding(24)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .navigationTitle("Exam Companion")
-            .onAppear { controller.setActive(phase == .active) }
-            .modifier(PhaseChange(phase: phase) { controller.setActive($0 == .active) })
-            .onOpenURL { url in
-                consent = false; insecureDemo = false
-                controller.acceptLink(url.absoluteString)
+        Group {
+            switch controller.screen {
+            case .scanning: ScannerScreen(controller: controller)
+            case .connecting, .connectFailed: ConnectingScreen(controller: controller)
+            case .paired: PairedScreen(controller: controller)
             }
         }
+        .onAppear { controller.scenePhaseChanged(phase) }
+        .modifier(PhaseChange(phase: phase) { controller.scenePhaseChanged($0) })
+        // Pairing links tapped in the system Camera app or elsewhere open here.
+        .onOpenURL { controller.acceptLink($0.absoluteString) }
+    }
+}
+
+// MARK: - Step 2: scan
+
+struct ScannerScreen: View {
+    @ObservedObject var controller: PresenceController
+    @StateObject private var scanner = QRScanner()
+    @State private var pastedLink = ""
+    @State private var showPaste = false
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Text("Scan the QR code on your laptop").font(.title2.bold()).multilineTextAlignment(.center)
+            Text(controller.status).font(.subheadline).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center).accessibilityIdentifier("presence-status")
+            camera
+            if let hint = controller.scanHint {
+                Text(hint).font(.callout).foregroundStyle(.orange).multilineTextAlignment(.center)
+                    .accessibilityIdentifier("scan-hint")
+            }
+            if showPaste || scanner.availability == .unavailable || scanner.availability == .denied {
+                pasteField
+            } else {
+                Button("Paste a pairing link instead") { showPaste = true }.font(.footnote)
+            }
+            Spacer(minLength: 0)
+            Text("This app only tells your laptop that your phone is here. It never sends camera, microphone, or screen data.")
+                .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        }
+        .padding(24)
+        .onAppear {
+            scanner.onCode = { [weak controller] in controller?.acceptLink($0) }
+            if controller.appActive { scanner.start() }
+        }
+        .onDisappear { scanner.stop() }
+        .modifier(ValueChange(value: controller.appActive) { active in active ? scanner.start() : scanner.stop() })
+    }
+
+    @ViewBuilder private var camera: some View {
+        switch scanner.availability {
+        case .running, .starting:
+            CameraPreview(session: scanner.session)
+                .aspectRatio(1, contentMode: .fit)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.8), lineWidth: 3).padding(40))
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+                .accessibilityLabel("QR scanner")
+                .accessibilityIdentifier("qr-scanner")
+        case .unavailable:
+            Label("Camera unavailable — paste link", systemImage: "camera.metering.unknown")
+                .font(.headline).frame(maxWidth: .infinity, minHeight: 120)
+                .background(RoundedRectangle(cornerRadius: 20).fill(Color(.secondarySystemBackground)))
+                .accessibilityIdentifier("camera-unavailable")
+        case .denied:
+            VStack(spacing: 10) {
+                Label("Camera access is off", systemImage: "camera.fill").font(.headline)
+                Text("Allow the camera in Settings to scan, or paste the pairing link below.").font(.callout)
+                    .multilineTextAlignment(.center)
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                }
+            }
+            .padding().frame(maxWidth: .infinity, minHeight: 120)
+            .background(RoundedRectangle(cornerRadius: 20).fill(Color(.secondarySystemBackground)))
+            .accessibilityIdentifier("camera-denied")
+        }
+    }
+
+    private var pasteField: some View {
+        VStack(spacing: 10) {
+            TextField("examcompanion://pair?…", text: $pastedLink)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("pairing-link-field")
+            Button("Use pairing link") {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                controller.acceptLink(pastedLink)
+                pastedLink = ""
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(pastedLink.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+    }
+}
+
+// MARK: - Connecting
+
+struct ConnectingScreen: View {
+    @ObservedObject var controller: PresenceController
+
+    var body: some View {
+        VStack(spacing: 22) {
+            Spacer()
+            if controller.screen == .connecting {
+                ProgressView().controlSize(.large)
+            } else {
+                Image(systemName: "wifi.exclamationmark").font(.system(size: 56)).foregroundStyle(.orange)
+            }
+            Text(controller.status).font(.title3.weight(.semibold)).multilineTextAlignment(.center)
+                .accessibilityIdentifier("presence-status")
+            if controller.screen == .connectFailed {
+                Button("Try again") { controller.retry() }.buttonStyle(.borderedProminent).controlSize(.large)
+                Button("Scan again") { controller.scanAgain() }
+            }
+            Spacer()
+        }
+        .padding(28)
+    }
+}
+
+// MARK: - Paired
+
+struct PairedScreen: View {
+    @ObservedObject var controller: PresenceController
+    @State private var confirmUnpair = false
+
+    private var symbol: (name: String, colour: Color) {
+        switch controller.link {
+        case .connected: return ("checkmark.circle.fill", .green)
+        case .reconnecting: return ("arrow.triangle.2.circlepath.circle.fill", .orange)
+        case .laptopNotResponding: return ("exclamationmark.triangle.fill", .red)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Spacer()
+            Image(systemName: symbol.name).font(.system(size: 88)).foregroundStyle(symbol.colour)
+                .accessibilityHidden(true)
+            Text("Paired with your laptop").font(.largeTitle.bold()).multilineTextAlignment(.center)
+            Text("Keep this app open and put the phone face-down on the desk.")
+                .font(.title3).multilineTextAlignment(.center)
+            Text(controller.status).font(.headline).foregroundStyle(symbol.colour)
+                .multilineTextAlignment(.center).accessibilityIdentifier("presence-status")
+            if let date = controller.lastAcknowledged {
+                Text("Last check: \(date.formatted(date: .omitted, time: .standard))")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            #if DEBUG
+            if MockLaptop.enabled { MockLaptopLog() }
+            #endif
+            Spacer()
+            Text("Leaving this app or locking the phone pauses answering on your laptop until you come back.")
+                .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Button("Unpair", role: .destructive) { confirmUnpair = true }.font(.footnote)
+                .confirmationDialog("Unpair from your laptop?", isPresented: $confirmUnpair, titleVisibility: .visible) {
+                    Button("Unpair", role: .destructive) { controller.scanAgain() }
+                } message: {
+                    Text("Your laptop will pause answering until you scan a new QR code.")
+                }
+        }
+        .padding(28)
     }
 }

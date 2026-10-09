@@ -64,13 +64,13 @@ it('formats timeline entries with time, source, kind and summary', () => {
 it('formats evidence lines and safe file names', () => {
   const snap = {
     id: 'ab/cd-1234-xyz',
-    source: 'desk_camera',
-    trigger: 'extra_person',
+    source: 'webcam',
+    trigger: 'multiple_faces',
     capturedAt: '2026-10-10T01:02:03.456Z',
   };
   expect(formatEvidence(snap, '/tmp/a.jpg')).toContain('saved /tmp/a.jpg');
   expect(formatEvidence(snap, null)).toContain('download failed');
-  expect(evidenceFileName(snap)).toBe('2026-10-10T01-02-03Z_desk_camera_extra_person_ab-cd-12.jpg');
+  expect(evidenceFileName(snap)).toBe('2026-10-10T01-02-03Z_webcam_multiple_faces_ab-cd-12.jpg');
 });
 
 it('shows each entry once, including genuinely repeated identical entries', () => {

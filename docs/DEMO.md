@@ -59,15 +59,15 @@ the laptop and phone on the laptop's own hotspot.
 **Cut first if running long:** the tab-switch in 2:25, then the AI-written
 check in 3:50. **Never cut:** consent, liveness, pull the network.
 
-**Optional extras (only if a judge asks):** the iPhone desk camera (Apple
-Vision on the phone; only a people count and two yes/no flags are sent), the
-desktop lockdown app, and adaptive cloud recording.
+**Optional extras (only if a judge asks):** iPhone presence (scan one QR; the
+phone only pings the laptop while the app is open), the desktop lockdown app,
+and adaptive cloud recording.
 
 ## Likely judge questions
 
 - **What exactly runs locally?** Face, head-pose and phone detection
   (MediaPipe), speech-to-text (whisper.cpp), the liveness checks, typing and
-  audio statistics, and on the iPhone, Apple Vision. Gemini only powers the
+  audio statistics. Gemini only powers the
   instructor's optional similarity/AI-writing checks and exam generation. Full
   table: [LOCAL_AI.md](LOCAL_AI.md).
 - **Can it detect earbuds, smart glasses or a smartwatch?** Not in the
@@ -78,14 +78,14 @@ desktop lockdown app, and adaptive cloud recording.
   `ENABLE_BACKEND_VISION=true`. Small items at webcam resolution are often
   missed, so these are leads, not proof.
 - **What about privacy?** Camera frames never leave the device; recording is
-  opt-in; the phone sends flags, not pictures; the student sees everything we
+  opt-in; the phone only sends presence pings; the student sees everything we
   recorded. Audio is transcribed locally by Whisper; only the text is kept
   (never the audio), for 30 days by default, and bystander speech can be captured.
 - **False positives?** Every signal is a lead for a teacher to review, shown to
   the student too. Liveness has alternatives so nobody is stuck.
 - **Can't a student cheat around it?** Some ways, yes: notes out of frame, a
   hidden earpiece, special hardware. We block virtual cameras, virtual machines
-  and capture displays, and the optional desk camera covers the desk. We say
+  and capture displays, and the paired iPhone shows the phone stayed on the desk. We say
   plainly that it isn't tamper-proof.
 - **Was this built today?** We started from our own earlier prototype and
   disclosed it: see [EXISTING_CODE.md](EXISTING_CODE.md). Every hackathon change

@@ -34,10 +34,10 @@ in [docs/LOCAL_AI.md](docs/LOCAL_AI.md).
 - One question at a time, with autosave and an idempotent submit.
 - A **transparency report** after submission that lists every recorded event in
   plain language.
-- Optional iPhone presence pairing with clear, non-accusatory messages, plus an
-  opt-in **desk camera**: the phone uses Apple's on-device Vision framework to
-  count people and check for hands near the keyboard, and sends only three
-  flags (people, hands visible, framing OK), never images.
+- Optional iPhone presence pairing in two steps (install Exam Companion, scan
+  the QR): the phone only proves it is on the desk by pinging the laptop while
+  the app is open, with clear, non-accusatory messages. It sends no camera,
+  microphone or screen data.
 - A liveness check that students can always pass: a random colour flash read by
   the native webcam, with a head-turn option and a spoken-word option
   (checked by local Whisper) when the room or the camera makes the flash hard.

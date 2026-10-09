@@ -239,43 +239,31 @@ describe('evidence snapshots', () => {
     expect(full.status).toBe(429);
   });
 
-  it('accepts desk_camera evidence only with the credential of the phone paired to that attempt', async () => {
+  it('no longer accepts photos from the paired phone (desk camera retired)', async () => {
     const student = await register('ev-phone@example.test');
-    const otherStudent = await register('ev-phone-other@example.test');
     const attemptId = await startAttempt(student);
-    const otherAttempt = await startAttempt(otherStudent);
     const path = `/exam/attempts/${attemptId}/evidence`;
     const { credential } = exam.phonePresence.claim(exam.phonePresence.enroll(attemptId).code);
-    const otherCredential = exam.phonePresence.claim(
-      exam.phonePresence.enroll(otherAttempt).code,
-    ).credential;
-    const post = (body: Record<string, unknown>, headers: Record<string, string> = {}) =>
-      exam.routes.handle({
-        method: 'POST',
-        path,
-        headers,
-        body: payload({ source: 'desk_camera', trigger: 'extra_person', ...body }),
-      });
+    const phonePost = (body: Record<string, unknown>) =>
+      exam.routes.handle({ method: 'POST', path, headers: {}, body: payload(body) });
 
-    expect((await post({})).status).toBe(401); // no credential
-    expect((await post({ credential: 'x'.repeat(43) })).status).toBe(401);
-    expect((await post({ credential: otherCredential })).status).toBe(403); // other attempt
-    // A student cookie session does not stand in for the phone.
+    // The retired source is refused outright; the phone credential is not an upload credential.
     expect(
-      (await post({}, as(student, 'POST', path).headers as Record<string, string>)).status,
+      (await phonePost({ source: 'desk_camera', trigger: 'extra_person', credential })).status,
+    ).toBe(400);
+    expect(
+      (await phonePost({ source: 'webcam', trigger: 'extra_person', credential })).status,
     ).toBe(401);
-    const created = await post({ credential });
-    expect(created.status).toBe(201);
-    expect((await post({ credential })).status).toBe(429);
-    expect((await post({ credential, imageJpegBase64: 'AAAA' })).status).toBe(400);
-    // The owner sees it, labelled as desk camera.
+    // Even the signed-in student cannot store the retired source.
+    expect(
+      (
+        await exam.routes.handle(
+          as(student, 'POST', path, payload({ source: 'desk_camera', trigger: 'extra_person' })),
+        )
+      ).status,
+    ).toBe(400);
     const list = await exam.routes.handle(as(student, 'GET', path));
-    expect((list.body as { snapshots: Array<{ source: string }> }).snapshots[0]?.source).toBe(
-      'desk_camera',
-    );
-    // After the attempt ends the credential stops working.
-    clock.advance(24 * 3600);
-    expect((await post({ credential, trigger: 'left_frame' })).status).toBe(401);
+    expect(list.body).toEqual({ snapshots: [] });
   });
 
   it('sweeps snapshots older than the retention window and keeps newer ones', async () => {

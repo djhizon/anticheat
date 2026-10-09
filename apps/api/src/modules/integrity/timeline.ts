@@ -235,35 +235,37 @@ const FLAG_MAP: Record<string, AppMapping> = {
     severity: 'flag',
     summary: 'A video-capture device appeared',
   },
-  desk_camera_extra_person: {
-    source: 'phone',
-    kind: 'desk_extra_person',
-    severity: 'notice',
-    summary: 'The paired iPhone desk camera reported more than one person',
-  },
-  desk_camera_left_frame: {
-    source: 'phone',
-    kind: 'desk_left_frame',
-    severity: 'notice',
-    summary: 'The paired iPhone desk camera reported nobody in frame',
-  },
   iphone_paired: {
     source: 'phone',
     kind: 'iphone_paired',
     severity: 'info',
-    summary: 'An iPhone was paired as a desk camera',
+    summary: 'The iPhone was paired for presence checks',
+  },
+  iphone_lost: {
+    source: 'phone',
+    kind: 'iphone_lost',
+    severity: 'notice',
+    summary:
+      'The paired iPhone stopped answering (app closed, phone locked or a network drop; not proof of cheating)',
+  },
+  iphone_reconnected: {
+    source: 'phone',
+    kind: 'iphone_reconnected',
+    severity: 'info',
+    summary: 'The paired iPhone answered again',
+  },
+  phone_left_app: {
+    source: 'phone',
+    kind: 'phone_left_app',
+    severity: 'notice',
+    summary:
+      'The iPhone app went to the background for a while (phone picked up or another app opened), a lead only',
   },
   iphone_disconnected: {
     source: 'phone',
     kind: 'iphone_disconnected',
     severity: 'notice',
     summary: 'The paired iPhone stopped checking in (answering was not blocked)',
-  },
-  iphone_reconnected: {
-    source: 'phone',
-    kind: 'iphone_reconnected',
-    severity: 'info',
-    summary: 'The paired iPhone checked in again',
   },
   desktop_demo_mode: {
     source: 'desktop',
@@ -548,7 +550,7 @@ const EVIDENCE_TEXT: Record<string, string> = {
 const EVIDENCE_SOURCE: Record<string, IntegrityTimelineSource> = {
   webcam: 'camera',
   screen: 'desktop',
-  desk_camera: 'phone',
+  desk_camera: 'phone', // legacy rows from the retired iPhone desk camera
 };
 
 function evidenceEntry(row: TimelineRows['evidence'][number]): Entry | null {

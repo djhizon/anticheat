@@ -6,18 +6,8 @@ export const PHONE_PING_MS = 2000;
 export const PHONE_LEASE_MS = 8000;
 const PAIRING_MS = 120000;
 const CHALLENGE_MS = 4000;
-/** Phone sends at most every 5 s; the server accepts one report per 2 s per attempt. */
-export const DESK_CAMERA_MIN_GAP_MS = 2000;
-/** A desk-camera report older than this means the camera is considered off. */
-export const DESK_CAMERA_STALE_MS = 15000;
-/** The same flag is stored at most once per window so a flickering view cannot spam the report. */
-const DESK_FLAG_COOLDOWN_MS = 30000;
-const MAX_PEOPLE = 20;
-const MAX_HANDS = 8;
-/** Object hints the phone may report (label names only). Anything else is rejected. */
-export const DESK_OBJECT_HINTS = ['cellphone', 'paper', 'book', 'bright_rectangle'] as const;
-/** Desk state and flag cooldowns for an attempt with no report this long are dropped. */
-const DESK_STATE_IDLE_MS = 10 * 60000;
+/** A `leftApp` report is logged at most once per window so a fidgety student cannot spam the log. */
+export const LEFT_APP_COOLDOWN_MS = 30000;
 const token = () => randomBytes(32).toString('base64url');
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 function secret(value: unknown): string {
@@ -40,80 +30,19 @@ export interface PhonePresenceStatus {
   remainingMs: number;
   heartbeatIntervalMs: number;
   timeoutMs: number;
-  deskCamera: DeskCameraState;
-}
-export interface DeskCameraState {
-  on: boolean;
-  framingOk: boolean;
-  people: number;
-  handsVisible: boolean;
-  extraPerson: boolean;
-  extraHands: boolean;
-  handCount: number;
-  leftHands: number;
-  rightHands: number;
-  textVisible: boolean;
-  objectHints: string[];
-  cameraObstructed: boolean;
-}
-/** Optional, additive flags from newer phones. Old phones omit all of them. */
-export interface DeskCameraExtras {
-  extraPerson?: unknown;
-  extraHands?: unknown;
-  handCount?: unknown;
-  leftHands?: unknown;
-  rightHands?: unknown;
-  textVisible?: unknown;
-  objectHints?: unknown;
-  cameraObstructed?: unknown;
-}
-interface DeskReport {
-  people: number;
-  handsVisible: boolean;
-  framingOk: boolean;
-  extraPerson: boolean;
-  extraHands: boolean;
-  handCount: number;
-  leftHands: number;
-  rightHands: number;
-  textVisible: boolean;
-  objectHints: string[];
-  cameraObstructed: boolean;
-  at: number;
-}
-function optionalBool(value: unknown): boolean | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== 'boolean')
-    throw new DomainError('validation_failed', 'Desk camera status is invalid.');
-  return value;
-}
-function optionalCount(value: unknown): number {
-  if (value === undefined || value === null) return 0;
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > MAX_HANDS) {
-    throw new DomainError('validation_failed', 'Desk camera status is invalid.');
-  }
-  return value;
-}
-function optionalHints(value: unknown): string[] {
-  if (value === undefined || value === null) return [];
-  if (
-    !Array.isArray(value) ||
-    value.length > DESK_OBJECT_HINTS.length ||
-    value.some((h) => !(DESK_OBJECT_HINTS as readonly unknown[]).includes(h))
-  ) {
-    throw new DomainError('validation_failed', 'Desk camera status is invalid.');
-  }
-  return [...new Set(value as string[])].sort();
 }
 
-/** Cooperative presence, not iOS attestation. No heartbeat history is retained.
+/** Cooperative presence, not iOS attestation. The phone only proves it is there by pinging.
+ * No heartbeat history is retained; only transitions (paired, lost, reconnected, left the app)
+ * are written to the integrity log as leads for a human reviewer.
  * Leases/challenges are deliberately memory-only: restart must fail closed.
  */
 export class PhonePresenceService {
   private readonly leases = new Map<string, number>();
   private readonly challenges = new Map<string, { value: string; issued: number }>();
-  private readonly desk = new Map<string, DeskReport>();
-  private readonly deskFlags = new Map<string, number>();
+  /** Attempts whose lease lapsed and whose loss is already logged; cleared on reconnect. */
+  private readonly lost = new Set<string>();
+  private readonly leftAppLogged = new Map<string, number>();
   constructor(
     private readonly db: DatabaseSync,
     private readonly clock: Clock,
@@ -134,7 +63,7 @@ export class PhonePresenceService {
       .run(attemptId, hash(code), Math.min(now + PAIRING_MS, deadline), deadline);
     this.leases.delete(attemptId);
     this.challenges.delete(attemptId);
-    this.clearDesk(attemptId);
+    this.forget(attemptId);
     return {
       code,
       expiresAt: new Date(Math.min(now + PAIRING_MS, deadline)).toISOString(),
@@ -160,12 +89,7 @@ export class PhonePresenceService {
       .run(hash(credential), row.attempt_id, pairingHash);
     if (result.changes !== 1) this.reject();
     // Log the pairing in the unified integrity log (timestamp only, no credential).
-    this.db
-      .prepare(
-        'INSERT INTO app_events (id, attempt_id, foreground_app, display_count) VALUES (?, ?, ?, 1)',
-      )
-      .run(randomUUID(), row.attempt_id, 'flag:iphone_paired');
-    // attemptId lets the phone address evidence snapshots; it is the student's own attempt.
+    this.log(row.attempt_id, 'iphone_paired', this.now());
     return {
       credential,
       attemptId: row.attempt_id,
@@ -187,8 +111,22 @@ export class PhonePresenceService {
     return { challenge: challenge.value, sequence: row.sequence + 1 };
   }
 
-  heartbeat(value: unknown, challengeValue: unknown, sequence: unknown, active: unknown) {
+  /**
+   * `leftApp` is optional and report-only: the phone sets it on the first heartbeat after the app
+   * came back from the background (phone picked up and used, Home pressed, another app opened).
+   * It never blocks anything; a lapsed lease is what pauses answering.
+   */
+  heartbeat(
+    value: unknown,
+    challengeValue: unknown,
+    sequence: unknown,
+    active: unknown,
+    leftApp?: unknown,
+  ) {
     const row = this.authenticate(value);
+    if (leftApp !== undefined && leftApp !== null && typeof leftApp !== 'boolean') {
+      throw new DomainError('validation_failed', 'Phone heartbeat is invalid.');
+    }
     const challenge = this.challenges.get(row.attempt_id);
     const now = this.now();
     if (
@@ -206,120 +144,13 @@ export class PhonePresenceService {
     this.db
       .prepare('UPDATE phone_presence SET sequence=? WHERE attempt_id=?')
       .run(sequence as number, row.attempt_id);
+    // A lapse nobody observed through status() is still logged before the reconnect.
+    this.noteLoss(row.attempt_id, now);
+    if (this.lost.delete(row.attempt_id)) this.log(row.attempt_id, 'iphone_reconnected', now);
+    if (leftApp === true) this.noteLeftApp(row.attempt_id, now);
     // A delayed request cannot extend presence by a full timeout from receipt.
     this.leases.set(row.attempt_id, challenge.issued + PHONE_LEASE_MS);
     return { ok: true, remainingMs: challenge.issued + PHONE_LEASE_MS - now };
-  }
-
-  /** Attempt a valid, unexpired phone credential is paired to; throws unauthorized otherwise. */
-  attemptIdForCredential(value: unknown): string {
-    return this.authenticate(value).attempt_id;
-  }
-
-  /** Optional desk-camera flags from the phone. Flags only; never images. Does not touch the lease.
-   * These are cooperative signals authenticated only by the pairing credential: whoever holds
-   * it can send or withhold them. They are leads for a human reviewer, not verdicts. */
-  deskCamera(
-    value: unknown,
-    people: unknown,
-    handsVisible: unknown,
-    framingOk: unknown,
-    extras: DeskCameraExtras = {},
-  ) {
-    const row = this.authenticate(value);
-    if (
-      typeof people !== 'number' ||
-      !Number.isSafeInteger(people) ||
-      people < 0 ||
-      people > MAX_PEOPLE ||
-      typeof handsVisible !== 'boolean' ||
-      typeof framingOk !== 'boolean'
-    ) {
-      throw new DomainError('validation_failed', 'Desk camera status is invalid.');
-    }
-    const extraPersonSent = optionalBool(extras.extraPerson);
-    const extraHands = optionalBool(extras.extraHands) ?? false;
-    const textVisible = optionalBool(extras.textVisible) ?? false;
-    const cameraObstructed = optionalBool(extras.cameraObstructed) ?? false;
-    const handCount = optionalCount(extras.handCount);
-    const leftHands = optionalCount(extras.leftHands);
-    const rightHands = optionalCount(extras.rightHands);
-    const objectHints = optionalHints(extras.objectHints);
-    // Newer phones debounce the second-person decision on-device; older ones only send a count.
-    const extraPerson = extraPersonSent ?? people >= 2;
-    const now = this.now();
-    this.pruneDesk(now);
-    const previous = this.desk.get(row.attempt_id);
-    if (previous && now >= previous.at && now - previous.at < DESK_CAMERA_MIN_GAP_MS) {
-      throw new DomainError('conflict', 'Desk camera status sent too often.');
-    }
-    this.desk.set(row.attempt_id, {
-      people,
-      handsVisible,
-      framingOk,
-      extraPerson,
-      extraHands,
-      handCount,
-      leftHands,
-      rightHands,
-      textVisible,
-      objectHints,
-      cameraObstructed,
-      at: now,
-    });
-    const fresh = previous !== undefined && now - previous.at < DESK_CAMERA_STALE_MS;
-    if (extraPerson && (!fresh || !previous.extraPerson)) {
-      this.flag(row.attempt_id, 'desk_camera_extra_person', now);
-    }
-    if (extraHands && (!fresh || !previous.extraHands)) {
-      this.flag(row.attempt_id, 'desk_camera_extra_hands', now);
-    }
-    if (textVisible && (!fresh || !previous.textVisible)) {
-      this.flag(row.attempt_id, 'desk_camera_text_visible', now);
-    }
-    if (cameraObstructed && (!fresh || !previous.cameraObstructed)) {
-      this.flag(row.attempt_id, 'desk_camera_obstructed', now);
-    }
-    for (const hint of objectHints) {
-      if (!fresh || !previous.objectHints.includes(hint)) {
-        this.flag(row.attempt_id, `desk_camera_object_${hint}`, now);
-      }
-    }
-    if (people === 0 && fresh && previous.people >= 1) {
-      this.flag(row.attempt_id, 'desk_camera_left_frame', now);
-    }
-    return { ok: true };
-  }
-
-  /** Bounded memory: drop idle or ended-attempt desk state and expired flag cooldowns. */
-  private pruneDesk(now: number) {
-    for (const [id, report] of this.desk) {
-      if (now < report.at || now - report.at >= DESK_STATE_IDLE_MS) this.clearDesk(id);
-    }
-    for (const [key, last] of this.deskFlags) {
-      if (now < last || now - last >= DESK_FLAG_COOLDOWN_MS) this.deskFlags.delete(key);
-    }
-  }
-  private clearDesk(attemptId: string) {
-    this.desk.delete(attemptId);
-    const prefix = `${attemptId}:`;
-    for (const key of this.deskFlags.keys()) if (key.startsWith(prefix)) this.deskFlags.delete(key);
-  }
-  /** In-memory state held for an attempt (for tests and diagnostics). */
-  memorySize() {
-    return this.desk.size + this.deskFlags.size;
-  }
-
-  private flag(attemptId: string, name: string, now: number) {
-    const key = `${attemptId}:${name}`;
-    const last = this.deskFlags.get(key);
-    if (last !== undefined && now >= last && now - last < DESK_FLAG_COOLDOWN_MS) return;
-    this.deskFlags.set(key, now);
-    this.db
-      .prepare(
-        'INSERT INTO app_events (id, attempt_id, foreground_app, display_count) VALUES (?, ?, ?, 1)',
-      )
-      .run(randomUUID(), attemptId, `flag:${name}`);
   }
 
   status(attemptId: string): PhonePresenceStatus {
@@ -332,30 +163,14 @@ export class PhonePresenceService {
         const deadline = this.activeDeadline(attemptId);
         remainingMs = Math.max(0, Math.min(this.leases.get(attemptId) ?? 0, deadline) - this.now());
         if (remainingMs > PHONE_LEASE_MS) remainingMs = 0; // clock moved backwards
+        if (remainingMs === 0) this.noteLoss(attemptId, this.now());
       } catch {
         this.leases.delete(attemptId);
         this.challenges.delete(attemptId);
-        this.clearDesk(attemptId); // attempt ended
+        this.forget(attemptId); // attempt ended: nothing more to log
       }
     }
-    const report = this.desk.get(attemptId);
-    const age = report ? this.now() - report.at : Infinity;
-    const on = !!report && age >= 0 && age < DESK_CAMERA_STALE_MS;
     return {
-      deskCamera: {
-        on,
-        framingOk: on && report.framingOk,
-        people: on ? report.people : 0,
-        handsVisible: on && report.handsVisible,
-        extraPerson: on && report.extraPerson,
-        extraHands: on && report.extraHands,
-        handCount: on ? report.handCount : 0,
-        leftHands: on ? report.leftHands : 0,
-        rightHands: on ? report.rightHands : 0,
-        textVisible: on && report.textVisible,
-        objectHints: on ? report.objectHints : [],
-        cameraObstructed: on && report.cameraObstructed,
-      },
       required: !!row,
       active: remainingMs > 0,
       remainingMs,
@@ -372,6 +187,42 @@ export class PhonePresenceService {
         'Phone connection lost. Open the paired iPhone app to resume answering.',
       );
     }
+  }
+
+  /** In-memory transition state held across all attempts (for tests and diagnostics). */
+  memorySize() {
+    return this.lost.size + this.leftAppLogged.size;
+  }
+
+  /** Log `iphone_lost` once, stamped when the lease ran out, if a lease lapsed. */
+  private noteLoss(attemptId: string, now: number) {
+    const lease = this.leases.get(attemptId);
+    if (lease === undefined || now < lease || this.lost.has(attemptId)) return;
+    this.lost.add(attemptId);
+    this.log(attemptId, 'iphone_lost', lease);
+  }
+
+  private noteLeftApp(attemptId: string, now: number) {
+    const last = this.leftAppLogged.get(attemptId);
+    if (last !== undefined && now >= last && now - last < LEFT_APP_COOLDOWN_MS) return;
+    this.leftAppLogged.set(attemptId, now);
+    this.log(attemptId, 'phone_left_app', now);
+  }
+
+  /** Drop the in-memory transition state of an attempt (re-enrolled or ended). */
+  private forget(attemptId: string) {
+    this.lost.delete(attemptId);
+    this.leftAppLogged.delete(attemptId);
+  }
+
+  /** One timestamped entry in the unified integrity log. Event names only, never a credential. */
+  private log(attemptId: string, name: string, at: number) {
+    this.db
+      .prepare(
+        `INSERT INTO app_events (id, attempt_id, foreground_app, display_count, created_at)
+      VALUES (?, ?, ?, 1, ?)`,
+      )
+      .run(randomUUID(), attemptId, `flag:${name}`, new Date(at).toISOString());
   }
 
   private authenticate(value: unknown): Row {

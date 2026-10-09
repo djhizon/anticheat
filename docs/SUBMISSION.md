@@ -48,8 +48,8 @@ https://github.com/djhizon/examguard
   detection, plain signal processing in the browser.
 - **Native-webcam rule:** OBS and other virtual cameras are refused; in strict mode the
   desktop app also refuses virtual machines and capture displays.
-- **iPhone desk camera (optional):** Apple Vision on the phone counts people and
-  checks hands near the keyboard; only three flags are sent, never images.
+- **iPhone presence (optional):** the phone app only pings the laptop while it is
+  open on the desk; no camera, microphone or screen data leaves the phone.
 - **Server vision (optional):** OWL-ViT zero-shot detection in a local Python
   process for earbuds, headphones, smart glasses and similar items.
 - **Everything else:** the API, SQLite database, transparency report and

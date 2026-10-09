@@ -144,7 +144,17 @@ describe('buildTimeline', () => {
           },
           {
             created_at: '2026-09-15T00:05:00.000Z',
-            foreground_app: 'flag:desk_camera_extra_person',
+            foreground_app: 'flag:iphone_lost',
+            display_count: 1,
+          },
+          {
+            created_at: '2026-09-15T00:05:10.000Z',
+            foreground_app: 'flag:iphone_reconnected',
+            display_count: 1,
+          },
+          {
+            created_at: '2026-09-15T00:05:20.000Z',
+            foreground_app: 'flag:phone_left_app',
             display_count: 1,
           },
           {
@@ -171,7 +181,9 @@ describe('buildTimeline', () => {
     expect(by('multiple_faces')).toMatchObject({ source: 'camera', severity: 'flag' });
     expect(by('gaze_away')).toMatchObject({ source: 'gaze', severity: 'flag' });
     expect(by('vision_object')?.summary).toContain('cell phone');
-    expect(by('desk_extra_person')?.source).toBe('phone');
+    expect(by('iphone_lost')).toMatchObject({ source: 'phone', severity: 'notice' });
+    expect(by('iphone_reconnected')).toMatchObject({ source: 'phone', severity: 'info' });
+    expect(by('phone_left_app')).toMatchObject({ source: 'phone', severity: 'notice' });
     expect(by('camera_virtual')?.severity).toBe('flag');
     expect(by('flag')).toMatchObject({ source: 'system', summary: 'Recorded: something new' });
     expect(by('lighting_poor')).toMatchObject({ source: 'camera', severity: 'info' });

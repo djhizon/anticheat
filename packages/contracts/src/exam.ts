@@ -143,10 +143,13 @@ export interface TransparencyEvent {
   readonly description: string;
 }
 
-export const EVIDENCE_SOURCES = ['webcam', 'screen', 'desk_camera'] as const;
+/** Sources the API accepts for new snapshots. The iPhone sends presence heartbeats only. */
+export const EVIDENCE_SOURCES = ['webcam', 'screen'] as const;
 export type EvidenceSource = (typeof EVIDENCE_SOURCES)[number];
+/** Read-only: snapshots saved by retired iPhone desk-camera builds may still carry `desk_camera`. */
+export type StoredEvidenceSource = EvidenceSource | 'desk_camera';
 
-/** Why a snapshot was taken. Shared by the laptop client, the iPhone app and the API. */
+/** Why a snapshot was taken. `extra_person`, `left_frame` and `hands_not_visible` only appear on legacy desk-camera rows. */
 export const EVIDENCE_TRIGGERS = [
   'multiple_faces',
   'no_face',
@@ -168,7 +171,7 @@ export const EVIDENCE_MAX_PER_ATTEMPT = 60;
 
 export interface EvidenceSnapshotMeta {
   readonly id: string;
-  readonly source: EvidenceSource;
+  readonly source: StoredEvidenceSource;
   readonly trigger: EvidenceTrigger;
   readonly capturedAt: string;
 }
@@ -341,22 +344,6 @@ export interface AiCheckRunResponse {
  */
 export const VIRTUAL_CAMERA_LABEL =
   /obs|virtual|camtwist|snap camera|manycam|epoccam|ndi|xsplit|mmhmm|camo\b|droidcam|ivcam|iriun|nvidia broadcast|splitcam|youcam|vcam|e2esoft|logi capture|streamlabs|chromacam|webcamoid|screen capture/i;
-
-/** Flags-only desk-camera status computed on the student's iPhone. No images. */
-export interface DeskCameraStatus {
-  readonly people: number;
-  readonly handsVisible: boolean;
-  readonly framingOk: boolean;
-  /** Optional, additive (newer phones). Debounced on-device; counts and label names only. */
-  readonly extraPerson?: boolean;
-  readonly extraHands?: boolean;
-  readonly handCount?: number;
-  readonly leftHands?: number;
-  readonly rightHands?: number;
-  readonly textVisible?: boolean;
-  readonly objectHints?: readonly string[];
-  readonly cameraObstructed?: boolean;
-}
 
 /** Liveness challenge kinds. `colour_flash` is the default; the others are opt-in. */
 export type LivenessChallengeType = 'colour_flash' | 'head_turn' | 'spoken_words';
