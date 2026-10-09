@@ -12,6 +12,8 @@ Every signal is a lead for a human to review. Nothing is an automatic verdict.
 > [CHANGELOG.md](CHANGELOG.md) for the story, then `git log --oneline` to see
 > each fix and feature land as its own commit. The baseline audit, including
 > every known bug at import, is in [docs/AUDIT.md](docs/AUDIT.md).
+> Pre-existing code is disclosed in
+> [docs/EXISTING_CODE.md](docs/EXISTING_CODE.md).
 
 ## What it does
 
