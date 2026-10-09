@@ -56,7 +56,7 @@ const assignmentStartPattern = /^\/exam\/assignments\/([^/]+)\/start$/u;
 const attemptPattern = /^\/exam\/attempts\/([^/]+)$/u;
 const answersPattern = /^\/exam\/attempts\/([^/]+)\/answers$/u;
 const submitPattern = /^\/exam\/attempts\/([^/]+)\/submit$/u;
-// Pack 8: integrity routes
+// integrity routes
 const audioPattern = /^\/exam\/attempts\/([^/]+)\/audio$/u;
 const livChallengePattern = /^\/exam\/attempts\/([^/]+)\/liveness-challenge$/u;
 const livVerifyPattern = /^\/exam\/attempts\/([^/]+)\/liveness-verify$/u;
@@ -451,7 +451,7 @@ export class ExamRoutes {
         ) as AttemptId;
         const saveReq = parseAnswerSaveRequest(request.body);
         const result = await this.service.saveAnswers(attemptId, principal.user.id, saveReq);
-        // Pack 8: record a revision for each written answer
+        // record a revision for each written answer
         if (this.integrity !== null) {
           for (const [qId, val] of Object.entries(saveReq.answers)) {
             if (typeof val === 'string' && val.length > 0) {
@@ -491,7 +491,7 @@ export class ExamRoutes {
         return jsonResponse(request, this.config.allowedOrigins, 200, { delivery });
       }
 
-      // ── Pack 8: Liveness Challenge ─────────────────────────────────────────
+      // ── Liveness Challenge ─────────────────────────────────────────
       const livChalMatch = livChallengePattern.exec(path);
       if (method === 'POST' && livChalMatch !== null && this.integrity !== null) {
         const principal = this.requireStudent(request);
@@ -518,7 +518,7 @@ export class ExamRoutes {
         return jsonResponse(request, this.config.allowedOrigins, 200, challenge);
       }
 
-      // ── Pack 8: Liveness Verify ────────────────────────────────────────────
+      // ── Liveness Verify ────────────────────────────────────────────
       const livVerifyMatch = livVerifyPattern.exec(path);
       if (method === 'POST' && livVerifyMatch !== null && this.integrity !== null) {
         const principal = this.requireStudent(request);
@@ -540,7 +540,7 @@ export class ExamRoutes {
         return jsonResponse(request, this.config.allowedOrigins, 200, result);
       }
 
-      // ── Pack 8: Native companion events ───────────────────────────────────
+      // ── Native companion events ───────────────────────────────────
       const eventsMatch = eventsPattern.exec(path);
       if (method === 'PATCH' && eventsMatch !== null && this.integrity !== null) {
         const principal = this.requireStudent(request);
@@ -799,7 +799,7 @@ export class ExamRoutes {
         );
       }
 
-      // ── Pack 8: Phone enrollment ──────────────────────────────────────────
+      // ── Phone enrollment ──────────────────────────────────────────
       const enrollMatch = enrollPhonePattern.exec(path);
       if (method === 'POST' && enrollMatch !== null && this.integrity !== null) {
         const principal = this.requireStudent(request);
@@ -810,7 +810,7 @@ export class ExamRoutes {
         return jsonResponse(request, this.config.allowedOrigins, 201, response);
       }
 
-      // ── Pack 8: Phone status ──────────────────────────────────────────────
+      // ── Phone status ──────────────────────────────────────────────
       const phoneStatusMatch = phoneStatusPattern.exec(path);
       if (method === 'GET' && phoneStatusMatch !== null && this.integrity !== null) {
         const principal = this.requireStudent(request);
@@ -820,14 +820,14 @@ export class ExamRoutes {
         return jsonResponse(request, this.config.allowedOrigins, 200, result);
       }
 
-      // ── Pack 8: Phone heartbeat ───────────────────────────────────────────
+      // ── Phone heartbeat ───────────────────────────────────────────
       if (method === 'POST' && path === '/exam/phone-heartbeat' && this.integrity !== null) {
         const body = parseObject(request.body, 'Heartbeat body required');
         const result = this.integrity.phoneHeartbeat(String(body.token ?? ''));
         return jsonResponse(request, this.config.allowedOrigins, 200, result);
       }
 
-      // ── Pack 8: Answer revisions ──────────────────────────────────────────
+      // ── Answer revisions ──────────────────────────────────────────
       const revisionsMatch = revisionsPattern.exec(path);
       if (method === 'GET' && revisionsMatch !== null && this.integrity !== null) {
         const principal = this.requireStudent(request);
@@ -838,7 +838,7 @@ export class ExamRoutes {
         return jsonResponse(request, this.config.allowedOrigins, 200, { revisions });
       }
 
-      // ── Pack 8: Audio Transcription (Whisper) ─────────────────────────────
+      // ── Audio Transcription (Whisper) ─────────────────────────────
       const audioMatch = audioPattern.exec(path);
       if (method === 'POST' && audioMatch !== null) {
         const principal = this.requireStudent(request);
@@ -878,7 +878,7 @@ export class ExamRoutes {
         }
       }
 
-      // ── Pack 8: Speedtest ─────────────────────────────────────────────────
+      // ── Speedtest ─────────────────────────────────────────────────
       if (method === 'POST' && speedtestPattern.test(path)) {
         // Upload-speed probe for adaptive recording: signed-in students only,
         // and the body is discarded once it has been received.
@@ -894,7 +894,7 @@ export class ExamRoutes {
         return jsonResponse(request, this.config.allowedOrigins, 200, { ok: true });
       }
 
-      // ── Pack 8: Cloud Recording ───────────────────────────────────────────
+      // ── Cloud Recording ───────────────────────────────────────────
       const recordingMatch = recordingPattern.exec(path);
       if (method === 'POST' && recordingMatch !== null) {
         const principal = this.requireStudent(request);

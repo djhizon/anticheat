@@ -236,7 +236,7 @@ export async function seedDemo(options: SeedDemoOptions = {}): Promise<void> {
     } else {
       const seeded = await exam.service.seedPublishedExam({
         slug: demoSlug,
-        title: '🤖 AI-Generated Exam — Pack 8',
+        title: 'Quiz 1',
         versionNumber: 1,
         durationSeconds: examDuration,
         questions: [...questions],
@@ -313,7 +313,7 @@ export async function seedDemo(options: SeedDemoOptions = {}): Promise<void> {
     console.log(`✅  Demo student:  ${demoEmail}`);
     console.log(`✅  Demo password: ${demoPassword}`);
     console.log(`✅  Instructor:    ${instructorEmail} / ${instructorPassword}`);
-    console.log(`✅  Exam:          🤖 AI-Generated Exam — Pack 8`);
+    console.log(`✅  Exam:          Quiz 1`);
     console.log(`✅  Questions:     ${questions.length}`);
     console.log('──────────────────────────────────────────');
     console.log('   Open http://127.0.0.1:5173 to test');

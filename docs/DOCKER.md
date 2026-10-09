@@ -29,7 +29,7 @@ docker compose down -v
 | Instructor | `demo.instructor@example.test` | `Demo instructor password 2026!` |
 | Classmates | `classmate1..4@example.test`   | `Demo classmate password 2026!`  |
 
-The seed also publishes the exam "AI-Generated Exam - Pack 8". Override the demo credentials with `DEMO_*` variables (see `.env.example`) before the first start.
+The seed also publishes the exam "Quiz 1". Override the demo credentials with `DEMO_*` variables (see `.env.example`) before the first start.
 
 ## Optional keys (`.env.local`)
 

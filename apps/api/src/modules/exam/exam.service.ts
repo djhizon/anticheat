@@ -49,7 +49,6 @@ const FRESH_EXAM_QUESTION_COUNT = 10;
 const FRESH_EXAM_DURATION_SECONDS = 60 * 60;
 const FRESH_EXAM_TOPIC =
   'Computer Science fundamentals — networking, algorithms, databases, and security';
-const FRESH_EXAM_TITLE = 'Fresh exam: Computer Science fundamentals';
 
 export interface SeedQuestionInput {
   readonly type: QuestionType;
@@ -464,7 +463,9 @@ export class ExamService {
       }
     }
 
-    const title = requireText(FRESH_EXAM_TITLE, 'Exam title', 500);
+    // Plain numbering: the student's next quiz is "Quiz N".
+    const quizNumber = this.dependencies.repository.listAssignmentsForStudent(studentId).length + 1;
+    const title = requireText(`Quiz ${quizNumber}`, 'Exam title', 500);
     const normalizedDuration = validatePositiveInteger(
       durationSeconds,
       'Exam duration',
