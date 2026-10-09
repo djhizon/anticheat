@@ -20,9 +20,12 @@ export const LOCAL_SEGMENT_MS = 60_000;
 const STEP_COOLDOWN_MS = 30_000;
 const STEP_UP_QUIET_MS = 120_000;
 const FLUSH_AFTER_STOP_MS = 60_000;
+const DOWNLOAD_SPACING_MS = 400;
+const REPROBE_LOCAL_MS = 120_000;
+const THROUGHPUT_SAMPLES = 4;
 
 export interface ScreenRecorderOptions {
-  /** Returns upload kbps or null; defaults to timing /exam/speedtest. */
+  /** Returns upload kbps or null; used before recording and while saving locally. Defaults to timing /exam/speedtest. */
   readonly probe?: () => Promise<number | null>;
   /** Blob to base64 for upload; defaults to FileReader. */
   readonly encode?: (blob: Blob) => Promise<string>;
@@ -67,6 +70,12 @@ export function createScreenRecorder(
   let reprobing = false;
   let notice = '';
   let queue: RecordingUploadQueue | null = null;
+  let reprobeTimer: ReturnType<typeof setTimeout> | null = null;
+  let downloadTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastDownloadAt = -Infinity;
+  const downloads: Array<{ blob: Blob; index: number }> = [];
+  /** Recent segment uploads (bits sent, milliseconds taken) used to estimate throughput. */
+  let uploadSamples: Array<{ bits: number; ms: number }> = [];
   const session = new Date().toISOString().replace(/[:.]/g, '-');
 
   function release() {
@@ -92,8 +101,30 @@ export function createScreenRecorder(
     );
   }
 
+  // Browsers block several downloads fired at once, so save one every ~400 ms.
   function download(blob: Blob, index: number) {
     if (!blob.size) return;
+    downloads.push({ blob, index });
+    pumpDownloads();
+  }
+
+  function pumpDownloads() {
+    if (downloadTimer || downloads.length === 0) return;
+    const wait = Math.max(0, lastDownloadAt + DOWNLOAD_SPACING_MS - now());
+    if (wait > 0) {
+      downloadTimer = setTimeout(() => {
+        downloadTimer = null;
+        pumpDownloads();
+      }, wait);
+      return;
+    }
+    const next = downloads.shift()!;
+    lastDownloadAt = now();
+    saveToDisk(next.blob, next.index);
+    pumpDownloads();
+  }
+
+  function saveToDisk(blob: Blob, index: number) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -105,14 +136,53 @@ export function createScreenRecorder(
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   }
 
-  function goLocal(pending: QueueItem[], message: string) {
+  function goLocal(pending: QueueItem[], message: string, canResume = true) {
     mode = 'local';
     notice = message;
     if (flushTimer) clearTimeout(flushTimer);
     flushTimer = null;
     for (const item of pending) download(item.blob, item.index);
     applyProfileToTrack({ ...LOCAL_PROFILE });
+    if (canResume) scheduleReprobe();
     report();
+  }
+
+  // After a blip we saved locally; try the network again every 2 minutes.
+  function scheduleReprobe() {
+    if (reprobeTimer || stopped || !examApi) return;
+    reprobeTimer = setTimeout(() => {
+      reprobeTimer = null;
+      void tryResumeCloud().catch(() => {});
+    }, REPROBE_LOCAL_MS);
+  }
+
+  async function tryResumeCloud() {
+    if (stopped || mode !== 'local' || !examApi) return;
+    const kbps = await (options.probe ?? (() => probeUploadKbps(examApi)))().catch(() => null);
+    if (stopped || mode !== 'local') return;
+    const choice = applyConnectionHint(chooseProfile(kbps), readConnectionHint());
+    if (choice === 'local-only') {
+      scheduleReprobe();
+      return;
+    }
+    mode = 'cloud';
+    notice = '';
+    profile = PROFILES[choice];
+    uploadSamples = [];
+    lastStepAt = lastBusyAt = now();
+    startQueue(examApi);
+    applyProfileToTrack(profile);
+    // Close the long local segment now so the next one is a short cloud segment.
+    if (timer) clearTimeout(timer);
+    if (recorder && recorder.state !== 'inactive') recorder.stop();
+    report();
+  }
+
+  function estimatedKbps(): number | null {
+    if (uploadSamples.length < 2) return null;
+    const bits = uploadSamples.reduce((sum, sample) => sum + sample.bits, 0);
+    const ms = uploadSamples.reduce((sum, sample) => sum + sample.ms, 0);
+    return bits / Math.max(1, ms);
   }
 
   function applyProfileToTrack(target: { width: number; height: number; frameRate: number }) {
@@ -148,7 +218,9 @@ export function createScreenRecorder(
     if (now() - lastBusyAt < STEP_UP_QUIET_MS || now() - lastStepAt < STEP_UP_QUIET_MS) return;
     reprobing = true;
     try {
-      const kbps = await (options.probe ?? (() => probeUploadKbps(examApi)))();
+      // Real segment upload timings; no extra probe traffic while recording.
+      const kbps = estimatedKbps();
+      if (kbps === null) return;
       const choice = applyConnectionHint(chooseProfile(kbps), readConnectionHint());
       if (stopped || mode !== 'cloud' || choice === 'local-only') return;
       if (profileRank(choice) > profileRank(profile.name)) changeProfile(stepUp(profile.name));
@@ -189,17 +261,27 @@ export function createScreenRecorder(
       segmentMs: CLOUD_SEGMENT_MS,
       now,
       upload: async (item) => {
-        await api.uploadRecordingChunk(attemptId, item.index, await encode(item.blob));
+        const encoded = await encode(item.blob);
+        const began = now();
+        await api.uploadRecordingChunk(attemptId, item.index, encoded);
+        uploadSamples = [
+          ...uploadSamples,
+          { bits: encoded.length * 8, ms: Math.max(1, now() - began) },
+        ].slice(-THROUGHPUT_SAMPLES);
       },
-      // Not configured / rejected: retrying will not help, keep the footage locally.
+      // Not configured / rejected / duplicate index: retrying will not help, keep the footage locally.
       isFatal: (error) =>
-        error instanceof ExamApiError && [400, 403, 404, 503].includes(error.status ?? 0),
+        error instanceof ExamApiError && [400, 403, 404, 409, 503].includes(error.status ?? 0),
       onChange: report,
       onPressure,
-      onGiveUp: (pending) =>
+      onOverflow: (item) => download(item.blob, item.index),
+      onGiveUp: (pending, reason) =>
         goLocal(
           pending,
-          'Your connection was not steady enough to upload, so segments are being saved on your computer (Downloads) instead.',
+          reason === 'fatal'
+            ? 'Cloud recording is unavailable, so segments are being saved on your computer (Downloads) instead.'
+            : 'Your connection was not steady enough to upload, so segments are being saved on your computer (Downloads) instead. Trying the network again shortly.',
+          reason === 'unstable',
         ),
     });
   }
@@ -344,6 +426,7 @@ export function createScreenRecorder(
         if (choice === 'local-only') {
           notice =
             'Could not reach the server to upload, so recording on this computer instead (segments saved to Downloads).';
+          scheduleReprobe();
         } else {
           mode = 'cloud';
           profile = PROFILES[choice];
@@ -364,6 +447,8 @@ export function createScreenRecorder(
     if (stopped) return;
     stopped = true;
     if (timer) clearTimeout(timer);
+    if (reprobeTimer) clearTimeout(reprobeTimer);
+    reprobeTimer = null;
     if (recorder && recorder.state !== 'inactive') recorder.stop();
     release();
     armFlush();

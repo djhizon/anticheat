@@ -15,12 +15,15 @@ import { type TokenGenerator } from '../auth/session.js';
 import { createExamPlugin, type ExamPlugin } from './exam.plugin.js';
 import { MAX_EXTRA_TIME_SECONDS, type SeedPublishedExamResult } from './exam.service.js';
 import { ExamRoutes } from './exam.routes.js';
-import { IntegrityService } from '../integrity/integrityService.js';
+import { IntegrityService, LivenessRateLimitError } from '../integrity/integrityService.js';
 import { IntegrityRepository } from '../integrity/integrityRepository.js';
 import type { GeminiRotatingClient } from '../integrity/gemini.js';
 import { transcribeAudio } from '../integrity/whisper.js';
 import { PhonePresenceService } from '../integrity/phonePresence.js';
-import { uploadRecordingChunk } from '../integrity/graph.js';
+import { RecordingConflictError, uploadRecordingChunk } from '../integrity/graph.js';
+
+/** Base64 of the WebM/EBML magic bytes 1A 45 DF A3. */
+const WEBM = 'GkXfow==';
 
 vi.mock('../integrity/graph.js', async (original) => ({
   ...(await original<typeof import('../integrity/graph.js')>()),
@@ -740,7 +743,9 @@ describe('exam delivery boundary', () => {
     expect(uploadRecordingChunk).not.toHaveBeenCalled();
 
     // Graph not configured: clear 503 so the client falls back to local-only.
-    const unconfigured = await send({ index: 0, chunk: 'AAAA' });
+    expect((await send({ index: 0, chunk: 'AAAA' })).status).toBe(400); // not WebM
+    expect((await send({ index: 720, chunk: WEBM })).status).toBe(400);
+    const unconfigured = await send({ index: 0, chunk: WEBM });
     expect(unconfigured.status).toBe(503);
     expect(uploadRecordingChunk).not.toHaveBeenCalled();
 
@@ -753,7 +758,7 @@ describe('exam delivery boundary', () => {
     };
     const routes = new ExamRoutes(exam.service, auth.boundary, configured);
     const accepted = await routes.handle(
-      studentRequest(student, 'POST', path, { index: 3, chunk: 'AAAA' }),
+      studentRequest(student, 'POST', path, { index: 3, chunk: WEBM }),
     );
     expect(accepted.status).toBe(202);
     expect(uploadRecordingChunk).toHaveBeenCalledWith(
@@ -761,8 +766,87 @@ describe('exam delivery boundary', () => {
       student.userId,
       attemptId,
       3,
-      Buffer.from('AAAA', 'base64'),
+      Buffer.from(WEBM, 'base64'),
     );
+  });
+
+  describe('recording abuse controls', () => {
+    async function setup(email: string) {
+      const student = await registerStudent(email);
+      const seeded = await seedExam();
+      const assignmentId = await exam.service.assignExam({
+        examVersionId: seeded.examVersionId,
+        studentId: student.userId,
+      });
+      const started = await exam.routes.handle(
+        studentRequest(student, 'POST', `/exam/assignments/${assignmentId}/start`),
+      );
+      const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
+      const configured = {
+        ...config,
+        msTenantId: 't',
+        msClientId: 'c',
+        msClientSecret: 's',
+        msTargetEmail: 'a@b.test',
+      };
+      const routes = new ExamRoutes(exam.service, auth.boundary, configured);
+      const send = (index: number) =>
+        routes.handle(
+          studentRequest(student, 'POST', `/exam/attempts/${attemptId}/recording`, {
+            index,
+            chunk: WEBM,
+          }),
+        );
+      return { student, attemptId, routes, send };
+    }
+
+    it('refuses to overwrite an accepted segment index', async () => {
+      const { send } = await setup('dup@example.test');
+      expect((await send(1)).status).toBe(202);
+      expect((await send(1)).status).toBe(409);
+      expect(uploadRecordingChunk).toHaveBeenCalledTimes(1);
+    });
+
+    it('frees the index after a failed upload and hides Graph details', async () => {
+      const { send } = await setup('fail@example.test');
+      vi.mocked(uploadRecordingChunk).mockRejectedValueOnce(new Error('secret graph body'));
+      const failed = await send(2);
+      expect(failed.status).toBe(500);
+      expect(JSON.stringify(failed.body)).not.toContain('secret graph body');
+      expect((await send(2)).status).toBe(202);
+    });
+
+    it('maps a Graph conflict to 409', async () => {
+      const { send } = await setup('graphdup@example.test');
+      vi.mocked(uploadRecordingChunk).mockRejectedValueOnce(new RecordingConflictError());
+      expect((await send(4)).status).toBe(409);
+    });
+
+    it('rate limits segments per student', async () => {
+      const { send } = await setup('rate@example.test');
+      const statuses: number[] = [];
+      for (let i = 0; i < 7; i += 1) statuses.push((await send(i)).status);
+      expect(statuses.slice(0, 5)).toEqual([202, 202, 202, 202, 202]);
+      expect(statuses.slice(5)).toEqual([429, 429]);
+    });
+
+    it('rejects uploads once the attempt is no longer in progress', async () => {
+      const { student, attemptId, routes, send } = await setup('state@example.test');
+      expect((await send(0)).status).toBe(202);
+      const submitted = await routes.handle(
+        studentRequest(student, 'POST', `/exam/attempts/${attemptId}/submit`),
+      );
+      expect(submitted.status).toBe(200);
+      expect((await send(1)).status).toBe(403);
+      expect(uploadRecordingChunk).toHaveBeenCalledTimes(1);
+    });
+
+    it('enforces the per-attempt segment and byte quotas', async () => {
+      const { send } = await setup('quota@example.test');
+      expect((await send(719)).status).toBe(202);
+      expect((await send(720)).status).toBe(400);
+      expect((await send(-1)).status).toBe(400);
+    });
   });
 
   it('passes the preferred liveness challenge and spoken audio through to the integrity service', async () => {
@@ -808,11 +892,38 @@ describe('exam delivery boundary', () => {
       'n',
       3,
       { samples: [] },
-      undefined,
       's',
       'FaceTime HD Camera',
       'QUJD',
     );
+  });
+
+  it('answers 429 when liveness challenges are requested too often', async () => {
+    const owner = await registerStudent('liveness-limit@example.test');
+    const seeded = await seedExam();
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: owner.userId,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
+    const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
+    const integrity = {
+      issueLivenessChallenge: vi.fn(() => {
+        throw new LivenessRateLimitError();
+      }),
+    };
+    const routes = new ExamRoutes(
+      exam.service,
+      auth.boundary,
+      config,
+      integrity as unknown as IntegrityService,
+    );
+    const response = await routes.handle(
+      studentRequest(owner, 'POST', `/exam/attempts/${attemptId}/liveness-challenge`),
+    );
+    expect(response.status).toBe(429);
   });
 
   it('answers CORS preflight for every browser-called exam route', async () => {
@@ -1076,6 +1187,18 @@ describe('exam delivery boundary', () => {
       (await exam.routes.handle(studentRequest(student, 'POST', '/exam/speedtest', { data: 'x' })))
         .status,
     ).toBe(200);
+  });
+
+  it('caps speed probe size and rate per student', async () => {
+    const student = await registerStudent('speedcap@example.test');
+    const probe = (data: unknown) =>
+      exam.routes.handle(studentRequest(student, 'POST', '/exam/speedtest', { data }));
+    expect((await probe('A'.repeat(1_500_001))).status).toBe(400);
+    expect((await probe(5)).status).toBe(400);
+    const statuses: number[] = [];
+    for (let i = 0; i < 7; i += 1) statuses.push((await probe('x')).status);
+    expect(statuses.filter((status) => status === 200)).toHaveLength(4);
+    expect(statuses.filter((status) => status === 429)).toHaveLength(3);
   });
 
   it('checks audio ownership before inference and reports inference failures instead of empty success', async () => {

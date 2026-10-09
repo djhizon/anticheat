@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { loadConfig } from '../../config.js';
 import {
+  RecordingConflictError,
   isRecordingUploadConfigured,
   recordingSegmentPath,
   uploadRecordingChunk,
@@ -43,6 +44,24 @@ describe('graph recording upload', () => {
     const put = fetchMock.mock.calls.find(([, init]) => (init as RequestInit)?.method === 'PUT');
     expect(String(put?.[0])).toContain(
       '/drive/root:/ExamAntiCheat/stu1/att1/segment-000002.webm:/content',
+    );
+    expect(String(put?.[0])).toContain('@microsoft.graph.conflictBehavior=fail');
+  });
+
+  it('maps 409 to a conflict and never leaks Graph error bodies', async () => {
+    const respond = (status: number) =>
+      vi.fn(async (url: string) =>
+        String(url).includes('login.microsoftonline.com')
+          ? new Response(JSON.stringify({ access_token: 'tok', expires_in: 3600 }))
+          : new Response('tenant-secret-detail', { status }),
+      );
+    vi.stubGlobal('fetch', respond(409));
+    await expect(
+      uploadRecordingChunk(config, 's', 'a', 1, Buffer.from('x')),
+    ).rejects.toBeInstanceOf(RecordingConflictError);
+    vi.stubGlobal('fetch', respond(500));
+    await expect(uploadRecordingChunk(config, 's', 'a', 1, Buffer.from('x'))).rejects.toThrow(
+      /^(?!.*tenant-secret-detail)/u,
     );
   });
 });

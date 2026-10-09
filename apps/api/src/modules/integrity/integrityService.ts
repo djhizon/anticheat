@@ -43,6 +43,18 @@ export interface PhoneEnrollResponse {
   readonly expiresAt: string;
 }
 
+/** Layers recorded in liveness_events (CHECK layer BETWEEN 1 AND 4). */
+export const LIVENESS_LAYERS = [1, 2, 3, 4] as const;
+export const LIVENESS_CHALLENGE_LIMIT = 6;
+export const LIVENESS_CHALLENGE_WINDOW_MS = 10 * 60_000;
+
+export class LivenessRateLimitError extends Error {
+  constructor() {
+    super('Too many liveness checks requested. Wait a few minutes and try again.');
+    this.name = 'LivenessRateLimitError';
+  }
+}
+
 export const AI_CHECK_MAX_ANSWERS = 30;
 
 export interface TelemetryCounts {
@@ -156,6 +168,10 @@ export class IntegrityService {
   // ── Liveness ─────────────────────────────────────────────────────────────────
 
   issueLivenessChallenge(attemptId: string, preferred?: unknown): GeneratedChallenge {
+    const since = new Date(Date.now() - LIVENESS_CHALLENGE_WINDOW_MS).toISOString();
+    if (this.repo.countLivenessChallengesSince(attemptId, since) >= LIVENESS_CHALLENGE_LIMIT) {
+      throw new LivenessRateLimitError();
+    }
     const type: ChallengeType = selectChallengeType(preferred);
     const challenge = generateChallenge(type);
     const data = JSON.stringify(challenge.data);
@@ -194,12 +210,13 @@ export class IntegrityService {
     nonce: string,
     layer: number,
     payload: Record<string, unknown>,
-    imageBase64?: string,
     signature?: unknown,
     cameraLabel?: string,
     audioBase64?: string,
   ): Promise<LivenessVerifyResponse> {
-    void imageBase64; // frames stay on the device; only measurements are scored
+    if (!(LIVENESS_LAYERS as readonly number[]).includes(layer)) {
+      throw new DomainError('validation_failed', 'Unsupported liveness layer');
+    }
     const row = this.repo.getLivenessChallenge(nonce);
     if (!row || row.attempt_id !== attemptId || row.used) {
       return { passed: false, layer, detail: 'Challenge invalid or used' };

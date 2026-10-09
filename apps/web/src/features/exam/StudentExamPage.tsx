@@ -86,6 +86,10 @@ export function StudentExamPage({
   const [examPaused, setExamPaused] = useState(false);
   const [showPhoneModal, setShowPhoneModal] = useState(false);
   const [showLivenessModal, setShowLivenessModal] = useState(false);
+  const [livenessOutcome, setLivenessOutcome] = useState<'verified' | 'not_verified' | null>(null);
+  // Read by the window blur handler: the camera/mic permission prompt and the
+  // modal's own focus changes must not count as focus loss.
+  const livenessOpenRef = useRef(false);
   const [recordScreen, setRecordScreen] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState('Screen recording is off.');
   const [focusedMode] = useState(true);
@@ -123,6 +127,7 @@ export function StudentExamPage({
     let pageHiddenCount = 0;
 
     const onBlur = () => {
+      if (livenessOpenRef.current) return;
       setExamPaused(true);
       focusLostCount += 1;
       onViolation?.({
@@ -311,21 +316,30 @@ export function StudentExamPage({
 
     let stopRecorder: (() => void) | null = null;
     let disposed = false;
-    import('../integrity/screenRecorder.js').then(({ createScreenRecorder }) => {
-      if (disposed) return;
-      const recorder = createScreenRecorder(currentDelivery.attempt.id, examApi, (message) => {
-        if (!disposed) setRecordingStatus(message);
-      });
-      recorder.start().catch((err) => {
+    import('../integrity/screenRecorder.js')
+      .then(({ createScreenRecorder }) => {
+        if (disposed) return;
+        const recorder = createScreenRecorder(currentDelivery.attempt.id, examApi, (message) => {
+          if (!disposed) setRecordingStatus(message);
+        });
+        recorder.start().catch((err) => {
+          if (!disposed) {
+            setRecordingStatus(
+              err instanceof Error ? err.message : 'Screen recording failed. Retry.',
+            );
+            setRecordScreen(false);
+          }
+        });
+        stopRecorder = recorder.stop;
+      })
+      .catch((err) => {
         if (!disposed) {
           setRecordingStatus(
-            err instanceof Error ? err.message : 'Screen recording failed. Retry.',
+            err instanceof Error ? err.message : 'Screen recording could not be loaded. Retry.',
           );
           setRecordScreen(false);
         }
       });
-      stopRecorder = recorder.stop;
-    });
 
     return () => {
       disposed = true;
@@ -835,11 +849,26 @@ export function StudentExamPage({
                 ✅ Submitted
               </span>
             )}
+            {livenessOutcome !== null && (
+              <span
+                className={`topbar-chip ${livenessOutcome === 'verified' ? 'topbar-chip--ok' : 'topbar-chip--error'}`}
+                role="status"
+              >
+                {livenessOutcome === 'verified'
+                  ? '✅ Presence check passed'
+                  : 'Not verified — you can try again'}
+              </span>
+            )}
             {isActive && examApi !== undefined && (
               <>
                 <button
                   className="topbar-submit"
-                  onClick={() => setShowLivenessModal(true)}
+                  onClick={() => {
+                    livenessOpenRef.current = true;
+                    setLivenessOutcome(null);
+                    setExamPaused(true);
+                    setShowLivenessModal(true);
+                  }}
                   type="button"
                 >
                   🙋 Verify I&apos;m here
@@ -1067,7 +1096,9 @@ export function StudentExamPage({
         <LivenessModal
           attemptId={visibleDelivery.attempt.id}
           examApi={examApi}
-          onComplete={() => {
+          onComplete={(success) => {
+            livenessOpenRef.current = false;
+            setLivenessOutcome(success ? 'verified' : 'not_verified');
             setShowLivenessModal(false);
             setExamPaused(false);
           }}

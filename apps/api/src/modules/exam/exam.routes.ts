@@ -15,8 +15,12 @@ import type {
 import { headerValue, type AuthRequest, type AuthRequestBoundary } from '../auth/auth.plugin.js';
 import { isAllowedOrigin } from '../auth/csrf.js';
 import { ExamService } from './exam.service.js';
-import type { IntegrityService } from '../integrity/integrityService.js';
-import { isRecordingUploadConfigured, uploadRecordingChunk } from '../integrity/graph.js';
+import { LivenessRateLimitError, type IntegrityService } from '../integrity/integrityService.js';
+import {
+  RecordingConflictError,
+  isRecordingUploadConfigured,
+  uploadRecordingChunk,
+} from '../integrity/graph.js';
 import type { PhonePresenceService } from '../integrity/phonePresence.js';
 import type { VisionResult } from '../integrity/backendVision.js';
 
@@ -49,7 +53,18 @@ const phoneStatusPattern = /^\/exam\/attempts\/([^/]+)\/phone-status$/u;
 const revisionsPattern = /^\/exam\/attempts\/([^/]+)\/revisions$/u;
 /** Segments are ~10 s; 4M base64 chars (~3 MB) is far above the highest profile and below the server body cap. */
 const MAX_RECORDING_BASE64_CHARS = 4_000_000;
-const MAX_RECORDING_INDEX = 100_000;
+/** ~2 h of 10 s segments and a hard byte ceiling per attempt. */
+const MAX_RECORDING_SEGMENTS = 720;
+const MAX_RECORDING_TOTAL_BYTES = 1_500_000_000;
+/** Recording route: one segment per 2 s sustained, bursts of 5, per student. */
+const RECORDING_REFILL_MS = 2000;
+const RECORDING_BURST = 5;
+/** Speed probe: 6 per minute per student, body capped at ~1.5 MB. */
+const SPEEDTEST_MAX_PER_WINDOW = 6;
+const SPEEDTEST_WINDOW_MS = 60_000;
+const MAX_SPEEDTEST_DATA_CHARS = 1_500_000;
+/** Every segment is its own complete WebM file, so each must start with the EBML magic. */
+const WEBM_MAGIC = Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);
 const base64Pattern = /^[A-Za-z0-9+/]+={0,2}$/u;
 const recordingPattern = /^\/exam\/attempts\/([^/]+)\/recording$/u;
 const speedtestPattern = /^\/exam\/speedtest$/u;
@@ -229,6 +244,10 @@ function requestedHeadersAreAllowed(value: string | undefined): boolean {
 
 export class ExamRoutes {
   private readonly generationInFlight = new Set<string>();
+  /** Accepted (or in-flight) segment indexes and bytes per attempt, in memory. */
+  private readonly recordingState = new Map<string, { indexes: Set<number>; bytes: number }>();
+  private readonly recordingBuckets = new Map<string, { tokens: number; at: number }>();
+  private readonly speedtestHits = new Map<string, number[]>();
 
   constructor(
     private readonly service: ExamService,
@@ -418,10 +437,21 @@ export class ExamRoutes {
           parsePathId<'AttemptId'>(livChalMatch[1] ?? '', 'Attempt ID') as AttemptId,
           principal.user.id,
         );
-        const challenge = this.integrity.issueLivenessChallenge(
-          delivery.attempt.id,
-          isRecord(request.body) ? request.body.preferred : undefined,
-        );
+        let challenge;
+        try {
+          challenge = this.integrity.issueLivenessChallenge(
+            delivery.attempt.id,
+            isRecord(request.body) ? request.body.preferred : undefined,
+          );
+        } catch (error) {
+          if (error instanceof LivenessRateLimitError) {
+            return jsonResponse(request, this.config.allowedOrigins, 429, {
+              code: 'invalid_state',
+              message: error.message,
+            });
+          }
+          throw error;
+        }
         return jsonResponse(request, this.config.allowedOrigins, 200, challenge);
       }
 
@@ -438,7 +468,6 @@ export class ExamRoutes {
           String(body.nonce ?? ''),
           Number(body.layer ?? 2),
           isRecord(body.payload) ? body.payload : {},
-          body.imageBase64 ? String(body.imageBase64) : undefined,
           body.signature,
           isRecord(body.camera) && typeof body.camera.label === 'string'
             ? body.camera.label
@@ -657,6 +686,13 @@ export class ExamRoutes {
         // and the body is discarded once it has been received.
         const principal = this.requireStudent(request);
         this.boundary.validateUnsafe(request, principal);
+        if (!this.allowSpeedtest(principal.user.id)) {
+          return this.tooManyRequests(request, 'Too many speed tests. Try again shortly.');
+        }
+        const probe = parseObject(request.body, 'Speed test data required').data;
+        if (typeof probe !== 'string' || probe.length > MAX_SPEEDTEST_DATA_CHARS) {
+          throw new DomainError('validation_failed', 'Speed test data is missing or too large.');
+        }
         return jsonResponse(request, this.config.allowedOrigins, 200, { ok: true });
       }
 
@@ -666,7 +702,10 @@ export class ExamRoutes {
         const principal = this.requireStudent(request);
         this.boundary.validateUnsafe(request, principal);
         const attemptId = parsePathId<'AttemptId'>(recordingMatch[1] ?? '', 'Attempt ID');
-        await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
+        const delivery = await this.service.getAttemptDelivery(
+          attemptId as AttemptId,
+          principal.user.id,
+        );
 
         const body = parseObject(request.body, 'Recording chunk required');
         const chunkIndex = body.index;
@@ -674,7 +713,7 @@ export class ExamRoutes {
           typeof chunkIndex !== 'number' ||
           !Number.isInteger(chunkIndex) ||
           chunkIndex < 0 ||
-          chunkIndex > MAX_RECORDING_INDEX
+          chunkIndex >= MAX_RECORDING_SEGMENTS
         ) {
           throw new DomainError('validation_failed', 'Recording segment index is invalid.');
         }
@@ -687,6 +726,19 @@ export class ExamRoutes {
         ) {
           throw new DomainError('validation_failed', 'Recording segment is empty or too large.');
         }
+        const buffer = Buffer.from(chunkBase64, 'base64');
+        if (buffer.length < WEBM_MAGIC.length || !buffer.subarray(0, 4).equals(WEBM_MAGIC)) {
+          throw new DomainError('validation_failed', 'Recording segment is not a WebM file.');
+        }
+        if (!this.takeRecordingToken(principal.user.id)) {
+          return this.tooManyRequests(request, 'Recording segments are arriving too quickly.');
+        }
+        if (delivery.attempt.status !== 'in_progress') {
+          throw new DomainError(
+            'forbidden',
+            'Recording segments are only accepted while the attempt is in progress.',
+          );
+        }
         if (!isRecordingUploadConfigured(this.config)) {
           return jsonResponse(request, this.config.allowedOrigins, 503, {
             code: 'invalid_state',
@@ -694,14 +746,41 @@ export class ExamRoutes {
           });
         }
 
+        const key = String(attemptId);
+        let state = this.recordingState.get(key);
+        if (state === undefined) {
+          state = { indexes: new Set(), bytes: 0 };
+          this.recordingState.set(key, state);
+        }
+        if (state.indexes.has(chunkIndex)) {
+          throw new DomainError('conflict', 'That recording segment was already uploaded.');
+        }
+        if (
+          state.indexes.size >= MAX_RECORDING_SEGMENTS ||
+          state.bytes + buffer.length > MAX_RECORDING_TOTAL_BYTES
+        ) {
+          throw new DomainError(
+            'validation_failed',
+            'The recording limit for this attempt is reached.',
+          );
+        }
+        // Reserve before the await so concurrent duplicates cannot both pass.
+        state.indexes.add(chunkIndex);
+        state.bytes += buffer.length;
+
         // Folder layout: <studentId>/<attemptId>/segment-<index>.webm
-        await uploadRecordingChunk(
-          this.config,
-          principal.user.id,
-          String(attemptId),
-          chunkIndex,
-          Buffer.from(chunkBase64, 'base64'),
-        );
+        try {
+          await uploadRecordingChunk(this.config, principal.user.id, key, chunkIndex, buffer);
+        } catch (error) {
+          if (error instanceof RecordingConflictError) {
+            // The file exists remotely (e.g. after a server restart): keep it reserved.
+            throw new DomainError('conflict', 'That recording segment was already uploaded.');
+          }
+          state.indexes.delete(chunkIndex);
+          state.bytes -= buffer.length;
+          console.error('Recording segment upload failed.');
+          throw new DomainError('invalid_state', 'Recording segment could not be stored.');
+        }
 
         return jsonResponse(request, this.config.allowedOrigins, 202, { ok: true });
       }
@@ -710,6 +789,39 @@ export class ExamRoutes {
     } catch (error) {
       return problemResponse(request, this.config.allowedOrigins, error);
     }
+  }
+
+  private tooManyRequests(request: AuthRequest, message: string): ExamResponse {
+    const response = jsonResponse(request, this.config.allowedOrigins, 429, {
+      code: 'conflict',
+      message,
+    });
+    return { ...response, headers: { ...response.headers, 'retry-after': '2' } };
+  }
+
+  private takeRecordingToken(studentId: string): boolean {
+    const nowMs = Date.now();
+    const bucket = this.recordingBuckets.get(studentId) ?? { tokens: RECORDING_BURST, at: nowMs };
+    bucket.tokens = Math.min(
+      RECORDING_BURST,
+      bucket.tokens + (nowMs - bucket.at) / RECORDING_REFILL_MS,
+    );
+    bucket.at = nowMs;
+    const allowed = bucket.tokens >= 1;
+    if (allowed) bucket.tokens -= 1;
+    this.recordingBuckets.set(studentId, bucket);
+    return allowed;
+  }
+
+  private allowSpeedtest(studentId: string): boolean {
+    const nowMs = Date.now();
+    const hits = (this.speedtestHits.get(studentId) ?? []).filter(
+      (at) => nowMs - at < SPEEDTEST_WINDOW_MS,
+    );
+    const allowed = hits.length < SPEEDTEST_MAX_PER_WINDOW;
+    if (allowed) hits.push(nowMs);
+    this.speedtestHits.set(studentId, hits);
+    return allowed;
   }
 
   private requireInstructor(request: AuthRequest) {

@@ -1,5 +1,5 @@
 import { acquireBuiltInMicrophone } from './builtInMicrophone.js';
-import { readCameraLabel } from './livenessCapture.js';
+import { acquireUnlessAborted, readCameraLabel, throwIfAborted } from './livenessCapture.js';
 
 export const SPOKEN_WORDS_RECORD_MS = 4000;
 
@@ -25,9 +25,10 @@ export function blobToBase64(blob: Blob): Promise<string> {
 export async function captureSpokenWords(
   durationMs = SPOKEN_WORDS_RECORD_MS,
   onRecording: () => void = () => {},
+  signal?: AbortSignal,
 ): Promise<SpokenWordsEvidence> {
-  const cameraLabel = await readCameraLabel();
-  const stream = await acquireBuiltInMicrophone();
+  const cameraLabel = await readCameraLabel(undefined, signal);
+  const stream = await acquireUnlessAborted(acquireBuiltInMicrophone, signal);
   try {
     const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((type) =>
       MediaRecorder.isTypeSupported(type),
@@ -44,10 +45,20 @@ export async function captureSpokenWords(
     });
     recorder.start();
     onRecording();
-    setTimeout(() => {
+    const stopTimer = setTimeout(() => {
       if (recorder.state !== 'inactive') recorder.stop();
     }, durationMs);
-    await stopped;
+    const onAbort = () => {
+      clearTimeout(stopTimer);
+      if (recorder.state !== 'inactive') recorder.stop();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      await stopped;
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+    }
+    throwIfAborted(signal);
     const audioBase64 = await blobToBase64(new Blob(chunks, { type: recorder.mimeType }));
     return { cameraLabel, audioBase64 };
   } finally {

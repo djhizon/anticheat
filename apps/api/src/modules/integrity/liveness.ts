@@ -170,7 +170,7 @@ export function scoreColourResponse(
   return {
     passed,
     detail: passed
-      ? `Screen colours matched on ${hits} of ${sequence.length} flashes — live feed confirmed`
+      ? `Check passed (client-measured): screen colours matched on ${hits} of ${sequence.length} flashes`
       : `Only ${hits} of ${sequence.length} colour flashes were reflected on your face. ` +
         `Face the screen in a dimmer spot and retry. ${COLOUR_RETRY_HINT}`,
   };
@@ -233,7 +233,7 @@ export function verifyHeadTurns(
   return {
     passed,
     detail: passed
-      ? `Head turned ${sequence.join(' then ')} as requested — live feed confirmed`
+      ? `Check passed (client-measured): head turned ${sequence.join(' then ')} as requested`
       : `Completed ${done} of ${sequence.length} requested head turns (${sequence.join(' then ')})`,
   };
 }

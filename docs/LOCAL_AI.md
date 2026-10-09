@@ -27,6 +27,8 @@ machine as `npm run dev`; nothing leaves the machine.
 | Gemini AI-written answer check (cloud, secondary)                | Instructor-only scoring of saved answers, with quoted phrases                                                      | Cloud (Google Gemini API)                                              | Same Gemini model                                                                          | No. Without keys the API returns a clear "needs GEMINI_API_KEYS" error; monitoring unaffected |
 | Gemini similarity embeddings (cloud, secondary)                  | Embeds saved free-text answers and flags close pairs across students                                               | Cloud (`gemini-embedding-001` by default)                              | `gemini-embedding-001`                                                                     | No. Fewer than two answers needs no embeddings; otherwise a clear error                       |
 
+Note on the liveness rows: the colour flash and head turn are scored from measurements the browser reports, so a pass is recorded as "Check passed (client-measured)" and is advisory, while spoken words is verified server-side from the recording transcribed by Whisper.
+
 ## How the cloud parts degrade
 
 - **No `GEMINI_API_KEYS`:** `exam.plugin.ts` logs that AI checks are disabled

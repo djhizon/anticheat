@@ -25,6 +25,7 @@ function repoFor(data: string, storage = 'flash') {
       challenge_data: data,
     }),
     insertLivenessChallenge: vi.fn(),
+    countLivenessChallengesSince: vi.fn(() => 0),
     markLivenessChallengeUsed: vi.fn(),
     insertLivenessEvent: vi.fn(),
   };
@@ -68,7 +69,6 @@ it('rejects missing or forged signatures without consuming the challenge', async
       'nonce',
       3,
       colourPayload,
-      undefined,
       signature,
       label,
     );
@@ -107,7 +107,6 @@ it('rejects OBS and other virtual cameras, and missing camera labels, for every 
         'nonce',
         3,
         colourPayload,
-        undefined,
         sign(JSON.parse(data).kind, data),
         camera,
         'AAAA',
@@ -126,7 +125,6 @@ it('scores a colour flash from the measured readings', async () => {
     'nonce',
     3,
     colourPayload,
-    undefined,
     signature,
     label,
   );
@@ -140,7 +138,6 @@ it('scores a colour flash from the measured readings', async () => {
     'nonce',
     3,
     flatPayload,
-    undefined,
     signature,
     label,
   );
@@ -154,7 +151,6 @@ it('verifies head turns', async () => {
     'nonce',
     3,
     { samples },
-    undefined,
     sign('head_turn', turnData),
     label,
   );
@@ -170,7 +166,6 @@ it('verifies spoken words through the mocked transcriber and consumes the challe
     'nonce',
     3,
     {},
-    undefined,
     sign('spoken_words', wordData),
     label,
     audio,
@@ -189,7 +184,6 @@ it('fails spoken words on few matches or transcription errors, never passing', a
     'nonce',
     3,
     {},
-    undefined,
     signature,
     label,
     'AAAA',
@@ -201,7 +195,6 @@ it('fails spoken words on few matches or transcription errors, never passing', a
     'nonce',
     3,
     {},
-    undefined,
     signature,
     label,
     'AAAA',
@@ -216,9 +209,41 @@ it('treats retired gesture challenges as unknown', async () => {
     'nonce',
     3,
     {},
-    undefined,
     sign('unknown', legacy),
     label,
   );
   expect(result).toMatchObject({ passed: false, detail: 'Unknown challenge type' });
+});
+
+it('rejects layers outside the allowlist before touching the challenge', async () => {
+  const repo = repoFor(colourData);
+  const signature = sign('colour_flash', colourData);
+  for (const layer of [0, 5, 2.5, Number.NaN, -1]) {
+    await expect(
+      service(repo).verifyLiveness('a', 'nonce', layer, colourPayload, signature, label),
+    ).rejects.toMatchObject({ code: 'validation_failed' });
+  }
+  expect(repo.markLivenessChallengeUsed).not.toHaveBeenCalled();
+});
+
+it('rate-limits challenge issuance per attempt', () => {
+  const repo = repoFor(colourData);
+  repo.countLivenessChallengesSince.mockReturnValue(6);
+  expect(() => service(repo).issueLivenessChallenge('a')).toThrow(/too many/i);
+  expect(repo.insertLivenessChallenge).not.toHaveBeenCalled();
+  repo.countLivenessChallengesSince.mockReturnValue(5);
+  expect(service(repo).issueLivenessChallenge('a').type).toBe('colour_flash');
+});
+
+it('words client-scored passes as client-measured, not a confirmed live feed', async () => {
+  const ok = await service(repoFor(colourData)).verifyLiveness(
+    'a',
+    'nonce',
+    3,
+    colourPayload,
+    sign('colour_flash', colourData),
+    label,
+  );
+  expect(ok.detail).toMatch(/client-measured/);
+  expect(ok.detail).not.toMatch(/live feed confirmed/);
 });

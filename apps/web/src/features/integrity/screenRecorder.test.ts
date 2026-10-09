@@ -73,6 +73,7 @@ it('without an API it saves local segments and a final partial clip and never ca
   expect(URL.createObjectURL).toHaveBeenCalledOnce();
   expect(Recorder.instances).toHaveLength(2);
   recorder.stop();
+  await vi.advanceTimersByTimeAsync(400);
   expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
   expect(speedtest).not.toHaveBeenCalled();
   expect(uploadRecordingChunk).not.toHaveBeenCalled();
@@ -121,7 +122,14 @@ function cloudApi(upload: () => Promise<void>) {
 const encode = async () => 'AAAA';
 
 it('uses the fast profile, uploads 10 s segments one at a time and steps down on backlog', async () => {
-  const api = cloudApi(() => new Promise<void>(() => {}));
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const api = cloudApi(async () => {
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    await new Promise((resolve) => setTimeout(resolve, 12_000));
+    inFlight -= 1;
+  });
   const messages: string[] = [];
   const recorder = createScreenRecorder('a', api, (m) => messages.push(m), {
     probe: async () => 7000,
@@ -132,13 +140,13 @@ it('uses the fast profile, uploads 10 s segments one at a time and steps down on
   expect(messages.at(-1)).toContain('720p (fast network)');
   await vi.advanceTimersByTimeAsync(10_000);
   await vi.advanceTimersByTimeAsync(30_000);
-  // Four segments waiting behind one never-finishing upload: exactly one in flight.
-  expect(api.uploadRecordingChunk).toHaveBeenCalledTimes(1);
+  // Uploads slower than the segment length pile up, but only one is ever in flight.
+  expect(maxInFlight).toBe(1);
   expect(api.uploadRecordingChunk).toHaveBeenCalledWith('a', 0, 'AAAA');
   expect(URL.createObjectURL).not.toHaveBeenCalled();
   expect(Recorder.instances[4]!.options.videoBitsPerSecond).toBe(600_000);
   expect(messages.at(-1)).toContain('540p (good network)');
-  expect(messages.at(-1)).toContain('4 waiting');
+  expect(messages.at(-1)).toContain('waiting');
   recorder.stop();
 });
 
@@ -204,13 +212,86 @@ it('records locally when the network probe fails', async () => {
   recorder.stop();
 });
 
-it('steps up one profile after two quiet minutes when a re-probe shows headroom', async () => {
-  const api = cloudApi(async () => {});
+it('steps up from recent segment upload timings without sending probe traffic', async () => {
+  const api = cloudApi(() => new Promise((resolve) => setTimeout(resolve, 100)));
+  const probe = vi.fn(async () => 3000);
+  const recorder = createScreenRecorder('a', api, () => {}, {
+    probe,
+    // 4 MB of base64 in 100 ms is far above the fastest profile threshold.
+    encode: async () => 'A'.repeat(4_000_000),
+  });
+  await recorder.start();
+  await vi.advanceTimersByTimeAsync(141_000);
+  expect(Recorder.instances.at(-1)!.options.videoBitsPerSecond).toBe(1_500_000);
+  expect(probe).toHaveBeenCalledTimes(1); // only the initial probe
+  recorder.stop();
+});
+
+it('counts a hung upload as a failure after the timeout and then saves locally', async () => {
+  const api = cloudApi(() => new Promise<void>(() => {}));
+  const messages: string[] = [];
+  const recorder = createScreenRecorder('a', api, (m) => messages.push(m), {
+    probe: async () => 3000,
+    encode,
+  });
+  await recorder.start();
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(api.uploadRecordingChunk).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(14_000);
+  expect(URL.createObjectURL).not.toHaveBeenCalled(); // 15 s has not elapsed yet
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(api.uploadRecordingChunk).toHaveBeenCalledTimes(1); // retry waits 2 s
+  await vi.advanceTimersByTimeAsync(40_000);
+  expect(api.uploadRecordingChunk.mock.calls.length).toBeGreaterThanOrEqual(3);
+  expect(messages.some((m) => m.includes('saved on your computer'))).toBe(true);
+  expect(URL.createObjectURL).toHaveBeenCalled();
+  recorder.stop();
+});
+
+it('recovers to cloud upload two minutes after a network blip', async () => {
+  let failing = true;
+  const api = cloudApi(async () => {
+    if (failing) throw new Error('blip');
+  });
   const probe = vi.fn(async () => 3000);
   const recorder = createScreenRecorder('a', api, () => {}, { probe, encode });
   await recorder.start();
-  probe.mockResolvedValue(9000);
-  await vi.advanceTimersByTimeAsync(141_000);
-  expect(Recorder.instances.at(-1)!.options.videoBitsPerSecond).toBe(1_500_000);
+  await vi.advanceTimersByTimeAsync(14_000);
+  expect(api.uploadRecordingChunk).toHaveBeenCalledTimes(3);
+  const callsAtOutage = api.uploadRecordingChunk.mock.calls.length;
+  failing = false;
+  await vi.advanceTimersByTimeAsync(121_000);
+  expect(probe).toHaveBeenCalledTimes(2); // initial + one re-probe
+  await vi.advanceTimersByTimeAsync(11_000);
+  expect(api.uploadRecordingChunk.mock.calls.length).toBeGreaterThan(callsAtOutage);
+  expect(Recorder.instances.at(-1)!.options.videoBitsPerSecond).toBe(600_000);
+  recorder.stop();
+});
+
+it('does not resume cloud upload after a fatal server refusal', async () => {
+  const api = cloudApi(async () => {
+    throw new ExamApiError({ code: 'invalid_state', message: 'x' }, 503);
+  });
+  const probe = vi.fn(async () => 9000);
+  const recorder = createScreenRecorder('a', api, () => {}, { probe, encode });
+  await recorder.start();
+  await vi.advanceTimersByTimeAsync(300_000);
+  expect(probe).toHaveBeenCalledTimes(1);
+  recorder.stop();
+});
+
+it('saves local downloads one at a time, about 400 ms apart', async () => {
+  const api = cloudApi(() => new Promise<void>(() => {}));
+  const recorder = createScreenRecorder('a', api, () => {}, { probe: async () => 3000, encode });
+  await recorder.start();
+  // Hung uploads build a backlog; the failover then saves several segments together.
+  for (let i = 0; i < 1000 && vi.mocked(URL.createObjectURL).mock.calls.length === 0; i += 1) {
+    await vi.advanceTimersByTimeAsync(100);
+  }
+  expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(399);
+  expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
   recorder.stop();
 });

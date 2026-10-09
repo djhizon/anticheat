@@ -34,8 +34,7 @@ async function getGraphToken(config: ApiConfig): Promise<string> {
   });
 
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Failed to acquire Microsoft Graph token: ${response.status} ${text}`);
+    throw new Error(`Failed to acquire Microsoft Graph token: ${response.status}`);
   }
 
   const data = (await response.json()) as { access_token: string; expires_in: number };
@@ -51,6 +50,14 @@ export function isRecordingUploadConfigured(config: ApiConfig): boolean {
   return Boolean(
     config.msTenantId && config.msClientId && config.msClientSecret && config.msTargetEmail,
   );
+}
+
+/** The segment already exists in OneDrive; uploads never overwrite. */
+export class RecordingConflictError extends Error {
+  constructor() {
+    super('Recording segment already exists.');
+    this.name = 'RecordingConflictError';
+  }
 }
 
 const safeSegment = (value: string): string => value.replace(/[^A-Za-z0-9_-]/gu, '_');
@@ -84,7 +91,7 @@ export async function uploadRecordingChunk(
   const token = await getGraphToken(config);
   const path = recordingSegmentPath(studentId, attemptId, chunkIndex);
 
-  const uploadUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(msTargetEmail)}/drive/root:${path}:/content`;
+  const uploadUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(msTargetEmail)}/drive/root:${path}:/content?@microsoft.graph.conflictBehavior=fail`;
 
   const response = await fetch(uploadUrl, {
     method: 'PUT',
@@ -96,7 +103,8 @@ export async function uploadRecordingChunk(
   });
 
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Failed to upload chunk to Microsoft Graph: ${response.status} ${text}`);
+    if (response.status === 409) throw new RecordingConflictError();
+    // Status only: Graph error bodies stay out of errors that may be logged or surfaced.
+    throw new Error(`Failed to upload chunk to Microsoft Graph: ${response.status}`);
   }
 }

@@ -191,6 +191,15 @@ export class IntegrityRepository {
       .run(nonce, attemptId, challengeType, challengeDataJson, expiresAt);
   }
 
+  countLivenessChallengesSince(attemptId: string, sinceIso: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM liveness_challenges WHERE attempt_id = ? AND issued_at >= ?`,
+      )
+      .get(attemptId, sinceIso) as { n: number };
+    return row.n;
+  }
+
   getLivenessChallenge(nonce: string): LivenessChallengeRow | null {
     const row = this.db.prepare(`SELECT * FROM liveness_challenges WHERE nonce = ?`).get(nonce) as
       LivenessChallengeRow | undefined;

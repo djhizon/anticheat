@@ -1,5 +1,6 @@
 import type { LivenessTurnDirection, LivenessYawSample } from '@exam-anti-cheat/contracts/exam';
 
+import { acquireUnlessAborted, throwIfAborted } from './livenessCapture.js';
 import { acquirePhysicalCamera } from './physicalCamera.js';
 import type { HeadPose, VisionReply } from './visionSignals.js';
 import { relativePose } from './visionSignals.js';
@@ -17,7 +18,22 @@ const CALIBRATION_MS = 1200;
 const TURN_TIMEOUT_MS = 5000;
 const RECENTRE_TIMEOUT_MS = 3000;
 
+const POSE_TIMEOUT_MS = 5000;
+
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Races a promise against a timer and always clears the timer afterwards. */
+export async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export function median(values: readonly number[]): number {
   if (values.length === 0) return 0;
@@ -50,11 +66,8 @@ export async function createWorkerPoseSource(video: HTMLVideoElement): Promise<F
     });
   const ready = next();
   worker.postMessage({ type: 'init', objects: false });
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('Face model initialization timed out.')), 30_000),
-  );
   try {
-    const reply = await Promise.race([ready, timeout]);
+    const reply = await withTimeout(ready, 30_000, 'Face model initialization timed out.');
     if (reply.type !== 'ready') throw new Error('Face model unavailable.');
   } catch (error) {
     worker.terminate();
@@ -65,7 +78,7 @@ export async function createWorkerPoseSource(video: HTMLVideoElement): Promise<F
       const bitmap = await createImageBitmap(video);
       const reply = next();
       worker.postMessage({ type: 'frame', bitmap }, [bitmap]);
-      const data = await reply;
+      const data = await withTimeout(reply, POSE_TIMEOUT_MS, 'Face model stopped responding.');
       return data.type === 'observation' ? data.observation.pose : null;
     },
     close: () => worker.terminate(),
@@ -86,8 +99,9 @@ export async function captureHeadTurn(
   onPrompt: (text: string) => void,
   acquire: () => Promise<MediaStream> = acquirePhysicalCamera,
   openPoseSource: (video: HTMLVideoElement) => Promise<FramePoseSource> = createWorkerPoseSource,
+  signal?: AbortSignal,
 ): Promise<HeadTurnEvidence> {
-  const stream = await acquire();
+  const stream = await acquireUnlessAborted(acquire, signal);
   const video = document.createElement('video');
   video.muted = true;
   video.playsInline = true;
@@ -98,12 +112,14 @@ export async function captureHeadTurn(
     await video.play();
     onPrompt('Loading the face model on this device…');
     source = await openPoseSource(video);
+    throwIfAborted(signal);
 
     onPrompt('Look straight at the screen.');
     const started = performance.now();
     const samples: LivenessYawSample[] = [];
     const basePoses: HeadPose[] = [];
     while (performance.now() - started < CALIBRATION_MS) {
+      throwIfAborted(signal);
       const pose = await source.pose();
       if (pose) basePoses.push(pose);
       await wait(SAMPLE_MS);
@@ -115,6 +131,7 @@ export async function captureHeadTurn(
     };
     const t0 = started;
     const record = async (): Promise<number | null> => {
+      throwIfAborted(signal);
       const pose = await source!.pose();
       if (!pose) return null;
       const yaw = turnYaw(pose, baseline);

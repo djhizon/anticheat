@@ -26,3 +26,12 @@ it('looks up a phone enrollment by attempt id', () => {
   expect(row?.token).toBe('token-1');
   expect(row?.last_seen_at).toBe('2026-10-09T00:00:00.000Z');
 });
+
+it('counts liveness challenges issued since a cutoff', () => {
+  const at = new Date().toISOString();
+  repo.insertLivenessChallenge('n1', 'attempt-1', 'colour_flash', '{}', at);
+  repo.insertLivenessChallenge('n2', 'attempt-1', 'head_turn', '{}', at);
+  repo.insertLivenessChallenge('n3', 'attempt-2', 'head_turn', '{}', at);
+  expect(repo.countLivenessChallengesSince('attempt-1', '2000-01-01T00:00:00.000Z')).toBe(2);
+  expect(repo.countLivenessChallengesSince('attempt-1', '2999-01-01T00:00:00.000Z')).toBe(0);
+});

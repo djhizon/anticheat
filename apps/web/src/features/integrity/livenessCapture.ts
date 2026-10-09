@@ -10,6 +10,23 @@ export interface ColourEvidence {
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+export function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new Error('The check timed out or was closed.');
+}
+
+/** Acquires a stream, releasing it at once if the check was abandoned while the prompt was open. */
+export async function acquireUnlessAborted(
+  acquire: () => Promise<MediaStream>,
+  signal?: AbortSignal,
+): Promise<MediaStream> {
+  const stream = await acquire();
+  if (signal?.aborted) {
+    stream.getTracks().forEach((track) => track.stop());
+    throwIfAborted(signal);
+  }
+  return stream;
+}
+
 /** How long each colour stays on screen before its frame is read. */
 export const FLASH_MS = 350;
 /** Neutral gap between colours keeps the sequence under ~2 flashes per second. */
@@ -82,8 +99,9 @@ async function openVideo(stream: MediaStream): Promise<HTMLVideoElement> {
 /** Opens the native webcam only (OBS/virtual cameras are refused) and returns its label. */
 export async function readCameraLabel(
   acquire: () => Promise<MediaStream> = acquirePhysicalCamera,
+  signal?: AbortSignal,
 ): Promise<string> {
-  const stream = await acquire();
+  const stream = await acquireUnlessAborted(acquire, signal);
   try {
     return stream.getVideoTracks()[0]?.label ?? '';
   } finally {
@@ -100,26 +118,31 @@ export async function readCameraLabel(
 export async function captureColourFlash(
   sequence: readonly LivenessColour[],
   acquire: () => Promise<MediaStream> = acquirePhysicalCamera,
+  signal?: AbortSignal,
 ): Promise<ColourEvidence> {
-  const stream = await acquire();
+  const stream = await acquireUnlessAborted(acquire, signal);
   let video: HTMLVideoElement | null = null;
   const overlay = document.createElement('div');
   overlay.setAttribute('aria-hidden', 'true');
   try {
     video = await openVideo(stream);
     await wait(600); // let auto-exposure settle
+    throwIfAborted(signal);
     const cameraLabel = stream.getVideoTracks()[0]?.label ?? '';
     // Baseline under the same neutral grey the gaps use, so only the colour differs.
     overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#808080';
     document.body.append(overlay);
     await wait(400);
+    throwIfAborted(signal);
     const baseline = grab(video);
     const frames: LivenessRgb[] = [];
     for (const colour of sequence) {
+      throwIfAborted(signal);
       overlay.style.background = '#808080';
       await wait(GAP_MS);
       overlay.style.background = FLASH_CSS[colour];
       await wait(FLASH_MS);
+      throwIfAborted(signal);
       frames.push(grab(video));
     }
     return { cameraLabel, baseline, frames };
