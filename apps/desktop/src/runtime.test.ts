@@ -120,7 +120,7 @@ describe('runtime paths and environment', () => {
       SERVE_WEB_DIST: '/res/web',
       WHISPER_BIN: '/res/whisper/whisper-cli',
       WHISPER_MODEL_PATH: '/res/whisper/ggml-small.en-q5_1.bin',
-      LOCAL_VISION: '1',
+      LOCAL_VISION: 'true',
       LOCAL_VISION_MODEL_DIR: '/res/vision-models',
     });
     expect(env.FFMPEG_BIN).toBeUndefined();

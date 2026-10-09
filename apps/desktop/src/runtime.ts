@@ -138,7 +138,7 @@ export function buildServerEnv(
   else if (deps.isPackaged) delete env.FFMPEG_BIN; // Fall back to PATH, never a stale value.
   // The on-device wearables detector is a desktop-app feature: the API only serves it to
   // loopback clients, and the model file is bundled (or prepared with `vision:prepare --local`).
-  env.LOCAL_VISION = '1';
+  env.LOCAL_VISION = 'true'; // The API accepts only 'true' or 'false'.
   env.LOCAL_VISION_MODEL_DIR = paths.visionModelDir;
   return env;
 }

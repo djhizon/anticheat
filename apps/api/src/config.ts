@@ -15,7 +15,7 @@ export interface ApiConfig {
   readonly freshExamGenerationEnabled: boolean;
   readonly backendVisionEnabled: boolean;
   /**
-   * Desktop app only (LOCAL_VISION=1): the on-device wearables/object detector (onnxruntime-node)
+   * Desktop app only (LOCAL_VISION=true): the on-device wearables/object detector (onnxruntime-node)
    * behind 127.0.0.1-only routes. Frames never leave the machine.
    */
   readonly localVisionEnabled: boolean;
