@@ -15,6 +15,15 @@ Every signal is a lead for a human to review. Nothing is an automatic verdict.
 > Pre-existing code is disclosed in
 > [docs/EXISTING_CODE.md](docs/EXISTING_CODE.md).
 
+## Local-first AI
+
+The core AI runs on the student's own machine and keeps working if cloud
+services disappear: MediaPipe face, head-pose and phone detection in the
+browser, local Whisper speech-to-text, keystroke dynamics, voice activity and a
+native-webcam liveness flash check. Gemini features are optional, secondary
+instructor aids. See the honest per-component inventory, including limitations,
+in [docs/LOCAL_AI.md](docs/LOCAL_AI.md).
+
 ## What it does
 
 **Students**
@@ -87,7 +96,7 @@ shell win.
 
 | Variable                                   | Enables                                                                                                                      |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| `GEMINI_API_KEYS`                          | AI exam generation, AI-text check, similarity check. Monitoring works without it.                                            |
+| `GEMINI_API_KEYS`                          | Optional, secondary cloud aids: AI exam generation, AI-text check, similarity check. Core on-device AI works without it.     |
 | `WHISPER_BIN`, `WHISPER_MODEL_PATH`        | Local speech transcription (build [whisper.cpp](https://github.com/ggml-org/whisper.cpp) into `apps/api/vendor/whisper.cpp`) |
 | `WHISPER_CONCURRENCY`, `WHISPER_MAX_QUEUE` | Transcription worker pool size and backlog                                                                                   |
 | `ENABLE_BACKEND_VISION=true`               | Server OWL-ViT check (run `npm run setup:vision`)                                                                            |
