@@ -10,12 +10,15 @@ ExamGuard: consent-first exam integrity with on-device AI
 
 ## Short description
 
-An exam platform that keeps online tests honest without streaming students to a
-cloud proctor. Face, phone and head-pose detection, speech-to-text, typing
-analysis and liveness checks run on the student's own laptop (and optionally on
-their iPhone). Students consent to every monitor up front, see everything that
-was recorded afterwards, and every signal is a lead for a teacher, never an
-automatic verdict.
+A Mac exam app and an iPhone companion that keep online tests honest without
+streaming anyone's webcam to a cloud proctor, and that give teachers a short
+list instead of hours of video: **teachers see only the attempts that need a
+look.** Face and gaze, phone, earbuds and glasses detection, speech-to-text,
+typing and pointer patterns and presence checks run on the student's own Mac;
+the iPhone only pings the laptop so it stays on the desk. Students agree to
+every check before the clock starts and see the same findings as the teacher
+afterwards, with room to reply. Every finding is a lead with its evidence,
+never an automatic verdict.
 
 ## Team members
 
@@ -28,7 +31,8 @@ https://github.com/djhizon/examguard
 
 ## Demo video
 
-**TODO**: link (about 1 minute; shot list below).
+**TODO**: link (about 1 minute, for a general audience; shot list, voice-over and
+caption strip in [DEMO.md](DEMO.md#a-the-60-second-video)).
 
 ## X / LinkedIn video URL
 
@@ -36,24 +40,43 @@ https://github.com/djhizon/examguard
 
 ## What runs locally
 
-- **Camera checks in the browser:** MediaPipe Face Landmarker (face presence,
-  multiple faces, head pose) and EfficientDet-Lite0 (phone detection), in a Web
-  Worker. No frame leaves the device.
-- **Speech-to-text:** whisper.cpp with the English `ggml-small.en-q5_1` model, run by the local
-  API as a child process.
-- **Liveness checks:** random colour flash (camera reads the face's colour
-  response), head-turn fallback (MediaPipe head pose) and spoken-words option
-  (local Whisper), all with HMAC-signed challenges scored by the local API.
-- **Typing and audio statistics:** keystroke dynamics and voice-activity
-  detection, plain signal processing in the browser.
-- **Native-webcam rule:** OBS and other virtual cameras are refused; in strict mode the
-  desktop app also refuses virtual machines and capture displays.
-- **iPhone presence (optional):** the phone app only pings the laptop while it is
-  open on the desk; no camera, microphone or screen data leaves the phone.
-- **Server vision (optional):** OWL-ViT zero-shot detection in a local Python
-  process for earbuds, headphones, smart glasses and similar items.
-- **Everything else:** the API, SQLite database, transparency report and
-  consent flow all run on the same machine.
+- **Camera checks on the student's Mac:** MediaPipe Face Landmarker (face
+  present, extra faces, eye-gaze direction that calibrates itself from where the
+  student clicks and types, hidden from the student) and EfficientDet-Lite0
+  (phone in view), in a Web Worker. No frame leaves the device; one downscaled
+  evidence photo is saved locally when an unusual condition holds for 2 s.
+- **Wearables check:** a D-FINE detector (Objects365, Apache-2.0) for earbuds,
+  headphones, glasses and watch. The Mac app runs D-FINE-X with `onnxruntime-node`
+  in a worker thread of its loopback-only local API; plain browsers run a lighter
+  D-FINE-S copy on WASM.
+- **Camera hardware rule:** OBS and other virtual cameras are refused; the Mac app
+  asks macOS (AVFoundation + CoreMediaIO) whether the camera is built-in, USB or
+  iPhone Continuity hardware. Strict mode also refuses virtual machines and
+  capture displays.
+- **Presence checks:** a required colour-reflection check in setup, then random
+  server-signed screen-edge colour pulses between questions (no button, no head
+  turn), read off the face by the local camera pipeline and scored by the local API.
+- **Speech-to-text:** whisper.cpp with the English `ggml-small.en-q5_1` model,
+  run by the local API as a child process; only the text is kept, never audio.
+- **Typing, pointer and audio statistics:** keystroke dynamics, injected-text,
+  burst-after-idle and pointer-outside-window checks, and voice-activity
+  detection, plain signal processing in the browser (never the text typed).
+- **Lighting and brightness:** lighting check with fix tips; the Mac app forces
+  the built-in display to full brightness for the exam.
+- **iPhone presence (required in setup):** the phone app pairs by QR and only
+  pings the laptop over the local network while it is open on the desk; no
+  camera, microphone or screen data leaves the phone.
+- **Screen recording (required):** whole-screen recording encoded on the Mac and
+  saved to Movies › ExamGuard Recordings; uploaded only if the exam's upload
+  setting is on.
+- **Findings engine and teacher triage:** the stored timeline becomes at most
+  six plain-language findings per attempt with an overall level (none / glance /
+  review); the instructor's "Who needs a look" screen, the evidence card and the
+  Fine / Follow up decisions all run on the local API and SQLite database.
+- **Everything else:** the API, SQLite database, student transparency report
+  with per-finding notes and the consent flow all run on the same machine.
+- **Server vision (optional, off by default):** OWL-ViT zero-shot detection in a
+  local Python process as a second opinion (`ENABLE_BACKEND_VISION=true`).
 
 ## What requires internet
 
@@ -112,8 +135,11 @@ only and the API refuse uploads with a 403.
 - MediaPipe Object Detector, EfficientDet-Lite0 (`efficientdet_lite0.tflite`,
   int8, a few MB; COCO's 80 classes)
 - OpenAI Whisper `small.en` via whisper.cpp (`ggml-small.en-q5_1.bin`, about 190 MB)
+- D-FINE object detector trained on Objects365 (Apache-2.0): D-FINE-X ONNX
+  (about 252 MB, bundled in the dmg, `onnxruntime-node`) in the Mac app, D-FINE-S
+  uint8 on `onnxruntime-web` WASM in plain browsers
 - Google OWL-ViT `google/owlvit-base-patch32` via Hugging Face Transformers
-  (optional, about 600 MB)
+  (optional, off by default, about 600 MB)
 - Apple Vision built-in requests on iOS (`VNDetectHumanRectanglesRequest`,
   `VNDetectHumanHandPoseRequest`)
 - Google Gemini (cloud, secondary): generation model set by `GEMINI_MODEL`
@@ -141,10 +167,11 @@ public demo link). None are needed for the core on-device features.
 > Its known defects at import are listed in `docs/AUDIT.md`. Everything after
 > that commit was built during the hackathon and is itemised in `CHANGELOG.md`.
 > Third-party assets: whisper.cpp (MIT, built from upstream at setup time, not
-> committed), the OpenAI Whisper `ggml-base` model, Google OWL-ViT
-> (`google/owlvit-base-patch32`, Apache-2.0) via Hugging Face Transformers,
-> MediaPipe Tasks Vision, Apple Vision (iOS), and npm dependencies in
-> `package-lock.json`.
+> committed), the OpenAI Whisper `small.en` model (`ggml-small.en-q5_1`), the
+> D-FINE Objects365 detector (Apache-2.0, ONNX weights fetched and checksummed at
+> package time), Google OWL-ViT (`google/owlvit-base-patch32`, Apache-2.0) via
+> Hugging Face Transformers, MediaPipe Tasks Vision, Apple Vision (iOS), and npm
+> dependencies in `package-lock.json`.
 >
 > AI development tools: Claude Code (Anthropic) was used throughout the
 > hackathon for planning, implementation, tests, code review and docs, with every
@@ -192,12 +219,10 @@ the full tables, the honest reading and five recommendations are in
 | hard_honest | 2        | 1    | 1      | 0      |
 | hard_cheat  | 2        | 2    | 0      | 0      |
 
-## 60-second demo video shot list
+## 60-second demo video
 
-1. **0–8 s:** the problem in one line over the sign-in screen.
-2. **8–18 s:** consent screen, tick, the exam opens and checks start.
-3. **18–30 s:** camera panel: look away, hold a phone up, the flag appears.
-4. **30–40 s:** liveness colour flash passes.
-5. **40–48 s:** Wi-Fi off, phone detection still works.
-6. **48–56 s:** submit, the student's transparency report.
-7. **56–60 s:** the line "AI on your device, not in the cloud", plus the repo URL.
+The shot list, the ~145-word voice-over and the "show it or list it" caption strip
+are in [DEMO.md](DEMO.md#a-the-60-second-video), next to the 5-minute live script
+and the Q&A cheat sheet. The hero moment is the internet going off while the
+phone-in-view detection and the iPhone pings keep working; the close line is
+"Private by design, works offline. ExamGuard."

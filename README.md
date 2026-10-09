@@ -25,6 +25,8 @@ and everything recorded after they finish. Every signal is a lead for a teacher,
    buttons. Brief presence checks appear at random between questions without interrupting.
 3. **After.** The student gets a transparency report of everything recorded; the teacher reviews
    leads with photos, transcript lines and the log.
+   Teacher triage: "Who needs a look" shows only the attempts that need a look (no review /
+   glance / review), one evidence card each, and a **Fine** or **Follow up** decision.
 
 ## What it checks — all on the student's Mac
 
