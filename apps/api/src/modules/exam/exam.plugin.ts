@@ -13,6 +13,7 @@ import { deleteRecordingSegments, isRecordingUploadConfigured } from '../integri
 import { ExamRepository } from './exam.repository.js';
 import { ExamRoutes } from './exam.routes.js';
 import { ExamService } from './exam.service.js';
+import { ReviewRepository } from './reviewRepository.js';
 import { PhonePresenceService } from '../integrity/phonePresence.js';
 
 export interface ExamPluginDependencies {
@@ -88,6 +89,7 @@ export function createExamPlugin(
     integrity,
     phonePresence,
     config.backendVisionEnabled ? detectObjectsRemotely : null,
+    new ReviewRepository(database),
   );
 
   return { repository, service, routes, integrity, phonePresence };

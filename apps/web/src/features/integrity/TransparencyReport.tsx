@@ -4,6 +4,8 @@ import { IntegrityTimeline } from './IntegrityTimeline.js';
 import type { IntegrityTimelineApi } from './timelineApi.js';
 import { EvidenceGallery, type EvidenceGalleryProps } from '../evidence/EvidenceGallery.js';
 import type { TranscriptEntry, TransparencyEvent } from '@examguard/contracts/exam';
+import type { FindingNotesApi } from '../triage/findingsApi.js';
+import { StudentFindings } from '../triage/StudentFindings.js';
 
 const typeIcon: Record<TransparencyEvent['type'], string> = {
   HARDWARE: '🖥️',
@@ -23,6 +25,7 @@ export function TransparencyReport({
   loadTranscript,
   timelineApi,
   evidence,
+  findings,
 }: {
   readonly attemptId: string;
   readonly load: (attemptId: string) => Promise<readonly TransparencyEvent[]>;
@@ -31,6 +34,8 @@ export function TransparencyReport({
   readonly timelineApi?: IntegrityTimelineApi | undefined;
   /** When provided, the still snapshots saved for this attempt are listed too. */
   readonly evidence?: Pick<EvidenceGalleryProps, 'listEvidence' | 'loadImage'> | undefined;
+  /** When provided, the triage findings are explained first, with a note box per finding. */
+  readonly findings?: FindingNotesApi | undefined;
 }) {
   const [events, setEvents] = useState<readonly TransparencyEvent[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -72,6 +77,7 @@ export function TransparencyReport({
         This is the full list of integrity events stored for this attempt. An instructor reviews
         them in context — none of them is an automatic cheating verdict.
       </p>
+      {findings !== undefined && <StudentFindings attemptId={attemptId} api={findings} />}
       {failed && <p role="alert">The transparency report could not be loaded. Try again later.</p>}
       {!failed && events === null && <p role="status">Loading report…</p>}
       {events !== null && events.length === 0 && (

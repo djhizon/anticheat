@@ -26,6 +26,7 @@ import { embedWatermark } from '../integrity/watermark.js';
 import { shouldKick } from '../integrity/tabGuard.js';
 import { TransparencyReport } from '../integrity/TransparencyReport.js';
 import type { IntegrityTimelineApi } from '../integrity/timelineApi.js';
+import type { FindingNotesApi } from '../triage/findingsApi.js';
 import { startCameraGuard } from '../integrity/cameraGuard.js';
 import { activeCameraTrack } from '../integrity/physicalCamera.js';
 import { checkCamera } from '../integrity/cameraGate.js';
@@ -257,6 +258,17 @@ export function StudentExamPage({
     (attemptId: string) => examApi?.getTranscript?.(attemptId) ?? Promise.resolve([]),
     [examApi],
   );
+
+  const findingsView = useMemo<FindingNotesApi | undefined>(() => {
+    const get = examApi?.getFindings;
+    const save = examApi?.saveFindingNote;
+    if (!examApi || !get || !save) return undefined;
+    return {
+      getFindings: (id: string) => get.call(examApi, id),
+      saveNote: (id: string, findingId: string, note: string) =>
+        save.call(examApi, id, findingId, note),
+    };
+  }, [examApi]);
 
   // ── Focus-loss and page-hide — fire violations ────────────────────────
   useEffect(() => {
@@ -1353,6 +1365,7 @@ export function StudentExamPage({
                 loadTranscript={loadTranscript}
                 timelineApi={timelineApi}
                 evidence={evidenceView}
+                findings={findingsView}
               />
             )}
           </main>

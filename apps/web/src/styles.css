@@ -2985,3 +2985,217 @@ button.timeline-chip[aria-pressed='false'] {
   font-size: 1.1rem;
   font-weight: 600;
 }
+
+/* ── Instructor triage and student findings ─────────────────────────────────── */
+.triage-counts {
+  font-weight: 600;
+  margin: 0.25rem 0 1rem;
+}
+.triage-layout {
+  display: grid;
+  grid-template-columns: minmax(16rem, 1fr) minmax(0, 1.6fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+@media (max-width: 760px) {
+  .triage-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.triage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+.triage-list:focus {
+  outline: none;
+}
+.triage-row-button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.15rem 0.5rem;
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.triage-row--selected .triage-row-button {
+  border-color: #3b6fe0;
+  box-shadow: 0 0 0 2px rgb(59 111 224 / 20%);
+}
+.triage-student {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.triage-reason,
+.triage-decision {
+  font-size: 0.85rem;
+  color: #51607a;
+}
+.triage-reason {
+  grid-column: 1;
+}
+.triage-decision {
+  grid-column: 2;
+  text-align: right;
+}
+.level-chip,
+.confidence-chip {
+  display: inline-block;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  background: #e8edf5;
+  color: #35425a;
+}
+.level-chip--review,
+.confidence-chip--high {
+  background: #fde2e2;
+  color: #8a1c1c;
+}
+.level-chip--glance,
+.confidence-chip--medium {
+  background: #fff1d6;
+  color: #7a4b00;
+}
+.level-chip--none {
+  background: #dff5e3;
+  color: #1d5d2a;
+}
+.evidence-card {
+  border: 1px solid #dbe3ef;
+  border-radius: 12px;
+  padding: 1rem;
+  background: #fbfcfe;
+}
+.evidence-card h3 {
+  margin-top: 0;
+}
+.finding-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1rem;
+}
+.finding {
+  border-top: 1px solid #e6ebf3;
+  padding-top: 0.75rem;
+}
+.finding-reasons {
+  margin: 0.35rem 0;
+  padding-left: 1.2rem;
+}
+.finding-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+}
+.finding-photos li {
+  display: grid;
+  gap: 0.2rem;
+  width: 140px;
+  font-size: 0.75rem;
+  color: #51607a;
+}
+.finding-photos img,
+.finding-photos .evidence-placeholder {
+  width: 140px;
+  height: 100px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #e8edf5;
+  display: grid;
+  place-items: center;
+}
+.clip-window {
+  margin: 0.35rem 0;
+}
+.clip-button {
+  font-size: 0.85rem;
+}
+.clip-fallback {
+  font-size: 0.85rem;
+  color: #51607a;
+  margin: 0.35rem 0 0;
+}
+.clip-player video {
+  width: 100%;
+  max-width: 560px;
+  border-radius: 8px;
+  background: #000;
+}
+.finding-transcript {
+  margin: 0.35rem 0;
+  padding-left: 1.2rem;
+  font-size: 0.9rem;
+}
+.finding-note {
+  margin: 0.35rem 0 0;
+  font-size: 0.9rem;
+}
+.triage-decision {
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.5rem;
+}
+.triage-decision input {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #c9d3e3;
+  border-radius: 8px;
+  font: inherit;
+}
+.triage-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.triage-buttons kbd,
+.triage p kbd {
+  font-size: 0.7rem;
+  border: 1px solid #c9d3e3;
+  border-radius: 4px;
+  padding: 0 0.3rem;
+  margin-left: 0.25rem;
+  background: #fff;
+  color: #35425a;
+}
+.triage-tools {
+  text-align: center;
+  margin: 0 0 1.5rem;
+}
+.student-findings {
+  margin: 1rem 0 1.5rem;
+}
+.finding-note-form {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+.finding-note-form textarea {
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #c9d3e3;
+  border-radius: 8px;
+  font: inherit;
+  resize: vertical;
+}
+.finding-note-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  color: #51607a;
+}

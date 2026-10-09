@@ -25,6 +25,7 @@ const benignConsole: readonly RegExp[] = [
   /Failed to load resource.*(409|422|503|501)/i,
   // Same instructor checks: with no keys the API currently answers 500 (reported as a finding).
   /status of 500.*\/exam\/instructor\/.*\/(ai-check|similarity)$/,
+  /Failed to load resource.*404.*\/findings/,
 ];
 const benignRequests: readonly RegExp[] = [
   /\/auth\/me -> 401/,
@@ -36,6 +37,8 @@ const benignRequests: readonly RegExp[] = [
   /\/exam\/attempts\/[^/]+\/(liveness-verify|vision-check)/,
   // Cloud (OneDrive) recording is not configured here: segments are saved locally instead.
   /\/exam\/attempts\/[^/]+\/recording -> 503/,
+  // The findings engine may have nothing for an attempt yet; the screens say so.
+  /\/exam\/attempts\/[^/]+\/findings -> 404/,
 ];
 
 /**
@@ -331,19 +334,52 @@ test('demo flow: student exam with on-device checks, then instructor review', as
     await expect(report).toBeVisible();
     await expect(report.getByText('Loading report…')).toBeHidden();
     await expect(report.getByRole('alert')).toHaveCount(0);
+    // The same findings the instructor triages, in plain language (or "not available yet").
+    const findings = report.getByRole('region', { name: 'What your teacher may look at' });
+    await expect(findings).toBeVisible();
+    await expect(findings.getByText('Loading…')).toBeHidden();
     // "What was heard" only renders when the local Whisper build produced text; empty is valid.
     const heard = await report.getByRole('heading', { name: 'What was heard' }).count();
     testInfo.annotations.push({ type: 'what-was-heard-sections', description: String(heard) });
     await shot('4-transparency-report');
   });
 
-  await test.step('instructor sees Integrity review with disabled Gemini checks and a clear hint', async () => {
-    currentStep = 'instructor sees Integrity review with disabled Gemini checks and a clear hint';
+  await test.step('instructor triage: counts, sorted list, one card cleared with "Fine"', async () => {
+    currentStep = 'instructor triage: counts, sorted list, one card cleared with "Fine"';
     await page.getByRole('button', { name: '← Back' }).click();
     await page.getByRole('button', { name: 'Sign out' }).click();
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
     await signIn(page, instructor);
     await expect(page.getByRole('heading', { name: 'Integrity review' })).toBeVisible();
+    const triage = page.getByRole('region', { name: 'Who needs a look' });
+    await expect(triage).toBeVisible();
+    await expect(triage.locator('.triage-counts')).toHaveText(
+      /^\d+ no review · \d+ glance · \d+ review$/,
+    );
+    const rows = triage.locator('.triage-row');
+    // The demo student plus the classmates and the synthetic triage students.
+    expect(await rows.count()).toBeGreaterThanOrEqual(5);
+    const selected = triage.locator('.triage-row--selected');
+    await expect(selected).toHaveCount(1);
+    await expect(selected).toContainText('Undecided');
+    const card = triage.locator('.evidence-card');
+    await expect(card).toBeVisible();
+    await expect(card.getByText('Loading findings…')).toBeHidden();
+    await shot('5-instructor-triage');
+    // Clearing one card: "Fine" records the decision and moves on to the next attempt.
+    const cleared = (await selected.locator('.triage-student').textContent()) ?? '';
+    const started = Date.now();
+    await triage.getByRole('button', { name: /^Fine/ }).click();
+    await expect(triage.locator('.triage-row', { hasText: cleared })).toContainText('✓ Fine');
+    expect(Date.now() - started).toBeLessThan(60_000);
+    await expect(triage.locator('.triage-row--selected')).not.toContainText(cleared);
+  });
+
+  await test.step('instructor Details show the dashboards with disabled Gemini checks and a clear hint', async () => {
+    currentStep =
+      'instructor Details show the dashboards with disabled Gemini checks and a clear hint';
+    await page.getByRole('button', { name: /^Details: full logs/ }).click();
+    await expect(page.getByRole('region', { name: /Attempt integrity log/ })).toBeVisible();
     const similarity = page.getByRole('region', { name: /Cross-student similarity/ });
     const ai = page.getByRole('region', { name: /AI-written answer check/ });
     await expect(similarity).toBeVisible();

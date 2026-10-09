@@ -40,6 +40,11 @@ import type { PhonePresenceService } from '../integrity/phonePresence.js';
 import type { VisionResult } from '../integrity/backendVision.js';
 import { timelineToCsv } from '../integrity/timeline.js';
 import { isFlaggableVisionLabel, visionFlagName } from '../integrity/visionLabels.js';
+import {
+  parseFindingNote,
+  parseReviewDecisionRequest,
+  type ReviewRepository,
+} from './reviewRepository.js';
 
 export type ExamResponseHeaderValue = string | readonly string[];
 
@@ -74,6 +79,10 @@ const timelinePattern = /^\/exam\/attempts\/([^/]+)\/timeline$/u;
 const findingsPattern = /^\/exam\/attempts\/([^/]+)\/findings$/u;
 const instructorAttemptsPath = '/exam/instructor/attempts';
 const instructorCapabilitiesPath = '/exam/instructor/capabilities';
+/** Instructor triage decision per attempt ("Fine" / "Follow up"). */
+const decisionPattern = /^\/exam\/instructor\/attempts\/([^/]+)\/decision$/u;
+/** Student note on one finding of their own submitted attempt. */
+const findingNotePattern = /^\/exam\/attempts\/([^/]+)\/findings\/([^/]+)\/note$/u;
 const evidenceListPattern = /^\/exam\/attempts\/([^/]+)\/evidence$/u;
 const evidenceItemPattern = /^\/exam\/attempts\/([^/]+)\/evidence\/([^/]+)$/u;
 /** Base64 of a 300 KB JPEG is ~400 K characters; reject anything bigger before decoding. */
@@ -185,6 +194,8 @@ function isExamPath(path: string): boolean {
     timelinePattern.test(path) ||
     findingsPattern.test(path) ||
     instructorExamPrivacyPattern.test(path) ||
+    decisionPattern.test(path) ||
+    findingNotePattern.test(path) ||
     similarityPattern.test(path) ||
     instructorAiCheckPattern.test(path) ||
     [
@@ -328,6 +339,8 @@ export class ExamRoutes {
     private readonly phonePresence: PhonePresenceService | null = null,
     // Opt-in (ENABLE_BACKEND_VISION): server-side OWL-ViT detection via the Python bridge.
     private readonly visionDetector: ((imageBase64: string) => Promise<VisionResult>) | null = null,
+    /** Review decisions and finding notes (triage); null disables those routes. */
+    private readonly review: ReviewRepository | null = null,
   ) {}
 
   async handle(request: AuthRequest): Promise<ExamResponse> {
@@ -697,8 +710,57 @@ export class ExamRoutes {
       // ── Instructor: attempt list for integrity review ─────────────────────
       if (method === 'GET' && path === instructorAttemptsPath && this.integrity !== null) {
         this.requireInstructor(request);
+        // Additive: each row carries the instructor's triage decision (null until decided).
+        const decisions = this.review?.listDecisions() ?? new Map();
         return jsonResponse(request, this.config.allowedOrigins, 200, {
-          attempts: this.integrity.listAttemptsForInstructor(),
+          attempts: this.integrity
+            .listAttemptsForInstructor()
+            .map((attempt) => ({ ...attempt, decision: decisions.get(attempt.id) ?? null })),
+        });
+      }
+
+      // ── Instructor: triage decision for one attempt ───────────────────────
+      const decisionMatch = decisionPattern.exec(path);
+      if (method === 'POST' && decisionMatch !== null && this.review !== null) {
+        const principal = this.requireInstructor(request);
+        this.boundary.validateUnsafe(request, principal);
+        const attemptId = parsePathId<'AttemptId'>(decisionMatch[1] ?? '', 'Attempt ID');
+        if (!this.review.attemptExists(String(attemptId))) {
+          throw new DomainError('not_found', 'The exam attempt was not found.');
+        }
+        const decision = this.review.saveDecision(
+          String(attemptId),
+          parseReviewDecisionRequest(request.body),
+          String(principal.user.id),
+          new Date().toISOString(),
+        );
+        return jsonResponse(request, this.config.allowedOrigins, 200, { decision });
+      }
+
+      // ── Student: own note on one finding (submitted attempts only) ────────
+      const findingNoteMatch = findingNotePattern.exec(path);
+      if (method === 'POST' && findingNoteMatch !== null && this.review !== null) {
+        const principal = this.requireStudent(request);
+        this.boundary.validateUnsafe(request, principal);
+        const attemptId = parsePathId<'AttemptId'>(findingNoteMatch[1] ?? '', 'Attempt ID');
+        const findingId = parsePathId<'FindingId'>(findingNoteMatch[2] ?? '', 'Finding ID');
+        const delivery = await this.service.getAttemptDelivery(
+          attemptId as AttemptId,
+          principal.user.id,
+        );
+        if (delivery.attempt.status !== 'submitted') {
+          throw new DomainError('conflict', 'Notes can be added once the exam is submitted.');
+        }
+        const note = parseFindingNote(request.body);
+        this.review.saveFindingNote(
+          String(attemptId),
+          String(findingId).slice(0, 200),
+          note,
+          new Date().toISOString(),
+        );
+        return jsonResponse(request, this.config.allowedOrigins, 200, {
+          findingId: String(findingId).slice(0, 200),
+          note: note.trim() === '' ? null : note,
         });
       }
 

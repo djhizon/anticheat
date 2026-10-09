@@ -8,7 +8,6 @@ import { useEvidenceCapture } from '../evidence/useEvidenceCapture.js';
 import { createEyeGazeTracker } from './eyeGazeTracker.js';
 import { reporterAngles, type GazeSample } from './gazeEstimator.js';
 import { useImplicitGazeCalibration } from './interactionCalibration.js';
-import { GazePanel, gazeDebugEnabled } from './GazePanel.js';
 import type { ExamApi } from '../exam/api.js';
 import type { Box } from './gazeEstimator.js';
 import type { VisionObservation } from './visionSignals.js';
@@ -404,8 +403,7 @@ export function CameraIntegrityPanel({
           )}
         </div>
       )}
-      {/* Calibration is automatic and silent: no student-facing calibration UI. */}
-      <GazePanel tracker={gazeTracker} live={live} showCalibration={gazeDebugEnabled()} />
+      {/* No gaze dial or statistics for students: the tracker only feeds the findings engine. */}
       <p className="muted">
         Direction is an on-device estimate from camera coordinates—not proof of cheating.
       </p>

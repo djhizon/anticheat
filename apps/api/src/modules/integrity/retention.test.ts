@@ -126,13 +126,16 @@ it('is a no-op for "marked fine" attempts until review_decisions exists', () => 
   const attempt = attemptFor('exam', null);
   addMedia(attempt, 1);
   const svc = new IntegrityService(repo, null, 'secret', 30, 30);
+  // Simulate a database from before the review_decisions migration.
+  db.exec('DROP TABLE IF EXISTS review_decisions');
   expect(repo.hasReviewDecisions()).toBe(false);
   expect(svc.sweepReviewedFine(NOW)).toBe(0);
   expect(mediaCounts(attempt)).toEqual({ transcripts: 1, evidence: 1, segments: 1 });
 });
 
 it('deletes media of attempts marked fine more than 7 days ago and keeps the findings', () => {
-  // The table is created by a later migration; this mirrors its minimal shape.
+  // Replace the migrated table with a minimal shape that allows several decisions per attempt.
+  db.exec('DROP TABLE IF EXISTS review_decisions');
   db.exec(`CREATE TABLE review_decisions (
     id INTEGER PRIMARY KEY,
     attempt_id TEXT NOT NULL,

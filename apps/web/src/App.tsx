@@ -12,6 +12,8 @@ import { AiCheckDashboard } from './features/admin/AiCheckDashboard.js';
 import { createInstructorApi } from './features/admin/api.js';
 import { createEvidenceApi } from './features/evidence/evidenceApi.js';
 import { SimilarityDashboard } from './features/admin/SimilarityDashboard.js';
+import { createTriageApi } from './features/triage/findingsApi.js';
+import { TriageDashboard } from './features/triage/TriageDashboard.js';
 import { AuthProvider, useAuth } from './features/auth/AuthProvider.js';
 import { LoginPage } from './features/auth/LoginPage.js';
 import { createExamApi, ExamApiError, type ExamApi } from './features/exam/api.js';
@@ -111,7 +113,10 @@ function InstructorWorkspace({
   readonly onLogout: () => Promise<void>;
 }): React.ReactElement {
   const instructorApi = useMemo(() => createInstructorApi(getCsrfToken), [getCsrfToken]);
+  const triageApi = useMemo(() => createTriageApi(getCsrfToken), [getCsrfToken]);
   const evidenceApi = useMemo(() => createEvidenceApi('', getCsrfToken), [getCsrfToken]);
+  // null: triage (default). '': the detail dashboards. Otherwise the attempt opened from "Details".
+  const [details, setDetails] = useState<string | null>(null);
   return (
     <main className="workspace">
       <header className="topbar">
@@ -130,9 +135,31 @@ function InstructorWorkspace({
         <p className="eyebrow">Instructor workspace</p>
         <h1>Integrity review</h1>
       </section>
-      <SimilarityDashboard api={instructorApi} />
-      <AiCheckDashboard api={instructorApi} />
-      <AttemptTimelineDashboard api={instructorApi} evidence={evidenceApi} />
+      {details === null ? (
+        <>
+          <TriageDashboard api={triageApi} evidence={evidenceApi} onDetails={setDetails} />
+          <p className="triage-tools">
+            <button className="secondary-button" onClick={() => setDetails('')} type="button">
+              Details: full logs, similarity and AI checks
+            </button>
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="triage-tools">
+            <button className="secondary-button" onClick={() => setDetails(null)} type="button">
+              ← Back to triage
+            </button>
+          </p>
+          <AttemptTimelineDashboard
+            api={instructorApi}
+            evidence={evidenceApi}
+            initialAttemptId={details === '' ? undefined : details}
+          />
+          <SimilarityDashboard api={instructorApi} />
+          <AiCheckDashboard api={instructorApi} />
+        </>
+      )}
     </main>
   );
 }

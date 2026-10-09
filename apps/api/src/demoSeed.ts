@@ -10,6 +10,7 @@ import { createAuthPlugin, type AuthPlugin } from './modules/auth/auth.plugin.js
 import { ensureDemoAccount } from './modules/auth/demoAccounts.js';
 import { SupabaseAuthClient } from './modules/auth/supabaseAuth.js';
 import { createExamPlugin } from './modules/exam/exam.plugin.js';
+import { seedTriageStudents } from './demoTriageSeed.js';
 import type { SeedQuestionInput } from './modules/exam/exam.service.js';
 import { generateExamQuestions } from './modules/integrity/questionGenerator.js';
 
@@ -145,6 +146,10 @@ export async function seedDemo(options: SeedDemoOptions = {}): Promise<void> {
     `DELETE FROM liveness_challenges`,
     `DELETE FROM phone_enrollments`,
     `DELETE FROM voice_events`,
+    `DELETE FROM audio_transcripts`,
+    `DELETE FROM evidence_snapshots`,
+    `DELETE FROM review_decisions`,
+    `DELETE FROM finding_notes`,
     `DELETE FROM exam_attempts`,
     `DELETE FROM exam_assignments`,
     `DELETE FROM question_versions`,
@@ -306,6 +311,15 @@ export async function seedDemo(options: SeedDemoOptions = {}): Promise<void> {
         idempotencyKey: `seed-submit-${String(attemptId)}-1`,
       });
     }
+
+    // ── Triage demo: submitted attempts with synthetic timelines (review / glance / none) ──
+    await seedTriageStudents({
+      auth,
+      config,
+      examVersionId,
+      password: classmatePassword,
+      ensureAccount: (email, password) => ensureAccount(auth, email, password),
+    });
 
     console.log('');
     console.log('──────────────────────────────────────────');

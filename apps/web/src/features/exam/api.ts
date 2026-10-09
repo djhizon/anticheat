@@ -24,6 +24,8 @@ import {
   type TimelineFormat,
 } from '../integrity/timelineApi.js';
 import { createEvidenceApi } from '../evidence/evidenceApi.js';
+import { createFindingNotesApi } from '../triage/findingsApi.js';
+import type { AttemptFindings } from '@examguard/contracts/findings';
 
 export interface ExamProblem {
   readonly code:
@@ -352,6 +354,10 @@ export interface ExamApi {
   postEvidence?(attemptId: string, request: EvidenceUploadRequest): Promise<void>;
   listEvidence?(attemptId: string): Promise<readonly EvidenceSnapshotMeta[]>;
   loadEvidenceImage?(attemptId: string, id: string): Promise<string>;
+  /** Triage findings for the student's own submitted attempt (null until the engine has them). */
+  getFindings?(attemptId: string): Promise<AttemptFindings | null>;
+  /** The student's own note on one finding (≤ FINDING_NOTE_MAX characters; empty clears). */
+  saveFindingNote?(attemptId: string, findingId: string, note: string): Promise<void>;
 }
 
 export class BrowserExamApi implements ExamApi {
@@ -789,6 +795,18 @@ export class BrowserExamApi implements ExamApi {
 
   loadEvidenceImage(attemptId: string, id: string): Promise<string> {
     return this.evidence().loadEvidenceImage(attemptId, id);
+  }
+
+  private findings() {
+    return createFindingNotesApi(this.csrfTokenProvider, this.fetchImpl, this.baseUrl);
+  }
+
+  getFindings(attemptId: string): Promise<AttemptFindings | null> {
+    return this.findings().getFindings(attemptId);
+  }
+
+  saveFindingNote(attemptId: string, findingId: string, note: string): Promise<void> {
+    return this.findings().saveNote(attemptId, findingId, note);
   }
 
   async getTranscript(attemptId: string): Promise<readonly TranscriptEntry[]> {

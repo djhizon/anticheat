@@ -13,13 +13,16 @@ import type { InstructorTimelineApi } from './api.js';
 export function AttemptTimelineDashboard({
   api,
   evidence,
+  initialAttemptId,
 }: {
   readonly api: InstructorTimelineApi;
+  /** Attempt to open straight away (the triage screen's "Details" link). */
+  readonly initialAttemptId?: string | undefined;
   /** When provided, saved photos are shown inline in the log and as a gallery below it. */
   readonly evidence?: Pick<EvidenceApi, 'listEvidence' | 'loadEvidenceImage'> | undefined;
 }) {
   const [attempts, setAttempts] = useState<readonly InstructorAttemptSummary[] | null>(null);
-  const [selected, setSelected] = useState('');
+  const [selected, setSelected] = useState(initialAttemptId ?? '');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {

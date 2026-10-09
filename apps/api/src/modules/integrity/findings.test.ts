@@ -450,6 +450,8 @@ describe('IntegrityService.getFindings over a real database', () => {
     service.recordAppEvent('a1', 'flag:text_injected', 1);
     service.recordAppEvent('a1', 'flag:text_injected', 1);
     db.prepare(`UPDATE app_events SET created_at = ? WHERE rowid = 2`).run(at(500));
+    // Simulate a database from before the finding_notes migration.
+    db.exec('DROP TABLE IF EXISTS finding_notes');
     const before = service.getFindings('a1', 0)!;
     expect(before.findings[0]!.studentNote).toBeNull();
     db.exec(

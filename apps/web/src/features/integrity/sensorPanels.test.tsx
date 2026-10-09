@@ -74,7 +74,9 @@ it('shows students no calibration prompt, button, status or wording while live',
     }),
   );
   expect(container.textContent).toContain('Camera active');
-  expect(container.textContent).toContain('Gaze details');
+  // The gaze dial and statistics are not shown to students (the tracker still runs).
+  expect(container.textContent).not.toContain('Gaze details');
+  expect(container.querySelector('.gaze-panel')).toBeNull();
   expect(container.textContent).not.toMatch(/calibrat|confidence|look at the|dot/i);
   for (const button of container.querySelectorAll('button'))
     expect(button.textContent).not.toMatch(/calibrat/i);
