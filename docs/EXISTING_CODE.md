@@ -17,6 +17,18 @@ checklist under **"Existing code and assets"**.
 > (`google/owlvit-base-patch32`, Apache-2.0) via Hugging Face Transformers,
 > MediaPipe Tasks Vision, Apple Vision (iOS), and npm dependencies in
 > `package-lock.json`.
+>
+> AI development tools: Claude Code (Anthropic) was used throughout the
+> hackathon for planning, implementation, tests, code review and docs, with every
+> change reviewed and committed incrementally in the public history.
+
+## AI development tools
+
+- **Claude Code (Anthropic)** — used during the hackathon as a coding assistant:
+  planning, implementing fixes and features, writing tests, independent code
+  and security reviews, and documentation. Work was split into small packages,
+  each validated (format, lint, typecheck, tests) and committed separately, so
+  every AI-assisted change is visible in `git log` and `CHANGELOG.md`.
 
 ## Pre-existing (before the hackathon)
 
