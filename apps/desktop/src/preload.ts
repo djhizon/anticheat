@@ -8,6 +8,14 @@ contextBridge.exposeInMainWorld('electronExam', {
   listAppTargets: () => ipcRenderer.invoke('list-app-targets'),
   closeAppTarget: (id: string, mode: 'quit' | 'force') => ipcRenderer.invoke('close-app-target', { id, mode }),
   reportRenderFailure: () => ipcRenderer.send('renderer-failure'),
+  onAppSnapshot: (
+    callback: (snapshot: { attemptId: string; foregroundApp: string; displayCount: number }) => void,
+  ) => {
+    const listener = (_event: unknown, snapshot: { attemptId: string; foregroundApp: string; displayCount: number }) =>
+      callback(snapshot);
+    ipcRenderer.on('app-snapshot', listener);
+    return () => ipcRenderer.removeListener('app-snapshot', listener);
+  },
   onEmergencyExit: (callback: () => void) =>
     ipcRenderer.on('emergency-exit', callback),
 });

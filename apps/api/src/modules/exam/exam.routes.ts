@@ -390,11 +390,14 @@ export class ExamRoutes {
       // ── Pack 8: Native companion events ───────────────────────────────────
       const eventsMatch = eventsPattern.exec(path);
       if (method === 'PATCH' && eventsMatch !== null && this.integrity !== null) {
+        const principal = this.requireStudent(request);
+        this.boundary.validateUnsafe(request, principal);
         const attemptId = parsePathId<'AttemptId'>(eventsMatch[1] ?? '', 'Attempt ID');
+        await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
         const body = parseObject(request.body, 'Events body required');
         this.integrity.recordAppEvent(
           String(attemptId),
-          String(body.foregroundApp ?? 'unknown'),
+          String(body.foregroundApp ?? body.event ?? 'unknown').slice(0, 200),
           Number(body.displayCount ?? 1),
         );
         return jsonResponse(request, this.config.allowedOrigins, 200, { ok: true });

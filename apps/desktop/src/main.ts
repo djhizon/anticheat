@@ -3,12 +3,10 @@ import { app, BrowserWindow, screen, ipcMain, Menu, globalShortcut, session, sys
 
 import { execSync } from 'child_process';
 import * as path from 'path';
-import * as http from 'http';
 import { appendFileSync, existsSync, statSync, writeFileSync } from 'fs';
 import { createAppController, createHelperCall } from './appControl';
 
 const WEB_URL = 'http://127.0.0.1:5173/';
-const API_URL = 'http://127.0.0.1:3000';
 const APP_WATCH_INTERVAL_MS = 2000;
 
 let mainWindow: BrowserWindow | null = null;
@@ -55,16 +53,9 @@ function startWatcher(attemptId: string): void {
   watcherInterval = setInterval(() => {
     const app = getForegroundApp();
     const displays = getDisplayCount();
-    const payload = JSON.stringify({ foregroundApp: app, displayCount: displays });
-    // Fire and forget PATCH to API
-    const req = http.request(
-      `${API_URL}/exam/attempts/${attemptId}/events`,
-      { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } },
-      () => {}
-    );
-    req.on('error', () => {});
-    req.write(payload);
-    req.end();
+    // Hand the snapshot to the renderer, which posts it with the student's
+    // session cookie and CSRF token. The main process holds no credentials.
+    mainWindow?.webContents.send('app-snapshot', { attemptId, foregroundApp: app, displayCount: displays });
   }, APP_WATCH_INTERVAL_MS);
 }
 

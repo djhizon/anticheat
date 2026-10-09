@@ -517,6 +517,24 @@ describe('exam delivery boundary', () => {
     expect((await routes.handle(studentRequest(owner, 'GET', `/exam/attempts/${attemptId}/phone-status`))).body).toEqual({ active: true });
   });
 
+  it('requires a session, CSRF and attempt ownership to record desktop events', async () => {
+    const owner = await registerStudent('events@example.test');
+    const other = await registerStudent('other@example.test');
+    const seeded = await seedExam();
+    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: owner.userId });
+    const started = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
+    const integrity = { recordAppEvent: vi.fn() };
+    const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity as unknown as IntegrityService);
+    const request = studentRequest(owner, 'PATCH', `/exam/attempts/${attemptId}/events`, { foregroundApp: 'Discord', displayCount: 2 });
+    expect((await routes.handle({ method: 'PATCH', path: request.path, headers: {}, body: request.body })).status).toBe(401);
+    expect((await routes.handle({ ...request, headers: { ...request.headers, 'x-csrf-token': undefined } })).status).toBe(403);
+    expect((await routes.handle(studentRequest(other, 'PATCH', request.path, request.body))).status).toBe(404);
+    expect(integrity.recordAppEvent).not.toHaveBeenCalled();
+    expect((await routes.handle(request)).status).toBe(200);
+    expect(integrity.recordAppEvent).toHaveBeenCalledWith(attemptId, 'Discord', 2);
+  });
+
   it('checks audio ownership before inference and reports inference failures instead of empty success', async () => {
     const owner = await registerStudent('audio@example.test');
     const other = await registerStudent('other@example.test');
