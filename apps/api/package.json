@@ -9,7 +9,7 @@
     "build": "npm run typecheck",
     "test:e2e": "vitest run --config ../../vitest.config.ts src/server.test.ts",
     "test": "vitest run --config ../../vitest.config.ts src",
-    "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --useUnknownInCatchVariables --forceConsistentCasingInFileNames --skipLibCheck src/*.ts src/db/*.ts src/modules/auth/*.ts src/modules/exam/*.ts",
+    "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --useUnknownInCatchVariables --forceConsistentCasingInFileNames --skipLibCheck src/*.ts src/db/*.ts src/modules/auth/*.ts src/modules/exam/*.ts src/modules/integrity/localVision.worker.ts",
     "build:bundle": "node ../../scripts/build-api-bundle.mjs",
     "smoke:bundle": "node ../../scripts/api-bundle-smoke.mjs"
   },
@@ -17,6 +17,10 @@
     "vite-node": "^3.2.4"
   },
   "dependencies": {
-    "hash-wasm": "4.12.0"
+    "hash-wasm": "4.12.0",
+    "jpeg-js": "0.4.4"
+  },
+  "optionalDependencies": {
+    "onnxruntime-node": "1.23.2"
   }
 }

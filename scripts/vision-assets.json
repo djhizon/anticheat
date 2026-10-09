@@ -9,6 +9,9 @@
     "vision_wasm_nosimd_internal.js",
     "vision_wasm_nosimd_internal.wasm"
   ],
+  "ortPackageName": "onnxruntime-web",
+  "ortPackageVersion": "1.23.2",
+  "ortWasmFiles": ["ort-wasm-simd-threaded.wasm"],
   "models": [
     {
       "target": "vision/models/face_landmarker.task",
@@ -19,10 +22,49 @@
       "target": "vision/models/efficientdet_lite0.tflite",
       "url": "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/latest/efficientdet_lite0.tflite?generation=1682636015897115",
       "sha256": "0720bf247bd76e6594ea28fa9c6f7c5242be774818997dbbeffc4da460c723bb"
+    },
+    {
+      "target": "vision/models/dfine_s_obj365_uint8.onnx",
+      "url": "https://huggingface.co/onnx-community/dfine_s_obj365-ONNX/resolve/a61e4cdfe4f9d3188a305d91e37dbf38688ffbb8/onnx/model_quantized.onnx",
+      "sha256": "6f4343599a65e57cc299980db0cca320d7fc27e92c57d682a12fe0d7daf891db",
+      "license": "Apache-2.0 (D-FINE-S Objects365, ustc-community/dfine-small-obj365)"
     }
   ],
+  "localModels": [
+    {
+      "id": "dfine-x",
+      "target": "dfine_x_obj365.onnx",
+      "url": "https://huggingface.co/onnx-community/dfine_x_obj365-ONNX/resolve/8b0ccdfc94d2a405acaaeceade13b6d2b4fccd16/onnx/model.onnx",
+      "sha256": "8499ca27e2ee289f0b664a2def6c3d574ae2765186460f18454969cf0d14e137",
+      "license": "Apache-2.0 (D-FINE-X Objects365, ustc-community/dfine-xlarge-obj365)"
+    },
+    {
+      "id": "dfine-l",
+      "target": "dfine_l_obj365.onnx",
+      "url": "https://huggingface.co/onnx-community/dfine_l_obj365-ONNX/resolve/32323e9a0c74b22803a2ad5b315a8fed61801e6a/onnx/model.onnx",
+      "sha256": "cd0dfa92a2e0e2ab3d4a7c2e6252ebc094aa77b67f2f9dc1a010dd350a9a2f3e",
+      "license": "Apache-2.0 (D-FINE-L Objects365, ustc-community/dfine-large-obj365)"
+    },
+    {
+      "id": "dfine-m",
+      "target": "dfine_m_obj365.onnx",
+      "url": "https://huggingface.co/onnx-community/dfine_m_obj365-ONNX/resolve/f78e69849ffb6dfacbc648b61a11b3af83a06204/onnx/model.onnx",
+      "sha256": "2fb7d73e2df5be2b1032381d191d6d26d1bca44b23d3eb79af1cbd9e3b19356c",
+      "license": "Apache-2.0 (D-FINE-M Objects365, ustc-community/dfine-medium-obj365)"
+    },
+    {
+      "id": "dfine-s",
+      "target": "dfine_s_obj365.onnx",
+      "url": "https://huggingface.co/onnx-community/dfine_s_obj365-ONNX/resolve/a61e4cdfe4f9d3188a305d91e37dbf38688ffbb8/onnx/model.onnx",
+      "sha256": "372feaa33ac6ba67d7df8589628f6abc395b3c6981c4edc70dfcfe2949751120",
+      "license": "Apache-2.0 (D-FINE-S Objects365, ustc-community/dfine-small-obj365)"
+    }
+  ],
+  "defaultLocalModel": "dfine-x",
   "limits": {
     "maxBytes": 16000000,
-    "timeoutMs": 120000
+    "timeoutMs": 120000,
+    "localMaxBytes": 300000000,
+    "localTimeoutMs": 900000
   }
 }

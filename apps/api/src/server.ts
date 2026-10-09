@@ -405,6 +405,7 @@ export function createApiServer(
           }
           activeSockets.clear();
           stopSharedVisionClient();
+          exam.localVision?.stop();
           if (sweepTimer !== undefined) clearInterval(sweepTimer);
 
           try {

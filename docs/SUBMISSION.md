@@ -167,6 +167,31 @@ cannot. It gives instant feedback (liveness, phone detection) without a round
 trip, and it costs nothing per student, so a school can use it for every quiz,
 not only high-stakes exams.
 
+## Measured on synthetic sessions
+
+Synthetic data only, not real students: `npm run eval:findings` replays 22 generated attempts
+(9 honest, 9 staged cheats, 2 hard borderline cases each way, seeded and noisy) through the
+findings engine. The main set catches 9 of 9 staged cheats and flags 3 of 9 honest sessions; both
+hard cheats are missed and one hard honest case is flagged. Thresholds were not tuned to this set;
+the full tables, the honest reading and five recommendations are in
+[eval-findings.md](eval-findings.md).
+
+| Finding                  | Staged cheats detected | Honest sessions flagged | Hard cheats | Hard honest |
+| ------------------------ | ---------------------- | ----------------------- | ----------- | ----------- |
+| `notes_or_second_screen` | 2 / 2                  | 2 / 9                   | 0 / 1       | 0 / 2       |
+| `second_person`          | 1 / 1                  | 1 / 9                   | -           | 1 / 2       |
+| `external_answer_entry`  | 2 / 2                  | 0 / 9                   | -           | 0 / 2       |
+| `phone_use`              | 2 / 2                  | 0 / 9                   | 0 / 1       | 0 / 2       |
+| `left_exam`              | 1 / 1                  | 0 / 9                   | -           | 0 / 2       |
+| `environment_risk`       | 1 / 1                  | 0 / 9                   | -           | 0 / 2       |
+
+| Cohort      | Sessions | none | glance | review |
+| ----------- | -------- | ---- | ------ | ------ |
+| honest      | 9        | 6    | 1      | 2      |
+| cheat       | 9        | 0    | 2      | 7      |
+| hard_honest | 2        | 1    | 1      | 0      |
+| hard_cheat  | 2        | 2    | 0      | 0      |
+
 ## 60-second demo video shot list
 
 1. **0–8 s:** the problem in one line over the sign-in screen.

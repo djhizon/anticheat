@@ -33,6 +33,18 @@ export interface ExamProblem {
   readonly message: string;
 }
 
+export interface LocalVisionStatus {
+  readonly available: boolean;
+  readonly model: string | null;
+}
+
+export interface LocalVisionResult {
+  readonly model: string;
+  readonly inferenceMs: number;
+  /** Detections in view coordinates; validated by the wearables engine. */
+  readonly detections: unknown;
+}
+
 export class ExamApiError extends Error {
   constructor(
     readonly problem: ExamProblem,
@@ -344,6 +356,15 @@ export interface ExamApi {
     imageBase64: string,
     signal?: AbortSignal,
   ): Promise<readonly { readonly label: string; readonly score: number }[]>;
+  /** Desktop app only: is the on-device (127.0.0.1) wearables detector available? */
+  getLocalVisionStatus?(signal?: AbortSignal): Promise<LocalVisionStatus>;
+  /** Desktop app only: run the local detector on one 640x640 JPEG view (never leaves the device). */
+  postLocalVision?(
+    attemptId: string,
+    imageJpegBase64: string,
+    view: 'full' | 'head',
+    signal?: AbortSignal,
+  ): Promise<LocalVisionResult>;
   getTranscript?(attemptId: string): Promise<readonly TranscriptEntry[]>;
   /** Unified chronological integrity log (same data the instructor sees). */
   getTimeline?(attemptId: string): Promise<readonly IntegrityTimelineEntry[]>;
@@ -760,6 +781,37 @@ export class BrowserExamApi implements ExamApi {
       (item): item is { label: string; score: number } =>
         isRecord(item) && isString(item.label) && typeof item.score === 'number',
     );
+  }
+
+  async getLocalVisionStatus(signal?: AbortSignal): Promise<LocalVisionStatus> {
+    const body = await this.request('/exam/local-vision-status', 'GET', undefined, false, signal);
+    return isRecord(body) && body.available === true && isString(body.model)
+      ? { available: true, model: body.model }
+      : { available: false, model: null };
+  }
+
+  async postLocalVision(
+    attemptId: string,
+    imageJpegBase64: string,
+    view: 'full' | 'head',
+    signal?: AbortSignal,
+  ): Promise<LocalVisionResult> {
+    const body = await this.request(
+      `/exam/attempts/${encodeURIComponent(attemptId)}/local-vision`,
+      'POST',
+      { imageJpegBase64, view },
+      true,
+      signal,
+    );
+    if (
+      !isRecord(body) ||
+      !isString(body.model) ||
+      typeof body.inferenceMs !== 'number' ||
+      !Array.isArray(body.detections)
+    ) {
+      throw new ExamApiError(fallbackProblem);
+    }
+    return { model: body.model, inferenceMs: body.inferenceMs, detections: body.detections };
   }
 
   async getTransparencyReport(attemptId: string): Promise<readonly TransparencyEvent[]> {

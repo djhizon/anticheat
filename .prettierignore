@@ -6,3 +6,4 @@ apps/desktop/package-lock.json
 .claude/
 supabase/.temp/
 apps/desktop/release/**
+apps/api/src/modules/integrity/eval-sessions/*.json

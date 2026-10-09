@@ -38,6 +38,10 @@
         "to": "api"
       },
       {
+        "from": "../api/vendor/vision-models",
+        "to": "vision-models"
+      },
+      {
         "from": "../web/dist",
         "to": "web",
         "filter": [

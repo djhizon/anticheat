@@ -57,6 +57,20 @@ import { buildFindings } from './findings.js';
 /** Findings are recomputed from the timeline at most this often per attempt. */
 export const FINDINGS_CACHE_MS = 30_000;
 
+/** Student-facing text for the on-device wearables check (glasses and watches are ordinary). */
+const LOCAL_VISION_TEXT: Readonly<Record<string, readonly ['low' | 'medium', string]>> = {
+  'flag:earbuds_detected': ['medium', 'On-device camera check: possible earbuds (a lead only)'],
+  'flag:headphones_detected': [
+    'medium',
+    'On-device camera check: possible headphones (a lead only)',
+  ],
+  'flag:glasses_detected': ['low', 'Glasses worn (normal, information only)'],
+  'flag:watch_detected': ['low', 'A wristwatch was visible (information only)'],
+  'flag:phone_detected_detailed': ['medium', 'On-device camera check: possible phone in view'],
+  'flag:notes_detected': ['medium', 'On-device camera check: possible paper notes in view'],
+  'flag:extra_person_detected': ['medium', 'On-device camera check: possibly a second person'],
+};
+
 const GAZE_DIRECTIONS = new Set([
   'left',
   'right',
@@ -157,6 +171,9 @@ export class IntegrityService {
           severity: 'low',
           description: 'Camera lighting was poor for a while (face tracking may be less reliable)',
         });
+      } else if (LOCAL_VISION_TEXT[app.foreground_app] !== undefined) {
+        const [severity, description] = LOCAL_VISION_TEXT[app.foreground_app]!;
+        events.push({ timestamp: app.created_at, type: 'VISION', severity, description });
       } else if (app.foreground_app === 'flag:brightness_restored') {
         events.push({
           timestamp: app.created_at,

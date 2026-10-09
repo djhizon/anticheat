@@ -10,6 +10,7 @@ import { IntegrityRepository } from '../integrity/integrityRepository.js';
 import { IntegrityService } from '../integrity/integrityService.js';
 import { detectObjectsRemotely } from '../integrity/backendVision.js';
 import { deleteRecordingSegments, isRecordingUploadConfigured } from '../integrity/graph.js';
+import { createLocalVision, type LocalVisionDetector } from '../integrity/localVision.js';
 import { ExamRepository } from './exam.repository.js';
 import { ExamRoutes } from './exam.routes.js';
 import { ExamService } from './exam.service.js';
@@ -27,6 +28,8 @@ export interface ExamPlugin {
   readonly routes: ExamRoutes;
   readonly integrity: IntegrityService | null;
   readonly phonePresence: PhonePresenceService;
+  /** Desktop app only (LOCAL_VISION=true): the on-device detector, else null. */
+  readonly localVision: LocalVisionDetector | null;
 }
 
 export function createExamPlugin(
@@ -82,6 +85,9 @@ export function createExamPlugin(
       : null,
   );
 
+  const localVision = config.localVisionEnabled
+    ? createLocalVision({ modelId: config.localVisionModel, modelDir: config.localVisionModelDir })
+    : null;
   const routes = new ExamRoutes(
     service,
     boundary,
@@ -90,7 +96,8 @@ export function createExamPlugin(
     phonePresence,
     config.backendVisionEnabled ? detectObjectsRemotely : null,
     new ReviewRepository(database),
+    localVision,
   );
 
-  return { repository, service, routes, integrity, phonePresence };
+  return { repository, service, routes, integrity, phonePresence, localVision };
 }

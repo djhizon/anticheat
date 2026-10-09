@@ -633,3 +633,58 @@ describe('input behaviour persistence', () => {
     expect(log?.map((e) => e.summary)).toEqual(['Pointer outside the exam window for 12 s']);
   });
 });
+
+describe('on-device wearables check', () => {
+  const app = (name: string, minute: number) => ({
+    created_at: `2026-09-15T00:0${minute}:00.000Z`,
+    foreground_app: `flag:${name}`,
+    display_count: 1,
+  });
+
+  it('logs earbuds and headphones as camera notices, glasses and watches as information', () => {
+    const entries = buildTimeline(
+      rows({
+        apps: [
+          app('earbuds_detected', 1),
+          app('headphones_detected', 2),
+          app('glasses_detected', 3),
+          app('watch_detected', 4),
+        ],
+      }),
+    ).filter((e) => e.source === 'camera');
+    expect(entries.map((e) => [e.kind, e.severity])).toEqual([
+      ['earbuds_in_view', 'notice'],
+      ['headphones_in_view', 'notice'],
+      ['glasses_worn', 'info'],
+      ['watch_visible', 'info'],
+    ]);
+    expect(entries[0]!.summary).toContain('a lead only');
+    expect(entries[2]!.summary).toContain('not a conduct issue');
+    expect(entries[3]!.summary).toContain('information only');
+  });
+
+  it('describes earbuds and headphones evidence photos', () => {
+    const photos = buildTimeline(
+      rows({
+        evidence: [
+          {
+            id: 'e1',
+            source: 'webcam',
+            trigger: 'earbuds_detected',
+            captured_at: '2026-09-15T00:02:00.000Z',
+          },
+          {
+            id: 'e2',
+            source: 'webcam',
+            trigger: 'headphones_detected',
+            captured_at: '2026-09-15T00:03:00.000Z',
+          },
+        ],
+      }),
+    ).filter((e) => e.kind === 'evidence_snapshot');
+    expect(photos.map((e) => e.summary)).toEqual([
+      'Photo saved: possible earbuds',
+      'Photo saved: possible headphones',
+    ]);
+  });
+});

@@ -12,6 +12,8 @@ export const evidenceTriggerLabel: Readonly<Record<string, string>> = {
   left_frame: 'Left the frame (desk camera)',
   hands_not_visible: 'Hands not visible (desk camera)',
   text_injected: 'Long answer appeared at once',
+  earbuds_detected: 'Possible earbuds',
+  headphones_detected: 'Possible headphones',
 };
 
 const sourceLabel: Readonly<Record<string, string>> = {

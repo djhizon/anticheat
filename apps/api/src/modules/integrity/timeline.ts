@@ -211,6 +211,51 @@ const FLAG_MAP: Record<string, AppMapping> = {
     severity: 'notice',
     summary: 'The browser camera check reported a possible phone in view',
   },
+  earbuds_detected: {
+    source: 'camera',
+    kind: 'earbuds_in_view',
+    severity: 'notice',
+    summary:
+      'The on-device camera check reported possible earbuds (a lead only; small objects are often missed or misread)',
+  },
+  headphones_detected: {
+    source: 'camera',
+    kind: 'headphones_in_view',
+    severity: 'notice',
+    summary: 'The on-device camera check reported possible headphones (a lead only)',
+  },
+  glasses_detected: {
+    source: 'camera',
+    kind: 'glasses_worn',
+    severity: 'info',
+    summary:
+      'Glasses worn. This is normal and not a conduct issue; the check cannot tell smart glasses from ordinary ones',
+  },
+  watch_detected: {
+    source: 'camera',
+    kind: 'watch_visible',
+    severity: 'info',
+    summary:
+      'A wristwatch was visible. The check cannot tell a smartwatch from an ordinary watch, so this is information only',
+  },
+  phone_detected_detailed: {
+    source: 'camera',
+    kind: 'phone_in_view',
+    severity: 'notice',
+    summary: 'The detailed on-device camera check reported a possible phone in view',
+  },
+  notes_detected: {
+    source: 'camera',
+    kind: 'notes_in_view',
+    severity: 'notice',
+    summary: 'The on-device camera check reported what may be paper notes in view (a lead only)',
+  },
+  extra_person_detected: {
+    source: 'camera',
+    kind: 'extra_person_in_view',
+    severity: 'notice',
+    summary: 'The on-device camera check reported what may be a second person in view',
+  },
   camera_disconnected: {
     source: 'camera',
     kind: 'camera_disconnected',
@@ -545,6 +590,8 @@ const EVIDENCE_TEXT: Record<string, string> = {
   left_frame: 'nobody in view of the desk camera',
   hands_not_visible: 'hands not visible to the desk camera',
   text_injected: 'a long answer appeared at once',
+  earbuds_detected: 'possible earbuds',
+  headphones_detected: 'possible headphones',
 };
 
 const EVIDENCE_SOURCE: Record<string, IntegrityTimelineSource> = {

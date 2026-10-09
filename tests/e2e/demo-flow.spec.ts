@@ -16,6 +16,8 @@ const benignConsole: readonly RegExp[] = [
   /status of 401.*\/auth\/me/,
   // TensorFlow Lite logs an informational line through console.error.
   /^INFO: Created TensorFlow Lite XNNPACK delegate/,
+  // onnxruntime-web (wearables worker) warns once at start-up that WASM exposes no CPU vendor id.
+  /\[W:onnxruntime:.*cpuid_info\.cc.*Unknown CPU vendor/,
   // On-device models are not downloaded in CI and fall back to a "model unavailable" state.
   /Failed to load resource.*(\.task|\.tflite|\.wasm|\.bin)/i,
   /(model|wasm|whisper|mediapipe).*(load|fetch|unavailable|not found)/i,

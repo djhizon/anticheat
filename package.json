@@ -33,6 +33,7 @@
     "vision:prepare": "node scripts/prepare-vision-assets.mjs",
     "vision:verify": "node scripts/prepare-vision-assets.mjs --verify",
     "vision:smoke": "node scripts/vision-smoke.mjs",
+    "eval:findings": "vite-node scripts/eval-findings.mjs",
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "tsc -p packages/contracts/tsconfig.json && npm run typecheck --workspace @examguard/api && tsc -p apps/api/tsconfig.json && tsc -p apps/web/tsconfig.json",
@@ -42,7 +43,7 @@
     "test:e2e": "npm run test:e2e --workspace @examguard/api",
     "build": "npm run build --workspace @examguard/api && npm run build --workspace @examguard/web",
     "validate": "npm run format:check && npm run lint && npm run typecheck && npm test",
-    "package:mac": "npm run vision:prepare && npm run build:whisper-portable && npm run build --workspace @examguard/web && npm run build:bundle --workspace @examguard/api && npm run build --workspace @examguard/desktop && npm run pack:judge --workspace @examguard/desktop",
+    "package:mac": "node scripts/prepare-vision-assets.mjs --local && npm run build:whisper-portable && npm run build --workspace @examguard/web && npm run build:bundle --workspace @examguard/api && npm run build --workspace @examguard/desktop && npm run pack:judge --workspace @examguard/desktop",
     "test:electron": "playwright test --config tests/electron/playwright.config.ts",
     "test:e2e:demo": "playwright test --config tests/e2e/demo.playwright.config.ts"
   },

@@ -20,6 +20,7 @@ test-results/
 /apps/api/vendor/whisper.cpp/
 /apps/api/vendor/whisper.cpp-portable/
 /apps/api/vendor/venv/
+/apps/api/vendor/vision-models/
 /apps/api/data/
 /apps/desktop/out*/
 /apps/desktop/native-bin/

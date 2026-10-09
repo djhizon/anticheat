@@ -40,7 +40,9 @@ export default defineConfig({
   optimizeDeps: {
     // Pre-bundle MediaPipe on first start so it doesn't stall the page on load
     include: ['@mediapipe/tasks-vision'],
-    exclude: ['@mediapipe/tasks-vision/vision_wasm_module_internal.js'],
+    // onnxruntime-web locates its .wasm next to its own module (import.meta.url); pre-bundling
+    // would move the module away from the file.
+    exclude: ['@mediapipe/tasks-vision/vision_wasm_module_internal.js', 'onnxruntime-web'],
   },
   server: {
     port: 5173,

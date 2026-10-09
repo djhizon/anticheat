@@ -15,8 +15,12 @@ checklist under **"Existing code and assets"**.
 > Third-party assets: whisper.cpp (MIT, built from upstream at setup time, not
 > committed), the OpenAI Whisper `ggml-base` model, Google OWL-ViT
 > (`google/owlvit-base-patch32`, Apache-2.0) via Hugging Face Transformers,
-> MediaPipe Tasks Vision, Apple Vision (iOS), and npm dependencies in
-> `package-lock.json`.
+> D-FINE Objects365 detectors (`ustc-community/dfine-xlarge-obj365` and
+> `dfine-small-obj365`, Apache-2.0; ONNX exports from `onnx-community`,
+> downloaded and SHA-256 checked at prepare time, not committed) run with
+> ONNX Runtime (`onnxruntime-node`, `onnxruntime-web`, MIT) and decoded with
+> `jpeg-js` (BSD-3-Clause), MediaPipe Tasks Vision, Apple Vision (iOS), and
+> npm dependencies in `package-lock.json`.
 >
 > AI development tools: Claude Code (Anthropic) was used throughout the
 > hackathon for planning, implementation, tests, code review and docs, with every

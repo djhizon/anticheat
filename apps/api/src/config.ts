@@ -14,6 +14,15 @@ export interface ApiConfig {
   readonly csrfHeaderName: string;
   readonly freshExamGenerationEnabled: boolean;
   readonly backendVisionEnabled: boolean;
+  /**
+   * Desktop app only (LOCAL_VISION=1): the on-device wearables/object detector (onnxruntime-node)
+   * behind 127.0.0.1-only routes. Frames never leave the machine.
+   */
+  readonly localVisionEnabled: boolean;
+  /** VISION_MODEL: which local detector to load (see LOCAL_VISION_MODELS). */
+  readonly localVisionModel: string;
+  /** LOCAL_VISION_MODEL_DIR: folder holding the prepared .onnx files. */
+  readonly localVisionModelDir: string | undefined;
   readonly geminiKeys: readonly string[];
   readonly geminiModel: string;
   readonly geminiEmbeddingModel: string;
@@ -195,6 +204,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     csrfHeaderName: 'x-csrf-token',
     freshExamGenerationEnabled,
     backendVisionEnabled: parseBoolean(env.ENABLE_BACKEND_VISION, false, 'ENABLE_BACKEND_VISION'),
+    localVisionEnabled: parseBoolean(env.LOCAL_VISION, false, 'LOCAL_VISION'),
+    localVisionModel: env.VISION_MODEL?.trim() || 'dfine-x',
+    localVisionModelDir: env.LOCAL_VISION_MODEL_DIR?.trim() || undefined,
     geminiKeys: env.GEMINI_API_KEYS
       ? env.GEMINI_API_KEYS.split(',')
           .map((k) => k.trim())

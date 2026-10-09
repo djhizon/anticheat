@@ -11,17 +11,58 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const publicRoot = resolve(repoRoot, 'apps/web/public');
 const manifestPath = resolve(repoRoot, 'scripts/vision-assets.json');
 const packageJsonPath = resolve(repoRoot, 'apps/web/package.json');
+// Desktop-only detector models (hundreds of MB): kept out of the web bundle and the repo.
+const localRoot = resolve(repoRoot, 'apps/api/vendor/vision-models');
+
+/** Model hosts we download from, and the CDN hosts each may redirect to. */
+const OFFICIAL_HOSTS = {
+  'storage.googleapis.com': () => false,
+  'huggingface.co': (host) =>
+    host === 'huggingface.co' || host.endsWith('.huggingface.co') || host.endsWith('.hf.co'),
+};
+const MAX_REDIRECTS = 3;
 
 async function readJson(filePath) {
   return JSON.parse(await readFile(filePath, 'utf8'));
 }
 
-function publicPath(target) {
-  const absolutePath = resolve(publicRoot, target);
-  if (absolutePath !== publicRoot && !absolutePath.startsWith(`${publicRoot}${sep}`)) {
-    throw new Error(`Asset target escapes the web public directory: ${target}`);
+function containedPath(root, target) {
+  const absolutePath = resolve(root, target);
+  if (absolutePath === root || !absolutePath.startsWith(`${root}${sep}`)) {
+    throw new Error(`Asset target escapes ${relative(repoRoot, root)}: ${target}`);
   }
   return absolutePath;
+}
+
+function publicPath(target) {
+  return containedPath(publicRoot, target);
+}
+
+function localPath(target) {
+  return containedPath(localRoot, target);
+}
+
+/** Follows at most MAX_REDIRECTS hops, each HTTPS and on the origin's allowed CDN hosts. */
+async function fetchOfficial(url, signal) {
+  const origin = new URL(url);
+  const allowRedirect = OFFICIAL_HOSTS[origin.hostname];
+  if (origin.protocol !== 'https:' || allowRedirect === undefined) {
+    throw new Error(`Refusing non-official model URL: ${url}`);
+  }
+  let current = origin;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+    const response = await fetch(current, { signal, redirect: 'manual' });
+    if (response.status < 300 || response.status >= 400) return response;
+    const location = response.headers.get('location');
+    await response.body?.cancel();
+    if (!location) throw new Error(`redirect without a location (HTTP ${response.status})`);
+    const next = new URL(location, current);
+    if (next.protocol !== 'https:' || !allowRedirect(next.hostname)) {
+      throw new Error(`refusing redirect to ${next.hostname}`);
+    }
+    current = next;
+  }
+  throw new Error('too many redirects');
 }
 
 function temporaryPath(target) {
@@ -86,6 +127,34 @@ async function resolveVisionPackage(manifest) {
   return packageRoot;
 }
 
+/**
+ * onnxruntime-web's WASM runtime for the browser wearables worker, served from /vision/ort so
+ * the worker never has to locate files next to a bundled module. Same version pin check as above.
+ */
+async function installedOrtFiles(manifest) {
+  // The package's exports map hides package.json, so resolve its main entry and walk up.
+  const entry = fileURLToPath(
+    import.meta.resolve(`${manifest.ortPackageName}/wasm`, pathToFileURL(packageJsonPath).href),
+  );
+  const packageRoot = resolve(dirname(entry), '..');
+  const packageInfo = await readJson(resolve(packageRoot, 'package.json'));
+  const webPackage = await readJson(packageJsonPath);
+  if (packageInfo.version !== manifest.ortPackageVersion) {
+    throw new Error(
+      `Expected ${manifest.ortPackageName}@${manifest.ortPackageVersion}; found ${packageInfo.version}`,
+    );
+  }
+  if (webPackage.dependencies?.[manifest.ortPackageName] !== manifest.ortPackageVersion) {
+    throw new Error(
+      `apps/web/package.json must pin ${manifest.ortPackageName} to ${manifest.ortPackageVersion}`,
+    );
+  }
+  return manifest.ortWasmFiles.map((file) => ({
+    source: resolve(packageRoot, 'dist', file),
+    target: publicPath(`vision/ort/${file}`),
+  }));
+}
+
 async function installedWasmFiles(packageRoot, manifest) {
   const wasmRoot = resolve(packageRoot, 'wasm');
   const installed = (await readdir(wasmRoot, { withFileTypes: true }))
@@ -124,7 +193,7 @@ async function downloadModel(model, target, limits) {
   let handle;
 
   try {
-    const response = await fetch(model.url, { signal: controller.signal, redirect: 'error' });
+    const response = await fetchOfficial(model.url, controller.signal);
     if (!response.ok) {
       throw new Error(`download returned HTTP ${response.status}`);
     }
@@ -167,8 +236,7 @@ async function downloadModel(model, target, limits) {
   }
 }
 
-async function prepareModel(model, limits) {
-  const target = publicPath(model.target);
+async function prepareModel(model, limits, target = publicPath(model.target)) {
   const existing = await existingDigest(target, limits.maxBytes);
   if (existing?.digest === model.sha256) {
     console.log(`Verified existing ${relative(repoRoot, target)}`);
@@ -186,10 +254,6 @@ async function prepareModel(model, limits) {
     }
   }
 
-  const url = new URL(model.url);
-  if (url.protocol !== 'https:' || url.hostname !== 'storage.googleapis.com') {
-    throw new Error(`Refusing non-official model URL: ${model.url}`);
-  }
   await downloadModel(model, target, limits);
   console.log(`Downloaded and verified ${relative(repoRoot, target)}`);
 }
@@ -217,18 +281,67 @@ async function verifyAssets(manifest, wasmAssets) {
   );
 }
 
-async function main() {
-  const args = process.argv.slice(2);
-  if (args.length > 1 || (args.length === 1 && args[0] !== '--verify')) {
-    throw new Error('Usage: node scripts/prepare-vision-assets.mjs [--verify]');
+/**
+ * `--local` adds the desktop app's on-device detector (VISION_MODEL or the manifest default);
+ * `--local=dfine-x,dfine-l` or `--local=all` picks explicitly.
+ */
+export function selectLocalModels(manifest, value, env = process.env) {
+  if (value === undefined) return [];
+  const wanted =
+    value === '' ? [env.VISION_MODEL?.trim() || manifest.defaultLocalModel] : value.split(',');
+  if (wanted.includes('all')) return manifest.localModels;
+  return wanted.map((id) => {
+    const model = manifest.localModels.find((entry) => entry.id === id.trim());
+    if (!model) throw new Error(`Unknown local vision model: ${id}`);
+    return model;
+  });
+}
+
+function localLimits(limits) {
+  return { maxBytes: limits.localMaxBytes, timeoutMs: limits.localTimeoutMs };
+}
+
+async function verifyLocalModels(models, limits) {
+  for (const model of models) {
+    const target = localPath(model.target);
+    const targetHash = await existingDigest(target, limits.maxBytes);
+    if (!targetHash) throw new Error(`Missing local model: ${relative(repoRoot, target)}`);
+    if (targetHash.digest !== model.sha256) {
+      throw new Error(`Model SHA-256 mismatch: ${relative(repoRoot, target)}`);
+    }
   }
+  if (models.length > 0) console.log(`Verified ${models.length} local detector model(s)`);
+}
 
+function parseArgs(args) {
+  let verify = false;
+  let local;
+  for (const arg of args) {
+    if (arg === '--verify') verify = true;
+    else if (arg === '--local') local = '';
+    else if (arg.startsWith('--local=')) local = arg.slice('--local='.length);
+    else {
+      throw new Error(
+        'Usage: node scripts/prepare-vision-assets.mjs [--verify] [--local[=all|id,...]]',
+      );
+    }
+  }
+  return { verify, local };
+}
+
+async function main() {
+  const { verify, local } = parseArgs(process.argv.slice(2));
   const manifest = await readJson(manifestPath);
+  const localModels = selectLocalModels(manifest, local);
   const packageRoot = await resolveVisionPackage(manifest);
-  const wasmAssets = await installedWasmFiles(packageRoot, manifest);
+  const wasmAssets = [
+    ...(await installedWasmFiles(packageRoot, manifest)),
+    ...(await installedOrtFiles(manifest)),
+  ];
 
-  if (args[0] === '--verify') {
+  if (verify) {
     await verifyAssets(manifest, wasmAssets);
+    await verifyLocalModels(localModels, localLimits(manifest.limits));
     return;
   }
 
@@ -238,10 +351,17 @@ async function main() {
   for (const model of manifest.models) {
     await prepareModel(model, manifest.limits);
   }
-  console.log(`Prepared ${wasmAssets.length} wasm files and ${manifest.models.length} models`);
+  for (const model of localModels) {
+    await prepareModel(model, localLimits(manifest.limits), localPath(model.target));
+  }
+  console.log(
+    `Prepared ${wasmAssets.length} wasm files, ${manifest.models.length} browser models` +
+      ` and ${localModels.length} local detector model(s)`,
+  );
 }
 
-main().catch((error) => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+  main().catch((error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });

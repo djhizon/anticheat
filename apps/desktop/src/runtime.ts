@@ -32,6 +32,8 @@ export interface RuntimePaths {
   /** Bundled model when packaged; undefined in development (the API resolves WHISPER_MODEL). */
   readonly whisperModel: string | undefined;
   readonly ffmpegBin: string | undefined;
+  /** Folder of the on-device wearables detector (`dfine_x_obj365.onnx`); see docs/LOCAL_AI.md. */
+  readonly visionModelDir: string;
 }
 
 export interface RuntimeDeps {
@@ -92,6 +94,7 @@ export function resolveRuntimePaths(
       whisperBin: path.join(base, 'whisper', 'whisper-cli'),
       whisperModel: bundledWhisperModel(path.join(base, 'whisper')),
       ffmpegBin: fs.existsSync(ffmpeg) ? ffmpeg : undefined,
+      visionModelDir: path.join(base, 'vision-models'),
     };
   }
   const api = path.join(deps.repoRoot, 'apps', 'api');
@@ -101,6 +104,7 @@ export function resolveRuntimePaths(
     whisperBin: path.join(api, 'vendor', 'whisper.cpp', 'build', 'bin', 'whisper-cli'),
     whisperModel: undefined,
     ffmpegBin: undefined,
+    visionModelDir: path.join(api, 'vendor', 'vision-models'),
   };
 }
 
@@ -132,6 +136,10 @@ export function buildServerEnv(
   if (paths.whisperModel !== undefined) env.WHISPER_MODEL_PATH = paths.whisperModel;
   if (paths.ffmpegBin !== undefined) env.FFMPEG_BIN = paths.ffmpegBin;
   else if (deps.isPackaged) delete env.FFMPEG_BIN; // Fall back to PATH, never a stale value.
+  // The on-device wearables detector is a desktop-app feature: the API only serves it to
+  // loopback clients, and the model file is bundled (or prepared with `vision:prepare --local`).
+  env.LOCAL_VISION = '1';
+  env.LOCAL_VISION_MODEL_DIR = paths.visionModelDir;
   return env;
 }
 

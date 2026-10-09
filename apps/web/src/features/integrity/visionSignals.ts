@@ -1,5 +1,6 @@
 import type { Box, EyeFeatures } from './gazeEstimator.js';
 import type { PhoneEvidence } from './phoneEvidence.js';
+import type { FaceKeypoints } from './wearablesGeometry.js';
 
 export interface HeadPose {
   readonly yaw: number;
@@ -22,6 +23,8 @@ export interface VisionObservation {
   readonly headRoll?: number | null;
   /** Normalised (0..1) bounding box of the single tracked face. */
   readonly faceBox?: Box | null;
+  /** A few landmarks of the single tracked face, for the wearables check's crops. */
+  readonly faceKeypoints?: FaceKeypoints | null;
   /** 0..1 landmark/tracking-quality proxy. */
   readonly quality?: number;
   /** Best 'cell phone' score this frame (>= 0.4 candidate floor), or null. */

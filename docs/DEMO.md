@@ -83,7 +83,9 @@ and adaptive cloud recording.
   recorded. Audio is transcribed locally by Whisper; only the text is kept
   (never the audio), for 30 days by default, and bystander speech can be captured.
 - **False positives?** Every signal is a lead for a teacher to review, shown to
-  the student too. Liveness has alternatives so nobody is stuck.
+  the student too. Liveness has alternatives so nobody is stuck. On 22 synthetic
+  sessions (generated, not real students) the findings engine caught 9 of 9 staged
+  cheats and flagged 3 of 9 honest ones: [eval-findings.md](eval-findings.md).
 - **Can't a student cheat around it?** Some ways, yes: notes out of frame, a
   hidden earpiece, special hardware. We block virtual cameras, virtual machines
   and capture displays, and the paired iPhone shows the phone stayed on the desk. We say

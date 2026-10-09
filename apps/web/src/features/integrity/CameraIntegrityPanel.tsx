@@ -23,6 +23,8 @@ import {
   startServerVision,
   type ServerVisionStatus,
 } from './serverVision.js';
+import { useWearables } from './useWearables.js';
+import { WearablesRows } from './WearablesRows.js';
 
 /** An eye-gaze sample older than this no longer counts as current. */
 const GAZE_FRESH_MS = 1500;
@@ -118,6 +120,12 @@ export function CameraIntegrityPanel({
   const live = snapshot.phase === 'live';
   // Plug-and-play gaze: clicks, focus and typing calibrate it implicitly (no calibration step).
   useImplicitGazeCalibration(gazeTracker, live && !paused);
+  const wearables = useWearables({
+    attemptId: attempt.id,
+    active: live && !ended && !paused,
+    video,
+    api,
+  });
   const running = snapshot.phase !== 'off';
   const restarts = useRef(0);
   const liveCallback = useRef(onLiveChange);
@@ -167,6 +175,7 @@ export function CameraIntegrityPanel({
       (sample) => {
         const box = sample.observation.faceBox;
         latestFaceBox.current = box ? { box, at: performance.now() } : null;
+        wearables.observe(sample.observation);
         gazeTracker.push(sample);
         try {
           onVision.current?.(sample.observation);
@@ -378,27 +387,7 @@ export function CameraIntegrityPanel({
                         ? 'Not observed'
                         : 'Waiting for result'}
               </p>
-              {/* Accessory rows appear only when something can actually check them. */}
-              {(serverVision || snapshot.earbuds !== null) && (
-                <p>
-                  Earbuds:{' '}
-                  {snapshot.earbuds === null
-                    ? 'Not available in this version'
-                    : snapshot.earbuds
-                      ? 'Detected'
-                      : 'Not observed'}
-                </p>
-              )}
-              {(serverVision || snapshot.smartGlasses !== null) && (
-                <p>
-                  Smart glasses:{' '}
-                  {snapshot.smartGlasses === null
-                    ? 'Not available in this version'
-                    : snapshot.smartGlasses
-                      ? 'Detected'
-                      : 'Not observed'}
-                </p>
-              )}
+              <WearablesRows snapshot={wearables.snapshot} />
             </>
           )}
         </div>

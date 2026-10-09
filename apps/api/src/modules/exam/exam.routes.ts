@@ -38,6 +38,7 @@ import {
 } from '@examguard/contracts/exam';
 import type { PhonePresenceService } from '../integrity/phonePresence.js';
 import type { VisionResult } from '../integrity/backendVision.js';
+import { LocalVisionBusyError, type LocalVisionDetector } from '../integrity/localVision.js';
 import { timelineToCsv } from '../integrity/timeline.js';
 import { isFlaggableVisionLabel, visionFlagName } from '../integrity/visionLabels.js';
 import {
@@ -69,6 +70,8 @@ const livChallengePattern = /^\/exam\/attempts\/([^/]+)\/liveness-challenge$/u;
 const livVerifyPattern = /^\/exam\/attempts\/([^/]+)\/liveness-verify$/u;
 const eventsPattern = /^\/exam\/attempts\/([^/]+)\/events$/u;
 const visionStatusPath = '/exam/vision-status';
+const localVisionStatusPath = '/exam/local-vision-status';
+const localVisionPattern = /^\/exam\/attempts\/([^/]+)\/local-vision$/u;
 const visionPattern = /^\/exam\/attempts\/([^/]+)\/vision-check$/u;
 const telemetryPattern = /^\/exam\/attempts\/([^/]+)\/telemetry$/u;
 const transcriptPattern = /^\/exam\/attempts\/([^/]+)\/transcript$/u;
@@ -100,6 +103,37 @@ const RECORDING_BURST = 5;
 /** Vision check: OWL-ViT costs ~8 s per frame, so 1 per 10 s sustained, burst of 2, per student. */
 const VISION_REFILL_MS = 10_000;
 const VISION_BURST = 2;
+/** The page sends at most two views every few seconds; this leaves room for retries. */
+const LOCAL_VISION_BURST = 4;
+const LOCAL_VISION_REFILL_MS = 1_000;
+/** A 640x640 JPEG view at quality 0.9 is ~60-150 KB. */
+const MAX_LOCAL_VISION_BASE64_CHARS = 400_000;
+
+/** True only for the loopback interface (IPv4, IPv6 and IPv4-mapped IPv6). */
+export function isLoopback(address: string | undefined): boolean {
+  if (address === undefined) return false;
+  return (
+    address === '::1' ||
+    /^127(?:\.\d{1,3}){3}$/u.test(address) ||
+    /^::ffff:127(?:\.\d{1,3}){3}$/iu.test(address)
+  );
+}
+
+function takeToken(
+  buckets: Map<string, { tokens: number; at: number }>,
+  key: string,
+  burst: number,
+  refillMs: number,
+): boolean {
+  const nowMs = Date.now();
+  const bucket = buckets.get(key) ?? { tokens: burst, at: nowMs };
+  bucket.tokens = Math.min(burst, bucket.tokens + (nowMs - bucket.at) / refillMs);
+  bucket.at = nowMs;
+  const allowed = bucket.tokens >= 1;
+  if (allowed) bucket.tokens -= 1;
+  buckets.set(key, bucket);
+  return allowed;
+}
 /** A 640 px JPEG is well under 200 KB; 1M base64 chars (~730 KB) is a generous cap. */
 const MAX_VISION_BASE64_CHARS = 1_000_000;
 /** Speed probe: 6 per minute per student, body capped at ~1.5 MB. */
@@ -188,6 +222,8 @@ function isExamPath(path: string): boolean {
     path === '/exam/phone-heartbeat' ||
     path === '/exam/speedtest' ||
     path === visionStatusPath ||
+    path === localVisionStatusPath ||
+    localVisionPattern.test(path) ||
     path === instructorVersionsPath ||
     path === instructorAttemptsPath ||
     path === instructorCapabilitiesPath ||
@@ -329,6 +365,7 @@ export class ExamRoutes {
   private readonly recordingState = new Map<string, { indexes: Set<number>; bytes: number }>();
   private readonly recordingBuckets = new Map<string, { tokens: number; at: number }>();
   private readonly visionBuckets = new Map<string, { tokens: number; at: number }>();
+  private readonly localVisionBuckets = new Map<string, { tokens: number; at: number }>();
   private readonly speedtestHits = new Map<string, number[]>();
 
   constructor(
@@ -341,6 +378,8 @@ export class ExamRoutes {
     private readonly visionDetector: ((imageBase64: string) => Promise<VisionResult>) | null = null,
     /** Review decisions and finding notes (triage); null disables those routes. */
     private readonly review: ReviewRepository | null = null,
+    // Desktop app only (LOCAL_VISION=true): on-device detector, reachable from 127.0.0.1 only.
+    private readonly localVision: LocalVisionDetector | null = null,
   ) {}
 
   async handle(request: AuthRequest): Promise<ExamResponse> {
@@ -853,6 +892,22 @@ export class ExamRoutes {
         );
       }
 
+      // ── On-device detector (desktop app): status, then one 640x640 view per request ─
+      if (method === 'GET' && path === localVisionStatusPath) {
+        this.requireStudent(request);
+        const usable = this.localVision !== null && isLoopback(request.remoteAddress);
+        return jsonResponse(
+          request,
+          this.config.allowedOrigins,
+          200,
+          usable ? this.localVision!.status() : { available: false, model: null },
+        );
+      }
+      const localVisionMatch = localVisionPattern.exec(path);
+      if (method === 'POST' && localVisionMatch !== null) {
+        return await this.handleLocalVision(request, localVisionMatch[1] ?? '');
+      }
+
       // ── Backend vision availability, so the browser only sends frames when on ─
       if (method === 'GET' && path === visionStatusPath) {
         this.requireStudent(request);
@@ -1211,6 +1266,62 @@ export class ExamRoutes {
       message,
     });
     return { ...response, headers: { ...response.headers, 'retry-after': '2' } };
+  }
+
+  private async handleLocalVision(request: AuthRequest, rawId: string): Promise<ExamResponse> {
+    const principal = this.requireStudent(request);
+    this.boundary.validateUnsafe(request, principal);
+    // Frames must never leave the machine: only the desktop app's own loopback traffic.
+    if (this.localVision === null || !isLoopback(request.remoteAddress)) {
+      throw new DomainError('not_found', 'The on-device detector is not available here.');
+    }
+    if (
+      !takeToken(
+        this.localVisionBuckets,
+        principal.user.id,
+        LOCAL_VISION_BURST,
+        LOCAL_VISION_REFILL_MS,
+      )
+    ) {
+      return this.tooManyRequests(request, 'Local checks are limited; try again shortly.');
+    }
+    const attemptId = parsePathId<'AttemptId'>(rawId, 'Attempt ID');
+    const delivery = await this.service.getAttemptDelivery(
+      attemptId as AttemptId,
+      principal.user.id,
+    );
+    if (delivery.attempt.status !== 'in_progress') {
+      throw new DomainError(
+        'conflict',
+        'Local checks are only accepted while the attempt is in progress.',
+      );
+    }
+    const body = parseObject(request.body, 'Local vision body required');
+    const image = typeof body.imageJpegBase64 === 'string' ? body.imageJpegBase64 : '';
+    if (
+      image === '' ||
+      image.length > MAX_LOCAL_VISION_BASE64_CHARS ||
+      !base64Pattern.test(image) ||
+      (body.view !== 'full' && body.view !== 'head')
+    ) {
+      throw new DomainError(
+        'validation_failed',
+        'A base64 JPEG view (at most about 300 KB) and a view of full or head are required.',
+      );
+    }
+    const bytes = Buffer.from(image, 'base64');
+    if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) {
+      throw new DomainError('validation_failed', 'The view must be a JPEG image.');
+    }
+    try {
+      const result = await this.localVision.detect(bytes);
+      return jsonResponse(request, this.config.allowedOrigins, 200, result);
+    } catch (error) {
+      if (error instanceof LocalVisionBusyError) {
+        return this.tooManyRequests(request, 'The local detector is busy; try again shortly.');
+      }
+      throw new DomainError('conflict', 'The on-device detector could not check this view.');
+    }
   }
 
   private takeVisionToken(studentId: string): boolean {

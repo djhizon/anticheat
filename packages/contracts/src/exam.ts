@@ -181,6 +181,8 @@ export const EVIDENCE_TRIGGERS = [
   'left_frame',
   'hands_not_visible',
   'text_injected',
+  'earbuds_detected',
+  'headphones_detected',
 ] as const;
 export type EvidenceTrigger = (typeof EVIDENCE_TRIGGERS)[number];
 

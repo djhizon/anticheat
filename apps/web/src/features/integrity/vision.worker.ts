@@ -9,6 +9,7 @@ import {
   type Box,
 } from './gazeEstimator.js';
 import { CANDIDATE_SCORE } from './phoneEvidence.js';
+import { keypointsFromMesh } from './wearablesGeometry.js';
 
 // Object detectors are costlier than the face mesh: run them about once a second and reuse the
 // last result in between (flagged `phoneFresh: false` so temporal confirmation ignores repeats).
@@ -196,6 +197,7 @@ worker.onmessage = (
         eye,
         headRoll: single && matrix ? rollFromMatrix(matrix.data) : null,
         faceBox,
+        faceKeypoints: single ? keypointsFromMesh(mesh) : null,
         quality: single
           ? trackingQuality({
               box: faceBox,

@@ -6,6 +6,7 @@ export function isVisionWorkerPath(url: string): boolean {
   const path = url.split('?')[0] ?? '';
   return (
     path.endsWith('/vision.worker.ts') ||
-    /\/(?:vision-engine|vision\.worker)-[\w-]+\.js$/.test(path)
+    path.endsWith('/wearables.worker.ts') ||
+    /\/(?:vision-engine|vision\.worker|wearables\.worker)-[\w-]+\.js$/.test(path)
   );
 }
