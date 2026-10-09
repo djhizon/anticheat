@@ -193,3 +193,10 @@ export interface AiCheckRunResponse {
  */
 export const VIRTUAL_CAMERA_LABEL =
   /obs|virtual|camtwist|snap camera|manycam|epoccam|ndi|xsplit|mmhmm|camo\b|droidcam|ivcam|iriun|nvidia broadcast|splitcam|youcam|vcam|e2esoft|logi capture|streamlabs|chromacam|webcamoid|screen capture/i;
+
+/** Flags-only desk-camera status computed on the student's iPhone. No images. */
+export interface DeskCameraStatus {
+  readonly people: number;
+  readonly handsVisible: boolean;
+  readonly framingOk: boolean;
+}

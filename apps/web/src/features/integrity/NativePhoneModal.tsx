@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import type { ExamApi } from '../exam/api.js';
+import type { ExamApi, PhonePresenceStatus } from '../exam/api.js';
 import { nativePhoneUrl } from './nativePhoneUrl.js';
 
 export function NativePhoneModal({
@@ -18,7 +18,27 @@ export function NativePhoneModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [now, setNow] = useState(Date.now());
+  const [desk, setDesk] = useState<PhonePresenceStatus['deskCamera'] | null>(null);
   const request = useRef<AbortController | null>(null);
+  const paired = pairing !== null;
+  useEffect(() => {
+    if (!paired || typeof api.getPhonePresence !== 'function') return;
+    let disposed = false;
+    const poll = async () => {
+      try {
+        const status = await api.getPhonePresence(attemptId);
+        if (!disposed) setDesk(status.deskCamera ?? null);
+      } catch {
+        if (!disposed) setDesk(null);
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 3000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [paired, api, attemptId]);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => {
@@ -111,8 +131,25 @@ export function NativePhoneModal({
         <label>
           <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />{' '}
           I agree to foreground connection checks. This requirement stays on for this attempt once
-          enabled. No phone camera/audio is monitored.
+          enabled. No phone audio is monitored, and the camera is used only if you switch on the
+          optional desk camera in the iPhone app.
         </label>
+        <section aria-label="Optional desk camera">
+          <h3>Optional desk camera</h3>
+          <p>
+            In the iPhone app you can turn on a desk camera. Stand the phone to the side so its back
+            camera sees your keyboard and screen. The phone itself checks, every few seconds,, how
+            many people are in view, whether hands are near the keyboard and whether the view is
+            lined up. Only those simple answers (a number and two yes/no values) are sent to the
+            exam. Pictures and video never leave your phone and are not stored. Seeing another
+            person or no one in view is recorded as a note for your instructor to review, not as a
+            verdict.
+          </p>
+          <p role="status">
+            Desk camera: {desk?.on ? 'on' : 'off'}
+            {desk?.on ? (desk.framingOk ? ', framing OK' : ', adjust framing') : ''}
+          </p>
+        </section>
         <p>
           Connection loss is not a cheating verdict. Only the latest pairing works; a new QR
           disconnects the previous phone.

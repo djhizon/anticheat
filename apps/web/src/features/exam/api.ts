@@ -240,6 +240,7 @@ export interface PhonePresenceStatus {
   required: boolean;
   active: boolean;
   remainingMs: number;
+  deskCamera?: { on: boolean; framingOk: boolean; people: number; handsVisible: boolean };
 }
 
 export interface ExamApi {
@@ -514,7 +515,22 @@ export class BrowserExamApi implements ExamApi {
     ) {
       throw new ExamApiError(fallbackProblem);
     }
-    return { required: body.required, active: body.active, remainingMs: body.remainingMs };
+    const desk = isRecord(body.deskCamera) ? body.deskCamera : null;
+    return {
+      required: body.required,
+      active: body.active,
+      remainingMs: body.remainingMs,
+      ...(desk && typeof desk.on === 'boolean' && typeof desk.framingOk === 'boolean'
+        ? {
+            deskCamera: {
+              on: desk.on,
+              framingOk: desk.framingOk,
+              people: typeof desk.people === 'number' ? desk.people : 0,
+              handsVisible: desk.handsVisible === true,
+            },
+          }
+        : {}),
+    };
   }
 
   async requirePhonePresence(

@@ -90,6 +90,43 @@ no arbitrary-load or invalid-certificate bypass is included.
 The iPhone still needs a reachable laptop address. This app does not solve Wi-Fi
 client isolation or host firewall rules and does not install Tailscale or VPNs.
 
+## Optional desk camera (on-device Vision)
+
+After pairing, the iPhone app offers a **Desk camera (optional)** toggle. It is
+off by default, per session, and is forgotten on **Stop and forget pairing**.
+
+Setup:
+
+1. Build and install with Xcode on a **physical iPhone**. The simulator has no
+   camera, so the toggle only reports "Rear camera is unavailable" there.
+2. Pair as above, then switch on **Desk camera** and allow Camera access.
+3. Stand the phone upright to the side of the desk so the rear camera sees the
+   keyboard (inside the dashed guide box) and the screen. A live preview is
+   shown on the phone only.
+4. Turn it off in the app at any time. Heartbeat/presence behaviour is
+   unchanged whether it is on or off. It stops whenever the app is inactive.
+
+How it works: AVFoundation captures the rear wide camera at about 5 fps; one
+frame every ~2 s is analysed on the phone with Apple Vision.
+`VNDetectHumanRectanglesRequest` counts people and `VNDetectHumanHandPoseRequest`
+checks whether hand landmarks fall in the lower-middle "keyboard" region. Framing
+is "OK" when a person fills a reasonable part of the view. No second-phone check
+exists: Vision has no built-in phone detector (`VNRecognizeAnimalsRequest` only
+finds cats and dogs), so it is skipped. Frames are never stored or transmitted.
+Only `{people, handsVisible, framingOk}` is sent, at most every 5 s.
+
+API: `POST /exam/phone-presence/desk-camera` with
+`{credential, people, handsVisible, framingOk}`. It uses the same credential and
+attempt/expiry checks as the heartbeat but does not extend the presence lease.
+`people` must be an integer 0..20; reports closer than 2 s apart get 409. State
+is memory-only; no report for 15 s means "off". Notable changes are stored as
+`app_events` rows (`flag:desk_camera_extra_person` when 2+ people appear,
+`flag:desk_camera_left_frame` when the person disappears), at most one of each
+per 30 s, and show in the transparency report as "Flagged behaviour: ...".
+`GET /exam/attempts/:id/phone-presence` additionally returns
+`deskCamera: {on, framingOk, people, handsVisible}`. These are leads for a human
+reviewer, not verdicts; lighting and camera angle cause false alarms.
+
 ## Protocol and safety boundaries
 
 `PhonePresenceService` is independent of the legacy Gemini integrity service.
@@ -102,6 +139,7 @@ credentials. It contains no heartbeat history or device identifiers.
 | `GET /exam/attempts/:id/phone-presence`  | Student session and ownership. Returns required/active/remaining lease, never credentials.                                          |
 | `POST /exam/phone-presence/claim`        | Consume QR code once; return a separate attempt-scoped credential to the phone.                                                     |
 | `POST /exam/phone-presence/challenge`    | Credential only; issue one outstanding four-second challenge and next sequence.                                                     |
+| `POST /exam/phone-presence/desk-camera`  | Same credential rules as heartbeat. Flags only, optional, rate limited; never extends the lease.                                    |
 | `POST /exam/phone-presence/heartbeat`    | Credential, unused/unexpired challenge, increasing sequence, active claim. Extend lease only to challenge issuance + eight seconds. |
 
 Leases and outstanding challenges are memory-only: restarting the API loses

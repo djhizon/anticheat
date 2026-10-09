@@ -133,6 +133,7 @@ function isExamPath(path: string): boolean {
       '/exam/phone-presence/claim',
       '/exam/phone-presence/challenge',
       '/exam/phone-presence/heartbeat',
+      '/exam/phone-presence/desk-camera',
     ].includes(path) ||
     phonePresencePattern.test(path) ||
     path === '/exam/generate' ||
@@ -281,6 +282,19 @@ export class ExamRoutes {
             this.config.allowedOrigins,
             200,
             this.phonePresence.challenge(body.credential),
+          );
+        }
+        if (path === '/exam/phone-presence/desk-camera') {
+          return jsonResponse(
+            request,
+            this.config.allowedOrigins,
+            200,
+            this.phonePresence.deskCamera(
+              body.credential,
+              body.people,
+              body.handsVisible,
+              body.framingOk,
+            ),
           );
         }
         if (path === '/exam/phone-presence/heartbeat') {

@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { DomainError, type Clock } from '@exam-anti-cheat/contracts';
 
@@ -6,6 +6,13 @@ export const PHONE_PING_MS = 2000;
 export const PHONE_LEASE_MS = 8000;
 const PAIRING_MS = 120000;
 const CHALLENGE_MS = 4000;
+/** Phone sends at most every 5 s; the server accepts one report per 2 s per attempt. */
+export const DESK_CAMERA_MIN_GAP_MS = 2000;
+/** A desk-camera report older than this means the camera is considered off. */
+export const DESK_CAMERA_STALE_MS = 15000;
+/** The same flag is stored at most once per window so a flickering view cannot spam the report. */
+const DESK_FLAG_COOLDOWN_MS = 30000;
+const MAX_PEOPLE = 20;
 const token = () => randomBytes(32).toString('base64url');
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 function secret(value: unknown): string {
@@ -28,6 +35,19 @@ export interface PhonePresenceStatus {
   remainingMs: number;
   heartbeatIntervalMs: number;
   timeoutMs: number;
+  deskCamera: DeskCameraState;
+}
+export interface DeskCameraState {
+  on: boolean;
+  framingOk: boolean;
+  people: number;
+  handsVisible: boolean;
+}
+interface DeskReport {
+  people: number;
+  handsVisible: boolean;
+  framingOk: boolean;
+  at: number;
 }
 
 /** Cooperative presence, not iOS attestation. No heartbeat history is retained.
@@ -36,6 +56,8 @@ export interface PhonePresenceStatus {
 export class PhonePresenceService {
   private readonly leases = new Map<string, number>();
   private readonly challenges = new Map<string, { value: string; issued: number }>();
+  private readonly desk = new Map<string, DeskReport>();
+  private readonly deskFlags = new Map<string, number>();
   constructor(
     private readonly db: DatabaseSync,
     private readonly clock: Clock,
@@ -56,6 +78,7 @@ export class PhonePresenceService {
       .run(attemptId, hash(code), Math.min(now + PAIRING_MS, deadline), deadline);
     this.leases.delete(attemptId);
     this.challenges.delete(attemptId);
+    this.desk.delete(attemptId);
     return {
       code,
       expiresAt: new Date(Math.min(now + PAIRING_MS, deadline)).toISOString(),
@@ -120,6 +143,47 @@ export class PhonePresenceService {
     return { ok: true, remainingMs: challenge.issued + PHONE_LEASE_MS - now };
   }
 
+  /** Optional desk-camera flags from the phone. Flags only; never images. Does not touch the lease. */
+  deskCamera(value: unknown, people: unknown, handsVisible: unknown, framingOk: unknown) {
+    const row = this.authenticate(value);
+    if (
+      typeof people !== 'number' ||
+      !Number.isSafeInteger(people) ||
+      people < 0 ||
+      people > MAX_PEOPLE ||
+      typeof handsVisible !== 'boolean' ||
+      typeof framingOk !== 'boolean'
+    ) {
+      throw new DomainError('validation_failed', 'Desk camera status is invalid.');
+    }
+    const now = this.now();
+    const previous = this.desk.get(row.attempt_id);
+    if (previous && now >= previous.at && now - previous.at < DESK_CAMERA_MIN_GAP_MS) {
+      throw new DomainError('conflict', 'Desk camera status sent too often.');
+    }
+    this.desk.set(row.attempt_id, { people, handsVisible, framingOk, at: now });
+    const fresh = previous !== undefined && now - previous.at < DESK_CAMERA_STALE_MS;
+    if (people >= 2 && (!fresh || previous.people < 2)) {
+      this.flag(row.attempt_id, 'desk_camera_extra_person', now);
+    }
+    if (people === 0 && fresh && previous.people >= 1) {
+      this.flag(row.attempt_id, 'desk_camera_left_frame', now);
+    }
+    return { ok: true };
+  }
+
+  private flag(attemptId: string, name: string, now: number) {
+    const key = `${attemptId}:${name}`;
+    const last = this.deskFlags.get(key);
+    if (last !== undefined && now >= last && now - last < DESK_FLAG_COOLDOWN_MS) return;
+    this.deskFlags.set(key, now);
+    this.db
+      .prepare(
+        'INSERT INTO app_events (id, attempt_id, foreground_app, display_count) VALUES (?, ?, ?, 1)',
+      )
+      .run(randomUUID(), attemptId, `flag:${name}`);
+  }
+
   status(attemptId: string): PhonePresenceStatus {
     const row = this.db
       .prepare('SELECT attempt_id FROM phone_presence WHERE attempt_id=?')
@@ -133,9 +197,19 @@ export class PhonePresenceService {
       } catch {
         this.leases.delete(attemptId);
         this.challenges.delete(attemptId);
+        this.desk.delete(attemptId);
       }
     }
+    const report = this.desk.get(attemptId);
+    const age = report ? this.now() - report.at : Infinity;
+    const on = !!report && age >= 0 && age < DESK_CAMERA_STALE_MS;
     return {
+      deskCamera: {
+        on,
+        framingOk: on && report.framingOk,
+        people: on ? report.people : 0,
+        handsVisible: on && report.handsVisible,
+      },
       required: !!row,
       active: remainingMs > 0,
       remainingMs,

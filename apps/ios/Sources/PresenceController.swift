@@ -16,6 +16,10 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
     @Published private(set) var connected = false
     @Published private(set) var busy = false
     @Published private(set) var lastAcknowledged: Date?
+    /// Optional, opt-in, additive. Heartbeat behaviour does not depend on it.
+    @Published private(set) var deskCameraWanted = false
+    let deskCamera = DeskCameraController()
+    private var lastDeskSend: Date?
     private var gate = ForegroundGate()
     private var task: Task<Void, Never>?
     private var session: URLSession?
@@ -30,6 +34,33 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
         #endif
     }
 
+    func setDeskCamera(_ on: Bool) {
+        deskCameraWanted = on
+        lastDeskSend = nil
+        if on && gate.active && paired { startDeskCamera() } else { deskCamera.stop() }
+    }
+
+    private func startDeskCamera() {
+        deskCamera.onStatus = { [weak self] status in self?.sendDesk(status) }
+        deskCamera.start()
+    }
+
+    /// Flags only, same credential as the heartbeat, at most every 5 s. Failures are ignored:
+    /// the heartbeat loop owns connection status and the desk camera is best-effort.
+    private func sendDesk(_ status: DeskCameraStatus) {
+        let now = Date()
+        guard DeskCameraPolicy.shouldSend(now: now, lastSent: lastDeskSend),
+              let session, let origin, let credential, paired, gate.active else { return }
+        lastDeskSend = now
+        Task { [weak self] in
+            guard let self else { return }
+            let _: Acknowledgement? = try? await self.post(session, origin, "desk-camera", [
+                "credential": credential, "people": status.people,
+                "handsVisible": status.handsVisible, "framingOk": status.framingOk
+            ])
+        }
+    }
+
     func acceptLink(_ value: String) {
         do {
             let link = try PairingLink(value, allowHTTP: Self.allowsDemoHTTP)
@@ -42,6 +73,7 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
     func setActive(_ active: Bool) {
         gate.transition(active: active)
         cancelWork()
+        if !active { deskCamera.stop() }
         if !active {
             status = paired ? "Paused — app is not active. Laptop will pause answering." : "Open the app to pair."
         } else if let origin, let credential {
@@ -50,6 +82,7 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
             status = pending == nil ? "Scan the laptop QR to pair." : "Confirm the laptop address, then connect."
         }
         UIApplication.shared.isIdleTimerDisabled = active && paired
+        if active && paired && deskCameraWanted { startDeskCamera() }
     }
 
     func connect(acceptInsecureDemo: Bool) {
@@ -60,6 +93,7 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
     func stopAndForget() {
         gate.transition(active: gate.active)
         cancelWork()
+        deskCamera.stop(); deskCameraWanted = false
         credential = nil; origin = nil; pending = nil; paired = false; lastAcknowledged = nil
         UIApplication.shared.isIdleTimerDisabled = false
         status = "Stopped. Laptop answering pauses after its timeout. Re-pair to connect again."
@@ -129,6 +163,7 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
                 self.busy = false; self.connected = false
                 self.status = "Pairing expired, was replaced, or the connection failed. Create a new QR on the laptop."
                 self.credential = nil; self.paired = false
+                self.deskCamera.stop()
                 UIApplication.shared.isIdleTimerDisabled = false
             }
         }

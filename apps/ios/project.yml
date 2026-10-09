@@ -24,7 +24,9 @@ targets:
         UILaunchScreen: {}
         UIApplicationSupportsIndirectInputEvents: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIRequiresFullScreen: true
         NSLocalNetworkUsageDescription: Connect to your exam laptop on Wi-Fi to send foreground-only presence checks.
+        NSCameraUsageDescription: Optional desk camera. Your phone checks, on the device, how many people are in view and whether hands are near the keyboard. Only simple yes/no and count results are sent; images never leave the phone.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         CFBundleURLTypes:

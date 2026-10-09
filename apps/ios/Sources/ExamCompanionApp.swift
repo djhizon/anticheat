@@ -37,6 +37,7 @@ struct CompanionView: View {
                             .disabled(!consent || controller.busy || (pairing.isHTTP && !insecureDemo))
                     }
                     if controller.paired {
+                        DeskCameraSection(controller: controller)
                         Button("Stop and forget pairing", role: .destructive) { controller.stopAndForget() }
                         Text("This does not disable the laptop requirement. Force-quitting also forgets pairing; scan a fresh QR to reconnect.").font(.caption)
                     } else {
@@ -54,7 +55,7 @@ struct CompanionView: View {
             }
             .navigationTitle("Exam Companion")
             .onAppear { controller.setActive(phase == .active) }
-            .onChange(of: phase) { controller.setActive($0 == .active) }
+            .modifier(PhaseChange(phase: phase) { controller.setActive($0 == .active) })
             .onOpenURL { url in
                 consent = false; insecureDemo = false
                 controller.acceptLink(url.absoluteString)

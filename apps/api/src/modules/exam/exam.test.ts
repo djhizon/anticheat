@@ -1182,6 +1182,62 @@ describe('exam delivery boundary', () => {
     expect(exam.phonePresence.status(attemptId).active).toBe(false);
   });
 
+  it('accepts desk-camera flags with the phone credential, records notable changes, and leaves heartbeats alone', async () => {
+    const { attemptId } = await phoneFixture();
+    const { credential } = exam.phonePresence.claim(exam.phonePresence.enroll(attemptId).code);
+    const send = (body: Record<string, unknown>) =>
+      exam.routes.handle({
+        method: 'POST',
+        path: '/exam/phone-presence/desk-camera',
+        headers: {},
+        body,
+      });
+    const good = { credential, people: 1, handsVisible: true, framingOk: true };
+    const wrong = 'x'.repeat(43);
+    expect((await send({ ...good, credential: wrong })).status).toBe(401);
+    expect((await send({ ...good, credential: 'short' })).status).toBe(401);
+    for (const bad of [
+      { people: -1 },
+      { people: 1.5 },
+      { people: 99 },
+      { people: '1' },
+      { handsVisible: 'yes' },
+      { framingOk: undefined },
+    ]) {
+      expect((await send({ ...good, ...bad })).status).toBe(400);
+    }
+    expect((await send(good)).status).toBe(200);
+    const status = exam.phonePresence.status(attemptId);
+    expect(status.deskCamera).toEqual({ on: true, framingOk: true, people: 1, handsVisible: true });
+    expect(status.active).toBe(false); // desk-camera reports never extend the lease
+    expect((await send(good)).status).toBe(409); // rate limited
+    clock.advance(3);
+    expect((await send({ ...good, people: 2 })).status).toBe(200);
+    clock.advance(3);
+    expect((await send({ ...good, people: 0 })).status).toBe(200);
+    const flags = () =>
+      (
+        auth.database
+          .prepare(
+            "SELECT foreground_app FROM app_events WHERE attempt_id=? AND foreground_app LIKE 'flag:desk_camera%' ORDER BY rowid",
+          )
+          .all(attemptId) as Array<{ foreground_app: string }>
+      ).map((r) => r.foreground_app);
+    expect(flags()).toEqual(['flag:desk_camera_extra_person', 'flag:desk_camera_left_frame']);
+    clock.advance(3);
+    await send({ ...good, people: 3 });
+    expect(flags()).toHaveLength(2); // cooldown suppresses repeats
+    // Plain heartbeats unchanged and record nothing.
+    const challenge = exam.phonePresence.challenge(credential);
+    exam.phonePresence.heartbeat(credential, challenge.challenge, challenge.sequence, true);
+    expect(exam.phonePresence.status(attemptId).active).toBe(true);
+    expect(flags()).toHaveLength(2);
+    clock.advance(20);
+    expect(exam.phonePresence.status(attemptId).deskCamera.on).toBe(false);
+    clock.advance(60);
+    expect((await send(good)).status).toBe(401); // expired attempt
+  });
+
   it('gates real answer writes and preserves acknowledged idempotent replay and finalization', async () => {
     const { student, attemptId, delivery } = await phoneFixture();
     const { credential } = exam.phonePresence.claim(exam.phonePresence.enroll(attemptId).code);
