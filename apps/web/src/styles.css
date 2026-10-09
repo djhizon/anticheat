@@ -2376,3 +2376,80 @@ dd {
   font-size: 0.95rem;
   margin: 0 0 8px;
 }
+
+/* Live audio indicator and transcript log */
+.rec-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #111827;
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.rec-dot {
+  color: #f87171;
+  animation: rec-blink 1.2s steps(2, start) infinite;
+}
+@keyframes rec-blink {
+  50% {
+    opacity: 0.2;
+  }
+}
+.level-bar {
+  display: inline-block;
+  width: 42px;
+  height: 6px;
+  border-radius: 3px;
+  background: #374151;
+  overflow: hidden;
+}
+.level-bar-fill {
+  display: block;
+  height: 100%;
+  background: #34d399;
+}
+.transcript-line {
+  margin: 0 0 3px;
+  color: #e5e7eb;
+  word-break: break-word;
+}
+.transcript-line time {
+  color: #9ca3af;
+}
+.transcript-line--skipped {
+  color: #9ca3af;
+  font-style: italic;
+}
+.transcript-shimmer {
+  color: #9ca3af;
+  background: linear-gradient(90deg, #9ca3af 0%, #f9fafb 50%, #9ca3af 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: transcript-shimmer 1.4s linear infinite;
+}
+@keyframes transcript-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+.transcript-log {
+  padding-left: 1.2rem;
+  font-size: 0.85rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rec-dot,
+  .transcript-shimmer {
+    animation: none;
+  }
+  .transcript-shimmer {
+    -webkit-text-fill-color: currentColor;
+    background: none;
+  }
+}

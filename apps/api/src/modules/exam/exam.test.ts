@@ -1104,6 +1104,60 @@ describe('exam delivery boundary', () => {
     ]);
   });
 
+  it('saves non-empty transcripts as structured events and returns them in order to the owner only', async () => {
+    const owner = await registerStudent('transcript@example.test');
+    const other = await registerStudent('other@example.test');
+    const seeded = await seedExam();
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: owner.userId,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
+    const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
+    const integrity = new IntegrityService(
+      new IntegrityRepository(auth.database),
+      {} as GeminiRotatingClient,
+    );
+    const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity);
+    const base = `/exam/attempts/${attemptId}`;
+    const post = async (transcript: string, capturedAt: string) => {
+      vi.mocked(transcribeAudio).mockResolvedValueOnce(transcript);
+      return routes.handle(
+        studentRequest(owner, 'POST', `${base}/audio`, {
+          audio: Buffer.from('synthetic audio').toString('base64'),
+          durationMs: 3000,
+          capturedAt,
+        }),
+      );
+    };
+    const now = Date.now();
+    const iso = (offset: number) => new Date(now + offset).toISOString();
+    expect((await post('second line', iso(-1000))).status).toBe(201);
+    expect((await post('   ', iso(-500))).status).toBe(201);
+    expect((await post('first line', iso(-5000))).status).toBe(201);
+
+    expect((await routes.handle(studentRequest(other, 'GET', `${base}/transcript`))).status).toBe(
+      404,
+    );
+    const response = await routes.handle(studentRequest(owner, 'GET', `${base}/transcript`));
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      entries: [
+        { capturedAt: iso(-5000), text: 'first line' },
+        { capturedAt: iso(-1000), text: 'second line' },
+      ],
+    });
+    const stored = auth.database
+      .prepare(`SELECT count(*) AS n FROM audio_transcripts WHERE attempt_id = ?`)
+      .get(attemptId) as { n: number };
+    expect(stored.n).toBe(2);
+    // The transparency report no longer carries a duplicate app-event copy.
+    const report = await routes.handle(studentRequest(owner, 'GET', `${base}/transparency`));
+    expect((report.body as { events: unknown[] }).events).toEqual([]);
+  });
+
   it('keeps integrity monitoring available without Gemini keys', async () => {
     const owner = await registerStudent('nokeys@example.test');
     const seeded = await seedExam();

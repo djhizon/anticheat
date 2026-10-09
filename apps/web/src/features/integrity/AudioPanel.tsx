@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createAudioSession, type AudioSnapshot } from './audioSession.js';
 import { createAudioRecorder } from './audioRecorder.js';
 import { acquireBuiltInMicrophone } from './builtInMicrophone.js';
+import { createLevelMeter, METER_BARS, type LevelReading } from './audioLevel.js';
+import { appendLine, formatClock, SKIPPED_TEXT, type LogLine } from './transcriptLog.js';
 import type { ExamApi } from '../exam/api.js';
 
 export const AUTO_START_DELAY_MS = 1000;
@@ -20,14 +22,41 @@ export function AudioPanel({
 }) {
   const [enabled, setEnabled] = useState(false);
   const [snapshot, setSnapshot] = useState<AudioSnapshot | null>(null);
-  const [transcript, setTranscript] = useState<string[]>([]);
+  const [log, setLog] = useState<readonly LogLine[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [micStream, setMicStream] = useState<MediaStream | null>(null);
   const [status, setStatus] = useState('Audio not started.');
   const [device, setDevice] = useState('');
   const [error, setError] = useState('');
   useEffect(() => {
     setEnabled(false);
-    setTranscript([]);
+    setLog([]);
   }, [attemptId]);
+  useEffect(() => {
+    // Restore the saved log after a reload. Duplicates of live lines are dropped by key.
+    let cancelled = false;
+    void examApi
+      ?.getTranscript?.(attemptId)
+      .then((saved) => {
+        if (cancelled) return;
+        setLog((previous) => {
+          let next: readonly LogLine[] = [];
+          for (const entry of saved) {
+            next = appendLine(next, {
+              at: Date.parse(entry.capturedAt),
+              kind: 'text',
+              text: entry.text,
+            });
+          }
+          for (const line of previous) next = appendLine(next, line);
+          return next;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [attemptId, examApi]);
   useEffect(() => {
     // Deliberately independent of `enabled`/`error`: a failed start leaves the
     // manual button and error visible instead of retrying. Delay lets the camera
@@ -51,11 +80,22 @@ export function AudioPanel({
       ? createAudioRecorder(
           attemptId,
           examApi,
-          (text) => {
-            if (!cancelled) setTranscript((previous) => [...previous.slice(-19), text]);
+          (text, at) => {
+            if (!cancelled) setLog((previous) => appendLine(previous, { at, kind: 'text', text }));
           },
           (text) => {
             if (!cancelled) setStatus(text);
+          },
+          {
+            onSkipped: (at) => {
+              if (!cancelled)
+                setLog((previous) =>
+                  appendLine(previous, { at, kind: 'skipped', text: SKIPPED_TEXT }),
+                );
+            },
+            onBusy: (value) => {
+              if (!cancelled) setBusy(value);
+            },
           },
         )
       : null;
@@ -74,6 +114,7 @@ export function AudioPanel({
           return;
         }
         stream = acquired;
+        setMicStream(acquired);
         setDevice(acquired.getAudioTracks()[0]?.label ?? 'Built-in microphone');
         acquired.getAudioTracks().forEach((track) => track.addEventListener('ended', ended));
         await monitor.start(true, acquired);
@@ -89,6 +130,8 @@ export function AudioPanel({
     })();
     return () => {
       cancelled = true;
+      setMicStream(null);
+      setBusy(false);
       recorder?.stop();
       monitor.destroy();
       stream?.getAudioTracks().forEach((track) => track.removeEventListener('ended', ended));
@@ -115,19 +158,127 @@ export function AudioPanel({
           cheating.
         </p>
       )}
+      {live && micStream && <RecordingIndicator stream={micStream} />}
       <h3>Local clip transcript</h3>
       <p role="status">{enabled && active ? status : 'Transcription off'}</p>
       <p className="muted">
-        Five-second clips; capture pauses while processing. Uses only the built-in laptop
-        microphone.
+        Three-second clips transcribed on this computer; a clip is skipped while the previous one is
+        still being transcribed. Uses only the built-in laptop microphone.
       </p>
-      {transcript.length > 0 && (
-        <div className="transcript-feed">
-          {transcript.map((text, index) => (
-            <p key={index}>{text}</p>
-          ))}
-        </div>
-      )}
+      <TranscriptLog lines={log} busy={busy && enabled && active} />
     </section>
+  );
+}
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
+const IDLE_READING: LevelReading = { bars: Array(METER_BARS).fill(0), level: 0 };
+
+export function RecordingIndicator({ stream }: { readonly stream: MediaStream }) {
+  const [reading, setReading] = useState<LevelReading>(IDLE_READING);
+  const reduced = prefersReducedMotion();
+  useEffect(() => {
+    const stop = createLevelMeter(stream, setReading, reduced);
+    return () => {
+      stop();
+      setReading(IDLE_READING);
+    };
+  }, [stream, reduced]);
+  return (
+    <div className="rec-indicator">
+      <span className="rec-dot" aria-hidden="true">
+        ●
+      </span>
+      <span className="rec-label">REC</span>
+      <span className="sr-only"> Microphone is recording</span>
+      {reduced ? (
+        <span className="level-bar" aria-hidden="true">
+          <span
+            className="level-bar-fill"
+            style={{ width: `${Math.round(reading.level * 100)}%` }}
+          />
+        </span>
+      ) : (
+        <svg
+          className="level-meter"
+          width="42"
+          height="18"
+          viewBox="0 0 42 18"
+          aria-hidden="true"
+          focusable="false"
+        >
+          {reading.bars.map((value, index) => {
+            const height = Math.max(2, Math.round(value * 18));
+            return (
+              <rect
+                key={index}
+                x={index * 7}
+                y={18 - height}
+                width="5"
+                height={height}
+                rx="1"
+                fill="#34d399"
+              />
+            );
+          })}
+        </svg>
+      )}
+    </div>
+  );
+}
+
+const SCROLL_STICK_PX = 24;
+
+export function TranscriptLog({
+  lines,
+  busy,
+}: {
+  readonly lines: readonly LogLine[];
+  readonly busy: boolean;
+}) {
+  const feed = useRef<HTMLDivElement | null>(null);
+  const stick = useRef(true);
+  useEffect(() => {
+    const element = feed.current;
+    if (element && stick.current) element.scrollTop = element.scrollHeight;
+  }, [lines, busy]);
+  if (lines.length === 0 && !busy) return null;
+  return (
+    <div
+      className="transcript-feed"
+      ref={feed}
+      onScroll={(event) => {
+        const el = event.currentTarget;
+        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_STICK_PX;
+      }}
+    >
+      <div role="log" aria-live="polite" aria-label="Transcript log" className="transcript-lines">
+        {lines.map((line) => (
+          <p
+            key={line.key}
+            className={
+              line.kind === 'skipped'
+                ? 'transcript-line transcript-line--skipped'
+                : 'transcript-line'
+            }
+          >
+            <time dateTime={new Date(line.at).toISOString()}>{formatClock(new Date(line.at))}</time>
+            {' — '}
+            {line.text}
+          </p>
+        ))}
+      </div>
+      {busy && (
+        <p className="transcript-line transcript-shimmer" aria-hidden="true">
+          transcribing…
+        </p>
+      )}
+    </div>
   );
 }

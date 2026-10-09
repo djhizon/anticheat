@@ -123,6 +123,11 @@ export function StudentExamPage({
     [examApi],
   );
 
+  const loadTranscript = useCallback(
+    (attemptId: string) => examApi?.getTranscript?.(attemptId) ?? Promise.resolve([]),
+    [examApi],
+  );
+
   // ── Focus-loss and page-hide — fire violations ────────────────────────
   useEffect(() => {
     if (!currentDelivery || currentDelivery.attempt.status !== 'in_progress') return;
@@ -1030,6 +1035,7 @@ export function StudentExamPage({
               <TransparencyReport
                 attemptId={visibleDelivery.attempt.id}
                 load={loadTransparencyReport}
+                loadTranscript={loadTranscript}
               />
             )}
           </main>

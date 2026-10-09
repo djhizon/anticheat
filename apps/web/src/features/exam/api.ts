@@ -9,6 +9,7 @@ import type {
   ExamSubmitResponse,
   LivenessChallengeType,
   TransparencyEvent,
+  TranscriptEntry,
 } from '@exam-anti-cheat/contracts/exam';
 
 import type { FetchLike } from '../auth/api.js';
@@ -271,6 +272,7 @@ export interface ExamApi {
     audioBase64: string,
     durationMs: number,
     signal?: AbortSignal,
+    capturedAt?: string,
   ): Promise<{ readonly transcript?: unknown }>;
   postEnrollPhone(attemptId: string): Promise<PhoneEnrollment>;
   patchEvents(attemptId: string, body: Record<string, unknown>): Promise<unknown>;
@@ -284,6 +286,7 @@ export interface ExamApi {
     imageBase64: string,
     signal?: AbortSignal,
   ): Promise<readonly { readonly label: string; readonly score: number }[]>;
+  getTranscript?(attemptId: string): Promise<readonly TranscriptEntry[]>;
 }
 
 export class BrowserExamApi implements ExamApi {
@@ -455,6 +458,7 @@ export class BrowserExamApi implements ExamApi {
     audioBase64: string,
     durationMs: number,
     signal?: AbortSignal,
+    capturedAt?: string,
   ): Promise<{ readonly transcript?: unknown }> {
     const controller = new AbortController();
     const cancel = () => controller.abort();
@@ -469,7 +473,7 @@ export class BrowserExamApi implements ExamApi {
           method: 'POST',
           signal: controller.signal,
           headers: { 'content-type': 'application/json', 'x-csrf-token': token },
-          body: JSON.stringify({ audio: audioBase64, durationMs }),
+          body: JSON.stringify({ audio: audioBase64, durationMs, capturedAt }),
           credentials: 'include',
         },
       );
@@ -666,6 +670,18 @@ export class BrowserExamApi implements ExamApi {
         isString(event.description) &&
         types.has(event.type as string) &&
         severities.has(event.severity as string),
+    );
+  }
+
+  async getTranscript(attemptId: string): Promise<readonly TranscriptEntry[]> {
+    const body = await this.request(
+      `/exam/attempts/${encodeURIComponent(attemptId)}/transcript`,
+      'GET',
+    );
+    if (!isRecord(body) || !Array.isArray(body.entries)) throw new ExamApiError(fallbackProblem);
+    return body.entries.filter(
+      (entry): entry is TranscriptEntry =>
+        isRecord(entry) && isString(entry.capturedAt) && isString(entry.text),
     );
   }
 

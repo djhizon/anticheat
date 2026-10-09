@@ -1,12 +1,20 @@
 import type { ExamApi } from '../exam/api.js';
 import { acquireBuiltInMicrophone } from './builtInMicrophone.js';
 
+/** Short clips keep the transcript feeling live. */
+export const CLIP_MS = 3000;
+
 export function createAudioRecorder(
   attemptId: string,
   examApi: ExamApi,
-  onTranscript: (text: string) => void,
+  onTranscript: (text: string, capturedAt: number) => void,
   onStatus: (text: string) => void = () => {},
+  hooks: {
+    readonly onSkipped?: (capturedAt: number) => void;
+    readonly onBusy?: (busy: boolean) => void;
+  } = {},
 ) {
+  let inFlight = false;
   let recorder: MediaRecorder | null = null;
   let stream: MediaStream | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -18,8 +26,10 @@ export function createAudioRecorder(
     active = false;
     upload?.abort();
     upload = null;
+    inFlight = false;
     if (timer) clearTimeout(timer);
     timer = null;
+    hooks.onBusy?.(false);
     if (recorder) {
       recorder.ondataavailable = null;
       recorder.onstop = null;
@@ -31,7 +41,7 @@ export function createAudioRecorder(
     recorder = null;
   }
 
-  function capture(note = '') {
+  function capture() {
     if (!active || !stream) return;
     const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((type) =>
       MediaRecorder.isTypeSupported(type),
@@ -40,6 +50,7 @@ export function createAudioRecorder(
     const current = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 32000 });
     recorder = current;
     const chunks: Blob[] = [];
+    const capturedAt = Date.now();
     current.ondataavailable = (event) => {
       if (active && event.data.size > 0) chunks.push(event.data);
     };
@@ -49,28 +60,47 @@ export function createAudioRecorder(
     };
     current.onstop = () => {
       if (!active) return;
+      // Recording is continuous: the next clip starts at once. Each clip is a
+      // complete container; timeslice fragments are not independently decodable.
+      try {
+        capture();
+      } catch {
+        stop();
+        onStatus('Transcription recording failed. Restart the audio session.');
+        return;
+      }
+      // Backpressure: never queue uploads behind the local model. A clip that
+      // finishes while another is in flight is dropped.
+      if (inFlight) {
+        hooks.onSkipped?.(capturedAt);
+        return;
+      }
+      inFlight = true;
+      hooks.onBusy?.(true);
       void (async () => {
         try {
-          onStatus('Transcribing a 5-second clip locally…');
-          // Each recording is complete, including its container header. Timeslice
-          // fragments from one long recording are not independently decodable.
+          onStatus('Transcribing the last clip locally…');
           const base64 = await blobToBase64(new Blob(chunks, { type: current.mimeType }));
           if (!active) return;
-          upload = new AbortController();
-          const started = performance.now();
-          const response = await examApi.postAudio(attemptId, base64, 5000, upload.signal);
-          upload = null;
+          const controller = new AbortController();
+          upload = controller;
+          const response = await examApi.postAudio(
+            attemptId,
+            base64,
+            CLIP_MS,
+            controller.signal,
+            new Date(capturedAt).toISOString(),
+          );
+          if (upload === controller) upload = null;
           if (!active) return;
           if (typeof response?.transcript !== 'string')
             throw new Error('Invalid transcription response');
-          if (response.transcript.trim()) onTranscript(response.transcript);
-          // Backpressure: never accumulate uploads behind the local model.
-          const elapsed = ((performance.now() - started) / 1000).toFixed(1);
-          capture(
-            response.transcript.trim()
-              ? `Previous clip processed in ${elapsed}s. `
-              : `No speech recognized in the last clip (${elapsed}s). `,
-          );
+          if (response.transcript.trim()) {
+            onTranscript(response.transcript.trim(), capturedAt);
+            onStatus('Listening…');
+          } else {
+            onStatus('Listening… (no speech in the last clip)');
+          }
         } catch (error) {
           if (active) {
             stop();
@@ -78,14 +108,16 @@ export function createAudioRecorder(
               `Transcription failed. ${error instanceof Error ? error.message : 'Check the local server.'} Stop and start audio to retry.`,
             );
           }
+        } finally {
+          inFlight = false;
+          if (active) hooks.onBusy?.(false);
         }
       })();
     };
     current.start();
-    onStatus(`${note}Recording a 5-second speech clip…`);
     timer = setTimeout(() => {
       if (active && current.state !== 'inactive') current.stop();
-    }, 5000);
+    }, CLIP_MS);
   }
 
   async function start(shared?: MediaStream) {
@@ -100,6 +132,7 @@ export function createAudioRecorder(
       }
       stream = acquired;
       capture();
+      onStatus('Listening…');
     } catch (error) {
       stop();
       onStatus('Microphone recording is unavailable for transcription.');

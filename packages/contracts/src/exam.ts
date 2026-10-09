@@ -141,6 +141,15 @@ export interface TransparencyEvent {
   readonly description: string;
 }
 
+export interface TranscriptEntry {
+  readonly capturedAt: string;
+  readonly text: string;
+}
+
+export interface TranscriptResponse {
+  readonly entries: readonly TranscriptEntry[];
+}
+
 export interface TransparencyReportResponse {
   readonly events: readonly TransparencyEvent[];
 }

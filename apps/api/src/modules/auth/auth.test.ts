@@ -116,6 +116,7 @@ describe('authentication boundary', () => {
       'attempt_answers',
       'attempt_mutations',
       'audio_sessions',
+      'audio_transcripts',
       'audit_events',
       'exam_assignments',
       'exam_attempts',

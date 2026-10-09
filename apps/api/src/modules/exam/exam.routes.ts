@@ -49,6 +49,7 @@ const eventsPattern = /^\/exam\/attempts\/([^/]+)\/events$/u;
 const visionStatusPath = '/exam/vision-status';
 const visionPattern = /^\/exam\/attempts\/([^/]+)\/vision-check$/u;
 const telemetryPattern = /^\/exam\/attempts\/([^/]+)\/telemetry$/u;
+const transcriptPattern = /^\/exam\/attempts\/([^/]+)\/transcript$/u;
 const transpPattern = /^\/exam\/attempts\/([^/]+)\/transparency$/u;
 const enrollPhonePattern = /^\/exam\/attempts\/([^/]+)\/enroll-phone$/u;
 const phoneStatusPattern = /^\/exam\/attempts\/([^/]+)\/phone-status$/u;
@@ -174,6 +175,7 @@ function isExamPath(path: string): boolean {
     recordingPattern.test(path) ||
     visionPattern.test(path) ||
     telemetryPattern.test(path) ||
+    transcriptPattern.test(path) ||
     transpPattern.test(path)
   );
 }
@@ -190,6 +192,17 @@ function parsePathId<Brand extends string>(value: string, field: string): Opaque
     throw new DomainError('validation_failed', `${field} is invalid.`);
   }
   return decoded as Opaque<string, Brand>;
+}
+
+/** Client clip start time, clamped so a wrong clock cannot reorder the saved log. */
+function parseCapturedAt(value: unknown, now = Date.now()): Date {
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed) && parsed <= now + 60_000 && parsed >= now - 10 * 60_000) {
+      return new Date(parsed);
+    }
+  }
+  return new Date(now);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -536,6 +549,16 @@ export class ExamRoutes {
         return jsonResponse(request, this.config.allowedOrigins, 200, { events });
       }
 
+      // ── Saved audio transcript log (student owner only) ──────────────────
+      const transcriptMatch = transcriptPattern.exec(path);
+      if (method === 'GET' && transcriptMatch !== null && this.integrity !== null) {
+        const principal = this.requireStudent(request);
+        const attemptId = parsePathId<'AttemptId'>(transcriptMatch[1] ?? '', 'Attempt ID');
+        await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
+        const entries = this.integrity.getTranscript(String(attemptId));
+        return jsonResponse(request, this.config.allowedOrigins, 200, { entries });
+      }
+
       // ── Instructor: cross-student similarity review ───────────────────────
       if (method === 'GET' && path === instructorVersionsPath && this.integrity !== null) {
         this.requireInstructor(request);
@@ -683,15 +706,13 @@ export class ExamRoutes {
           const { transcribeAudio } = await import('../integrity/whisper.js');
           const transcript = await transcribeAudio(buffer);
 
-          if (transcript && transcript.length > 0) {
-            // Log it to the database
-            if (this.integrity) {
-              this.integrity.recordAppEvent(
-                String(attemptId),
-                `🎙️ Whisper Transcript: "${transcript}"`,
-                1,
-              );
-            }
+          if (transcript && transcript.trim().length > 0) {
+            // Text only; the audio itself is discarded after transcription.
+            this.integrity?.recordTranscript(
+              String(attemptId),
+              transcript,
+              parseCapturedAt(body.capturedAt),
+            );
           }
 
           return jsonResponse(request, this.config.allowedOrigins, 201, { transcript });

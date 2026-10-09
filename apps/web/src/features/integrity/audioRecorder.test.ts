@@ -54,7 +54,7 @@ describe('independent speech clips', () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
-  it('starts a new complete recording only after the previous upload finishes', async () => {
+  it('records continuously in 3 s clips and skips a clip while one is in flight', async () => {
     let finish!: (body: { transcript: string }) => void;
     const postAudio = vi.fn(
       (_id: string, _audio: string, _duration: number) =>
@@ -63,22 +63,51 @@ describe('independent speech clips', () => {
         }),
     );
     const transcript = vi.fn();
-    const session = createAudioRecorder('a', { postAudio } as unknown as ExamApi, transcript);
+    const skipped = vi.fn();
+    const busy = vi.fn();
+    const session = createAudioRecorder(
+      'a',
+      { postAudio } as unknown as ExamApi,
+      transcript,
+      vi.fn(),
+      { onSkipped: skipped, onBusy: busy },
+    );
     await session.start();
     expect(Recorder.instances[0]?.start).toHaveBeenCalledWith();
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(3000);
     await vi.waitFor(() => expect(postAudio).toHaveBeenCalledOnce());
-    expect(Recorder.instances).toHaveLength(1);
+    // The next complete recording starts immediately, without waiting for the upload.
+    expect(Recorder.instances).toHaveLength(2);
+    expect(busy).toHaveBeenLastCalledWith(true);
     expect(Buffer.from(postAudio.mock.calls[0]![1] as string, 'base64').toString()).toBe(
       'complete-container-1',
     );
-    finish({ transcript: 'test speech' });
-    await vi.waitFor(() => expect(Recorder.instances).toHaveLength(2));
-    expect(transcript).toHaveBeenCalledWith('test speech');
+    expect(postAudio.mock.calls[0]![2]).toBe(3000);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(skipped).toHaveBeenCalledOnce();
+    expect(postAudio).toHaveBeenCalledOnce();
+    expect(Recorder.instances).toHaveLength(3);
+    finish({ transcript: ' test speech ' });
+    await vi.waitFor(() => expect(transcript).toHaveBeenCalledOnce());
+    expect(transcript).toHaveBeenCalledWith('test speech', expect.any(Number));
+    expect(busy).toHaveBeenLastCalledWith(false);
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.waitFor(() => expect(postAudio).toHaveBeenCalledTimes(2));
     session.stop();
     await vi.advanceTimersByTimeAsync(10000);
-    expect(postAudio).toHaveBeenCalledOnce();
+    expect(postAudio).toHaveBeenCalledTimes(2);
     expect(trackStop).toHaveBeenCalledOnce();
+  });
+  it('does not report empty or silent results', async () => {
+    const postAudio = vi.fn(async () => ({ transcript: '   ' }));
+    const transcript = vi.fn();
+    const session = createAudioRecorder('a', { postAudio } as unknown as ExamApi, transcript);
+    await session.start();
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.waitFor(() => expect(postAudio).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transcript).not.toHaveBeenCalled();
+    session.stop();
   });
   it('shows an upload failure instead of silently continuing an empty transcript', async () => {
     const status = vi.fn();
@@ -87,9 +116,9 @@ describe('independent speech clips', () => {
     });
     const session = createAudioRecorder('a', { postAudio } as unknown as ExamApi, vi.fn(), status);
     await session.start();
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(3000);
     await vi.waitFor(() => expect(trackStop).toHaveBeenCalledOnce());
     expect(status.mock.calls.at(-1)?.[0]).toContain('Transcription failed');
-    expect(Recorder.instances).toHaveLength(1);
+    expect(status.mock.calls.at(-1)?.[0]).toContain('Stop and start audio');
   });
 });

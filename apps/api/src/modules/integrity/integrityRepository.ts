@@ -114,6 +114,29 @@ export class IntegrityRepository {
       .run(randomUUID(), attemptId, foregroundApp, displayCount);
   }
 
+  // ── Audio transcripts (text only; raw audio is never stored) ────────────────
+
+  insertAudioTranscript(attemptId: string, capturedAt: string, text: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO audio_transcripts (id, attempt_id, captured_at, text)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(randomUUID(), attemptId, capturedAt, text);
+  }
+
+  getAudioTranscripts(
+    attemptId: string,
+    limit = 5000,
+  ): ReadonlyArray<{ captured_at: string; text: string }> {
+    return this.db
+      .prepare(
+        `SELECT captured_at, text FROM audio_transcripts
+         WHERE attempt_id = ? ORDER BY captured_at ASC, rowid ASC LIMIT ?`,
+      )
+      .all(attemptId, limit) as unknown as ReadonlyArray<{ captured_at: string; text: string }>;
+  }
+
   getRecentAppEvents(
     attemptId: string,
     limit = 50,

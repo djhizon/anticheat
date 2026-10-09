@@ -49,3 +49,21 @@ it('reassures the student when nothing was flagged and reports load failures', a
   );
   expect(container.querySelector('[role="alert"]')?.textContent).toContain('could not be loaded');
 });
+
+it('shows the full transcript log once in a "What was heard" section', async () => {
+  const loadTranscript = vi.fn(async () => [
+    { capturedAt: new Date(2026, 9, 9, 8, 0, 1).toISOString(), text: 'hello there' },
+    { capturedAt: new Date(2026, 9, 9, 8, 0, 4).toISOString(), text: 'second clip' },
+  ]);
+  await act(async () =>
+    root.render(
+      <TransparencyReport attemptId="t" load={async () => []} loadTranscript={loadTranscript} />,
+    ),
+  );
+  expect(loadTranscript).toHaveBeenCalledWith('t');
+  expect(container.textContent).toContain('What was heard');
+  const items = [...container.querySelectorAll('.transcript-log li')].map((i) => i.textContent);
+  expect(items).toEqual(['08:00:01 — hello there', '08:00:04 — second clip']);
+  expect(container.textContent?.match(/hello there/gu)).toHaveLength(1);
+  expect(container.querySelector('.transparency-list')).toBeNull();
+});

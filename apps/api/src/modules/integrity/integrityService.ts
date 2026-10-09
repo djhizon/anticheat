@@ -93,13 +93,6 @@ export class IntegrityService {
           severity: 'medium',
           description: `Flagged behaviour: ${app.foreground_app.slice(5).replaceAll('_', ' ')}`,
         });
-      } else if (app.foreground_app.startsWith('🎙️')) {
-        events.push({
-          timestamp: app.created_at,
-          type: 'AUDIO',
-          severity: 'low',
-          description: app.foreground_app.replace(/^🎙️\s*/u, ''),
-        });
       } else if (app.foreground_app && app.foreground_app !== 'unknown') {
         events.push({
           timestamp: app.created_at,
@@ -445,6 +438,19 @@ export class IntegrityService {
       counts.voice += 1;
     }
     return counts;
+  }
+
+  /** Stores transcript text only. The report lists it once, via getTranscript. */
+  recordTranscript(attemptId: string, text: string, capturedAt: Date = new Date()): void {
+    const clean = text.trim().slice(0, 2000);
+    if (clean === '') return;
+    this.repo.insertAudioTranscript(attemptId, capturedAt.toISOString(), clean);
+  }
+
+  getTranscript(attemptId: string): Array<{ capturedAt: string; text: string }> {
+    return this.repo
+      .getAudioTranscripts(attemptId)
+      .map((row) => ({ capturedAt: row.captured_at, text: row.text }));
   }
 
   recordAppEvent(attemptId: string, foregroundApp: string, displayCount: number): void {
