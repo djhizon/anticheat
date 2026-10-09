@@ -287,6 +287,21 @@ export function createApiServer(
     socket.once('close', () => activeSockets.delete(socket));
   });
 
+  let sweepTimer: ReturnType<typeof setInterval> | undefined;
+  const sweep = (): void => {
+    try {
+      exam.integrity?.sweepExpiredTranscripts();
+    } catch (error) {
+      console.warn('[retention] transcript sweep failed', error);
+    }
+  };
+  const startTranscriptSweep = (): void => {
+    sweep();
+    if (sweepTimer !== undefined) return;
+    sweepTimer = setInterval(sweep, 24 * 60 * 60 * 1000);
+    sweepTimer.unref();
+  };
+
   let lifecycleState: LifecycleState = 'created';
   let startPromise: Promise<AddressInfo> | undefined;
   let closePromise: Promise<void> | undefined;
@@ -341,6 +356,7 @@ export function createApiServer(
           }
           lifecycleState = 'running';
           startPromise = undefined;
+          startTranscriptSweep();
           return address;
         },
         (error: unknown) => {
@@ -374,6 +390,7 @@ export function createApiServer(
           }
           activeSockets.clear();
           stopSharedVisionClient();
+          if (sweepTimer !== undefined) clearInterval(sweepTimer);
 
           try {
             auth.close();

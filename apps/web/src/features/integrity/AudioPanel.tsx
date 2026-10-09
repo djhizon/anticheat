@@ -28,6 +28,7 @@ export function AudioPanel({
   const [status, setStatus] = useState('Audio not started.');
   const [device, setDevice] = useState('');
   const [error, setError] = useState('');
+  const [monitorNote, setMonitorNote] = useState('');
   useEffect(() => {
     setEnabled(false);
     setLog([]);
@@ -100,6 +101,7 @@ export function AudioPanel({
         )
       : null;
     setError('');
+    setMonitorNote('');
     setSnapshot(null);
     setStatus('Starting built-in microphone…');
     const ended = () => {
@@ -117,10 +119,19 @@ export function AudioPanel({
         setMicStream(acquired);
         setDevice(acquired.getAudioTracks()[0]?.label ?? 'Built-in microphone');
         acquired.getAudioTracks().forEach((track) => track.addEventListener('ended', ended));
-        await monitor.start(true, acquired);
+        // Each part fails independently: a monitor failure must not stop transcription.
+        try {
+          await monitor.start(true, acquired);
+        } catch {
+          if (!cancelled) setMonitorNote('Sound-activity monitor unavailable.');
+        }
         if (cancelled) return;
-        await recorder?.start(acquired);
-        if (!recorder) setStatus('Transcription unavailable: exam API is not connected.');
+        try {
+          await recorder?.start(acquired);
+          if (!recorder) setStatus('Transcription unavailable: exam API is not connected.');
+        } catch {
+          if (!cancelled) setStatus('Transcription could not start.');
+        }
       } catch (failure) {
         if (!cancelled) {
           setError(failure instanceof Error ? failure.message : 'Audio failed to start.');
@@ -152,6 +163,7 @@ export function AudioPanel({
         {enabled ? 'Stop audio' : error ? 'Retry audio' : 'Start audio'}
       </button>
       {error && <p role="alert">{error}</p>}
+      {monitorNote && enabled && <p className="muted">{monitorNote}</p>}
       {live && (
         <p>
           Sound activity events: {snapshot.voiceDetectedCount}. This is not proof of speech or

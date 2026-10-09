@@ -73,7 +73,8 @@ desktop lockdown app, and adaptive cloud recording.
   missed, so these are leads, not proof.
 - **What about privacy?** Camera frames never leave the device; recording is
   opt-in; the phone sends flags, not pictures; the student sees everything we
-  recorded.
+  recorded. Audio is transcribed locally by Whisper; only the text is kept
+  (never the audio), for 30 days by default, and bystander speech can be captured.
 - **False positives?** Every signal is a lead for a teacher to review, shown to
   the student too. Liveness has alternatives so nobody is stuck.
 - **Can't a student cheat around it?** Some ways, yes: notes out of frame, a

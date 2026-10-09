@@ -17,6 +17,7 @@ import { StudentExamPage } from './features/exam/StudentExamPage.js';
 import { PreflightCheck } from './features/integrity/PreflightCheck.js';
 import { DemoModeBanner } from './features/integrity/DemoModeBanner.js';
 import { DevelopmentExemptions } from './features/integrity/DevelopmentExemptions.js';
+import { AUDIO_CONSENT_TEXT } from './features/integrity/audioSession.js';
 import { acquireBuiltInMicrophone } from './features/integrity/builtInMicrophone.js';
 import { acquirePhysicalCamera } from './features/integrity/physicalCamera.js';
 
@@ -341,11 +342,11 @@ function StudentWorkspace({
                 <div>
                   <strong>Audio Monitoring</strong>
                   <p>
-                    Microphone access is requested to detect voices other than your own during the
-                    exam. Audio checks start automatically a moment after the camera and can be
-                    stopped from the sidebar. The face-liveness check and screen recording are never
-                    started automatically.
+                    Audio checks start automatically a moment after the camera and can be stopped
+                    from the sidebar. The face-liveness check and screen recording are never started
+                    automatically.
                   </p>
+                  <p>{AUDIO_CONSENT_TEXT}</p>
                 </div>
               </li>
               <li>

@@ -247,3 +247,29 @@ it('words client-scored passes as client-measured, not a confirmed live feed', a
   expect(ok.detail).toMatch(/client-measured/);
   expect(ok.detail).not.toMatch(/live feed confirmed/);
 });
+
+it('sweeps transcripts older than the retention window', () => {
+  const deleteAudioTranscriptsBefore = vi.fn(() => 2);
+  const svc = new IntegrityService(
+    { deleteAudioTranscriptsBefore } as unknown as IntegrityRepository,
+    null,
+    secret,
+    10,
+  );
+  expect(svc.sweepExpiredTranscripts(new Date('2026-10-11T00:00:00.000Z'))).toBe(2);
+  expect(deleteAudioTranscriptsBefore).toHaveBeenCalledWith('2026-10-01T00:00:00.000Z');
+});
+
+it('sweeps expired transcripts before returning a transcript', () => {
+  const calls: string[] = [];
+  const svc = new IntegrityService(
+    {
+      deleteAudioTranscriptsBefore: () => (calls.push('sweep'), 0),
+      getAudioTranscripts: () => (calls.push('read'), []),
+    } as unknown as IntegrityRepository,
+    null,
+    secret,
+  );
+  svc.getTranscript('a');
+  expect(calls).toEqual(['sweep', 'read']);
+});

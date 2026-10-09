@@ -71,7 +71,8 @@ reviewer, never a verdict. Per-label score thresholds can be tuned in
 3. **OWL-ViT first run downloads about 600 MB** from Hugging Face. It is
    opt-in, and the demo does not depend on it.
 4. **Whisper `base` is small.** Accuracy on noisy or accented audio is limited.
-   The transcript is a lead for review, not evidence.
+   The transcript is a lead for review, not evidence. Only transcript text is
+   stored (never audio), and it is deleted after `AUDIO_RETAIN_DAYS` (default 30).
 5. Detection models make mistakes. Every signal is shown to the student and
    labelled as a lead for a human, never an automatic verdict.
 

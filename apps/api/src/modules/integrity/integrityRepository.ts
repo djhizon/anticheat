@@ -125,6 +125,14 @@ export class IntegrityRepository {
       .run(randomUUID(), attemptId, capturedAt, text);
   }
 
+  /** Deletes transcript rows captured before the ISO cutoff. Returns the number removed. */
+  deleteAudioTranscriptsBefore(cutoffIso: string): number {
+    const result = this.db
+      .prepare(`DELETE FROM audio_transcripts WHERE captured_at < ?`)
+      .run(cutoffIso);
+    return Number(result.changes);
+  }
+
   getAudioTranscripts(
     attemptId: string,
     limit = 5000,

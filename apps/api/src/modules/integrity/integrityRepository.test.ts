@@ -16,6 +16,13 @@ beforeEach(() => {
 
 afterEach(() => db.close());
 
+it('deletes only audio transcripts older than the cutoff', () => {
+  repo.insertAudioTranscript('a1', '2026-01-01T00:00:00.000Z', 'old');
+  repo.insertAudioTranscript('a1', '2026-10-01T00:00:00.000Z', 'new');
+  expect(repo.deleteAudioTranscriptsBefore('2026-09-01T00:00:00.000Z')).toBe(1);
+  expect(repo.getAudioTranscripts('a1').map((r) => r.text)).toEqual(['new']);
+});
+
 it('looks up a phone enrollment by attempt id', () => {
   expect(repo.getPhoneEnrollmentByAttempt('attempt-1')).toBeNull();
 

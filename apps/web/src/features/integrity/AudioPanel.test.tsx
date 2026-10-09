@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   stopMeter: vi.fn(),
   meter: vi.fn(),
   recorderStop: vi.fn(),
+  monitorFails: false,
+  recorderStart: vi.fn(async () => {}),
 }));
 vi.mock('./builtInMicrophone.js', () => ({
   acquireBuiltInMicrophone: async () => ({
@@ -23,14 +25,16 @@ vi.mock('./builtInMicrophone.js', () => ({
 }));
 vi.mock('./audioSession.js', () => ({
   createAudioSession: (_id: string, publish: (value: unknown) => void) => ({
-    start: async () =>
+    start: async () => {
+      if (mocks.monitorFails) throw new Error('monitor broke');
       publish({
         phase: 'recording',
         reason: '',
         recordingSeconds: 0,
         voiceDetectedCount: 0,
         lastVoiceAt: null,
-      }),
+      });
+    },
     destroy: () => {},
   }),
 }));
@@ -50,7 +54,7 @@ vi.mock('./audioRecorder.js', () => ({
     hooks: { onSkipped: (at: number) => void; onBusy: (busy: boolean) => void },
   ) => {
     mocks.recorder = { onTranscript, hooks };
-    return { start: async () => {}, stop: mocks.recorderStop };
+    return { start: mocks.recorderStart, stop: mocks.recorderStop };
   },
 }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -62,6 +66,7 @@ const api = { getTranscript: vi.fn(async () => []) } as unknown as ExamApi;
 beforeEach(() => {
   vi.useFakeTimers();
   mocks.recorder = null;
+  mocks.monitorFails = false;
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -78,6 +83,14 @@ async function startAudio(examApi: ExamApi = api) {
   });
 }
 const lines = () => [...container.querySelectorAll('.transcript-line')].map((l) => l.textContent);
+
+it('still starts transcription and shows a note when the sound monitor fails', async () => {
+  mocks.monitorFails = true;
+  await startAudio();
+  expect(mocks.recorderStart).toHaveBeenCalledOnce();
+  expect(container.textContent).toContain('Sound-activity monitor unavailable.');
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+});
 
 it('shows a labelled REC indicator with a meter that is released on stop and unmount', async () => {
   await startAudio();

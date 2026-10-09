@@ -151,6 +151,8 @@ export class IntegrityService {
     // challenges expire in 90s; set LIVENESS_SECRET to survive restarts.
     private readonly livenessSecret: string = process.env.LIVENESS_SECRET ||
       randomBytes(32).toString('hex'),
+    // Transcript text older than this many days is deleted (AUDIO_RETAIN_DAYS).
+    private readonly audioRetainDays: number = 30,
   ) {}
 
   private requireGemini(): GeminiRotatingClient {
@@ -447,7 +449,14 @@ export class IntegrityService {
     this.repo.insertAudioTranscript(attemptId, capturedAt.toISOString(), clean);
   }
 
+  /** Deletes transcript text older than the retention window. Returns rows removed. */
+  sweepExpiredTranscripts(now: Date = new Date()): number {
+    const cutoff = new Date(now.getTime() - this.audioRetainDays * 86_400_000);
+    return this.repo.deleteAudioTranscriptsBefore(cutoff.toISOString());
+  }
+
   getTranscript(attemptId: string): Array<{ capturedAt: string; text: string }> {
+    this.sweepExpiredTranscripts();
     return this.repo
       .getAudioTranscripts(attemptId)
       .map((row) => ({ capturedAt: row.captured_at, text: row.text }));

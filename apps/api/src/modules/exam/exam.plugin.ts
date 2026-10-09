@@ -66,6 +66,8 @@ export function createExamPlugin(
   const integrity: IntegrityService | null = new IntegrityService(
     new IntegrityRepository(database),
     gemini,
+    undefined,
+    config.audioRetainDays,
   );
 
   const routes = new ExamRoutes(

@@ -1,5 +1,14 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { createAudioSession } from './audioSession.js';
+import { AUDIO_CONSENT_TEXT, createAudioSession } from './audioSession.js';
+
+it('consent text discloses local Whisper transcription, text-only storage, retention and bystanders', () => {
+  expect(AUDIO_CONSENT_TEXT).toMatch(/transcribe/);
+  expect(AUDIO_CONSENT_TEXT).toMatch(/on\s+this computer with Whisper/);
+  expect(AUDIO_CONSENT_TEXT).toMatch(/Only the text is saved, never the audio/);
+  expect(AUDIO_CONSENT_TEXT).toMatch(/report/);
+  expect(AUDIO_CONSENT_TEXT).toMatch(/30 days/);
+  expect(AUDIO_CONSENT_TEXT).toMatch(/Other people/);
+});
 const mocks = vi.hoisted(() => ({ acquire: vi.fn() }));
 vi.mock('./builtInMicrophone.js', () => ({ acquireBuiltInMicrophone: mocks.acquire }));
 afterEach(() => {

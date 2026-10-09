@@ -1,5 +1,14 @@
 import { acquireBuiltInMicrophone } from './builtInMicrophone.js';
 
+/** Default of the API's AUDIO_RETAIN_DAYS; the deployment may configure a shorter or longer window. */
+export const AUDIO_RETAIN_DAYS_DEFAULT = 30;
+
+export const AUDIO_CONSENT_TEXT =
+  'Your microphone is used to detect sound activity and to transcribe short clips to text on ' +
+  'this computer with Whisper. Only the text is saved, never the audio. You can see it in your ' +
+  `report. The text is kept for ${AUDIO_RETAIN_DAYS_DEFAULT} days by default and then deleted ` +
+  'automatically. Other people’s speech near you can also be captured and transcribed.';
+
 export interface AudioSnapshot {
   readonly phase: 'off' | 'permission' | 'recording' | 'stopped';
   readonly reason: string;
