@@ -18,6 +18,7 @@ import { headerValue, type AuthRequest, type AuthRequestBoundary } from '../auth
 import { isAllowedOrigin } from '../auth/csrf.js';
 import { ExamService } from './exam.service.js';
 import {
+  EvidenceRateLimitError,
   GeminiUnavailableError,
   LivenessRateLimitError,
   type IntegrityService,
@@ -27,6 +28,13 @@ import {
   isRecordingUploadConfigured,
   uploadRecordingChunk,
 } from '../integrity/graph.js';
+import {
+  EVIDENCE_MAX_BYTES,
+  EVIDENCE_SOURCES,
+  EVIDENCE_TRIGGERS,
+  type EvidenceSource,
+  type EvidenceTrigger,
+} from '@exam-anti-cheat/contracts/exam';
 import type { PhonePresenceService } from '../integrity/phonePresence.js';
 import type { VisionResult } from '../integrity/backendVision.js';
 import { timelineToCsv } from '../integrity/timeline.js';
@@ -62,6 +70,11 @@ const enrollPhonePattern = /^\/exam\/attempts\/([^/]+)\/enroll-phone$/u;
 const phoneStatusPattern = /^\/exam\/attempts\/([^/]+)\/phone-status$/u;
 const timelinePattern = /^\/exam\/attempts\/([^/]+)\/timeline$/u;
 const instructorAttemptsPath = '/exam/instructor/attempts';
+const evidenceListPattern = /^\/exam\/attempts\/([^/]+)\/evidence$/u;
+const evidenceItemPattern = /^\/exam\/attempts\/([^/]+)\/evidence\/([^/]+)$/u;
+/** Base64 of a 300 KB JPEG is ~400 K characters; reject anything bigger before decoding. */
+const MAX_EVIDENCE_BASE64_CHARS = Math.ceil((EVIDENCE_MAX_BYTES * 4) / 3) + 8;
+const JPEG_MAGIC = Buffer.from([0xff, 0xd8, 0xff]);
 const revisionsPattern = /^\/exam\/attempts\/([^/]+)\/revisions$/u;
 /** Segments are ~10 s; 4M base64 chars (~3 MB) is far above the highest profile and below the server body cap. */
 const MAX_RECORDING_BASE64_CHARS = 4_000_000;
@@ -187,6 +200,8 @@ function isExamPath(path: string): boolean {
     visionPattern.test(path) ||
     telemetryPattern.test(path) ||
     transcriptPattern.test(path) ||
+    evidenceListPattern.test(path) ||
+    evidenceItemPattern.test(path) ||
     transpPattern.test(path)
   );
 }
@@ -636,6 +651,48 @@ export class ExamRoutes {
         return jsonResponse(request, this.config.allowedOrigins, 200, { entries });
       }
 
+      // ── Evidence snapshots: triggered still photos for review ─────────────
+      const evidenceItemMatch = evidenceItemPattern.exec(path);
+      if (method === 'GET' && evidenceItemMatch !== null && this.integrity !== null) {
+        const attemptId = await this.authoriseEvidenceRead(
+          request,
+          parsePathId<'AttemptId'>(evidenceItemMatch[1] ?? '', 'Attempt ID'),
+        );
+        const image = this.integrity.getEvidenceImage(
+          attemptId,
+          parsePathId<'EvidenceId'>(evidenceItemMatch[2] ?? '', 'Evidence ID'),
+        );
+        if (image === null) throw new DomainError('not_found', 'Evidence snapshot not found.');
+        return {
+          status: 200,
+          headers: {
+            ...corsHeaders(request, this.config.allowedOrigins),
+            'cache-control': 'private, no-store',
+            'content-type': 'image/jpeg',
+            'content-length': String(image.bytes.length),
+            'x-content-type-options': 'nosniff',
+          },
+          body: image.bytes,
+        };
+      }
+      const evidenceListMatch = evidenceListPattern.exec(path);
+      if (method === 'GET' && evidenceListMatch !== null && this.integrity !== null) {
+        const attemptId = await this.authoriseEvidenceRead(
+          request,
+          parsePathId<'AttemptId'>(evidenceListMatch[1] ?? '', 'Attempt ID'),
+        );
+        return jsonResponse(request, this.config.allowedOrigins, 200, {
+          snapshots: this.integrity.listEvidence(attemptId),
+        });
+      }
+      if (method === 'POST' && evidenceListMatch !== null && this.integrity !== null) {
+        return await this.handleEvidenceUpload(
+          request,
+          parsePathId<'AttemptId'>(evidenceListMatch[1] ?? '', 'Attempt ID'),
+          this.integrity,
+        );
+      }
+
       // ── Instructor: cross-student similarity review ───────────────────────
       if (method === 'GET' && path === instructorVersionsPath && this.integrity !== null) {
         this.requireInstructor(request);
@@ -918,6 +975,93 @@ export class ExamRoutes {
       throw new DomainError('not_found', 'The requested exam route does not exist.');
     } catch (error) {
       return problemResponse(request, this.config.allowedOrigins, error);
+    }
+  }
+
+  /** The owning student or any instructor may read an attempt's evidence. */
+  private async authoriseEvidenceRead(request: AuthRequest, attemptId: string): Promise<string> {
+    const principal = this.boundary.requirePrincipal(request);
+    if (principal.user.role === 'instructor') return attemptId;
+    this.boundary.requireRole(principal, 'student');
+    await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
+    return attemptId;
+  }
+
+  private async handleEvidenceUpload(
+    request: AuthRequest,
+    attemptId: string,
+    integrity: IntegrityService,
+  ): Promise<ExamResponse> {
+    const body = parseObject(request.body, 'Evidence body required');
+    const source = body.source;
+    if (typeof source !== 'string' || !(EVIDENCE_SOURCES as readonly string[]).includes(source)) {
+      throw new DomainError('validation_failed', 'Evidence source is invalid.');
+    }
+    const trigger = body.trigger;
+    if (
+      typeof trigger !== 'string' ||
+      !(EVIDENCE_TRIGGERS as readonly string[]).includes(trigger)
+    ) {
+      throw new DomainError('validation_failed', 'Evidence trigger is not allowed.');
+    }
+
+    // Authenticate first. Laptop sources use the student session + CSRF; the paired
+    // phone has no cookies and presents its scoped credential (as for desk-camera flags).
+    if (source === 'desk_camera') {
+      if (this.phonePresence === null) {
+        throw new DomainError('unauthorized', 'Phone pairing is invalid or expired.');
+      }
+      const owner = this.phonePresence.attemptIdForCredential(body.credential);
+      if (owner !== attemptId) {
+        throw new DomainError('forbidden', 'That phone is not paired to this attempt.');
+      }
+    } else {
+      const principal = this.requireStudent(request);
+      this.boundary.validateUnsafe(request, principal);
+      const delivery = await this.service.getAttemptDelivery(
+        attemptId as AttemptId,
+        principal.user.id,
+      );
+      if (delivery.attempt.status !== 'in_progress') {
+        throw new DomainError(
+          'conflict',
+          'Evidence is only accepted while the attempt is in progress.',
+        );
+      }
+    }
+
+    const image = body.imageJpegBase64;
+    if (
+      typeof image !== 'string' ||
+      image.length === 0 ||
+      image.length > MAX_EVIDENCE_BASE64_CHARS ||
+      !base64Pattern.test(image)
+    ) {
+      throw new DomainError('validation_failed', 'A base64 JPEG of at most 300 KB is required.');
+    }
+    const bytes = Buffer.from(image, 'base64');
+    if (bytes.length > EVIDENCE_MAX_BYTES) {
+      throw new DomainError('validation_failed', 'The snapshot is larger than 300 KB.');
+    }
+    if (bytes.length < JPEG_MAGIC.length || !bytes.subarray(0, 3).equals(JPEG_MAGIC)) {
+      throw new DomainError('validation_failed', 'The snapshot is not a JPEG image.');
+    }
+
+    try {
+      const id = integrity.recordEvidence({
+        attemptId,
+        source: source as EvidenceSource,
+        trigger: trigger as EvidenceTrigger,
+        capturedAt: parseCapturedAt(body.capturedAt),
+        bytes,
+      });
+      return jsonResponse(request, this.config.allowedOrigins, 201, { id });
+    } catch (error) {
+      if (error instanceof EvidenceRateLimitError) {
+        const limited = this.tooManyRequests(request, error.message);
+        return { ...limited, headers: { ...limited.headers, 'retry-after': '30' } };
+      }
+      throw error;
     }
   }
 

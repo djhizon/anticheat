@@ -10,6 +10,7 @@ import { ConfirmPage } from './features/account/ConfirmPage.js';
 import { AttemptTimelineDashboard } from './features/admin/AttemptTimelineDashboard.js';
 import { AiCheckDashboard } from './features/admin/AiCheckDashboard.js';
 import { createInstructorApi } from './features/admin/api.js';
+import { createEvidenceApi } from './features/evidence/evidenceApi.js';
 import { SimilarityDashboard } from './features/admin/SimilarityDashboard.js';
 import { AuthProvider, useAuth } from './features/auth/AuthProvider.js';
 import { LoginPage } from './features/auth/LoginPage.js';
@@ -107,6 +108,7 @@ function InstructorWorkspace({
   readonly onLogout: () => Promise<void>;
 }): React.ReactElement {
   const instructorApi = useMemo(() => createInstructorApi(getCsrfToken), [getCsrfToken]);
+  const evidenceApi = useMemo(() => createEvidenceApi('', getCsrfToken), [getCsrfToken]);
   return (
     <main className="workspace">
       <header className="topbar">
@@ -127,7 +129,7 @@ function InstructorWorkspace({
       </section>
       <SimilarityDashboard api={instructorApi} />
       <AiCheckDashboard api={instructorApi} />
-      <AttemptTimelineDashboard api={instructorApi} />
+      <AttemptTimelineDashboard api={instructorApi} evidence={evidenceApi} />
     </main>
   );
 }
@@ -382,6 +384,17 @@ function StudentWorkspace({
                     to the school&apos;s secure OneDrive for exam review. Quality adapts to your
                     connection; if the connection is poor, segments are saved on your computer
                     instead.
+                  </p>
+                </div>
+              </li>
+              <li>
+                <span className="consent-icon">📸</span>
+                <div>
+                  <strong>Evidence Photos</strong>
+                  <p>
+                    If something unusual is detected (another person, a phone, looking away for a
+                    long time), one still photo is saved for your instructor and shown in your
+                    report.
                   </p>
                 </div>
               </li>

@@ -59,6 +59,7 @@ describe('database migrations', () => {
         { version: 7, name: 'liveness_kinds' },
         { version: 8, name: 'audio_transcripts' },
         { version: 9, name: 'gaze_direction' },
+        { version: 10, name: 'evidence_snapshots' },
       ]);
     } finally {
       database.close();

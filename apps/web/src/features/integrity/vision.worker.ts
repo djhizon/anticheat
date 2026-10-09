@@ -1,6 +1,22 @@
 import { FaceLandmarker, FilesetResolver, ObjectDetector } from '@mediapipe/tasks-vision';
 import ModuleFactory from '@mediapipe/tasks-vision/vision_wasm_module_internal.js';
 import { poseFromMatrix, type VisionReply } from './visionSignals.js';
+import {
+  extractEyeFeatures,
+  faceBoxFromLandmarks,
+  rollFromMatrix,
+  trackingQuality,
+  type Box,
+} from './gazeEstimator.js';
+import { CANDIDATE_SCORE } from './phoneEvidence.js';
+
+// Object detectors are costlier than the face mesh: run them about once a second and reuse the
+// last result in between (flagged `phoneFresh: false` so temporal confirmation ignores repeats).
+const OBJECT_INTERVAL_MS = 900;
+let lastObjectsAt = -Infinity;
+let cachedPhone: { score: number | null; box: Box | null } = { score: null, box: null };
+let cachedEarbuds: boolean | null = null;
+let cachedGlasses: boolean | null = null;
 
 let face: FaceLandmarker | null = null;
 let phone: ObjectDetector | null = null;
@@ -39,8 +55,9 @@ async function initialize(objects: boolean): Promise<void> {
         },
         runningMode: 'VIDEO',
         categoryAllowlist: ['cell phone'],
-        scoreThreshold: 0.6,
-        maxResults: 1,
+        // Low candidate floor; the session requires temporal consistency before confirming.
+        scoreThreshold: CANDIDATE_SCORE,
+        maxResults: 3,
       });
     } catch {
       phone = null;
@@ -104,11 +121,37 @@ worker.onmessage = (
     if (face === null) throw new Error('Face model unavailable');
     const timestamp = performance.now();
     const faces = face.detectForVideo(bitmap, timestamp);
-    const objects = phone?.detectForVideo(bitmap, timestamp);
-    const earbudObjects = earbuds ? earbuds.detectForVideo(bitmap, timestamp) : { detections: [] };
-    const glassObjects = smartGlasses
-      ? smartGlasses.detectForVideo(bitmap, timestamp)
-      : { detections: [] };
+    const objectsDue = timestamp - lastObjectsAt >= OBJECT_INTERVAL_MS;
+    if (objectsDue) {
+      lastObjectsAt = timestamp;
+      const objects = phone?.detectForVideo(bitmap, timestamp);
+      let best: { score: number; box: Box | null } | null = null;
+      for (const detection of objects?.detections ?? []) {
+        for (const category of detection.categories) {
+          if (category.categoryName !== 'cell phone') continue;
+          if (best !== null && category.score <= best.score) continue;
+          const b = detection.boundingBox;
+          best = {
+            score: category.score,
+            box: b
+              ? {
+                  x: b.originX / bitmap.width,
+                  y: b.originY / bitmap.height,
+                  w: b.width / bitmap.width,
+                  h: b.height / bitmap.height,
+                }
+              : null,
+          };
+        }
+      }
+      cachedPhone = { score: best?.score ?? null, box: best?.box ?? null };
+      cachedEarbuds = earbuds
+        ? earbuds.detectForVideo(bitmap, timestamp).detections.length > 0
+        : null;
+      cachedGlasses = smartGlasses
+        ? smartGlasses.detectForVideo(bitmap, timestamp).detections.length > 0
+        : null;
+    }
 
     // ── Blink score from blendshapes ──────────────────────────────────────
     let blinkScore = 0;
@@ -131,6 +174,10 @@ worker.onmessage = (
 
     // ── Pose ─────────────────────────────────────────────────────────────
     const matrix = faces.facialTransformationMatrixes[0];
+    const single = faces.faceLandmarks.length === 1;
+    const mesh = faces.faceLandmarks[0];
+    const eye = single ? extractEyeFeatures(mesh, blendshapes) : null;
+    const faceBox = single && mesh ? faceBoxFromLandmarks(mesh) : null;
 
     worker.postMessage({
       type: 'observation',
@@ -138,16 +185,26 @@ worker.onmessage = (
         faces: faces.faceLandmarks.length,
         pose: faces.faceLandmarks.length === 1 && matrix ? poseFromMatrix(matrix.data) : null,
         phoneAvailable: phone !== null,
-        phone:
-          objects?.detections.some((detection) =>
-            detection.categories.some(
-              (category) => category.categoryName === 'cell phone' && category.score >= 0.6,
-            ),
-          ) ?? false,
+        phone: cachedPhone.score !== null,
+        phoneScore: cachedPhone.score,
+        phoneBox: cachedPhone.box,
+        phoneFresh: objectsDue,
         blinkScore,
-        earbuds: earbuds ? earbudObjects.detections.length > 0 : null,
-        smartGlasses: smartGlasses ? glassObjects.detections.length > 0 : null,
+        earbuds: cachedEarbuds,
+        smartGlasses: cachedGlasses,
         landmarkJitter,
+        eye,
+        headRoll: single && matrix ? rollFromMatrix(matrix.data) : null,
+        faceBox,
+        quality: single
+          ? trackingQuality({
+              box: faceBox,
+              hasIris: (mesh?.length ?? 0) >= 478,
+              poseOk: matrix !== undefined,
+              blink: blinkScore,
+            })
+          : 0,
+        processMs: Math.round(performance.now() - timestamp),
       },
     });
   } catch {

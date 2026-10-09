@@ -18,6 +18,8 @@ export interface ApiConfig {
   readonly geminiModel: string;
   readonly geminiEmbeddingModel: string;
   readonly audioRetainDays: number;
+  /** Days before evidence snapshots are deleted; 0 keeps them until the attempt is removed. */
+  readonly evidenceRetainDays: number;
   readonly livenessFlashThreshold: number;
   readonly livenessNoiseThreshold: number;
   readonly livenessJitterThreshold: number;
@@ -190,6 +192,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     geminiEmbeddingModel: env.GEMINI_EMBEDDING_MODEL?.trim() || 'gemini-embedding-001',
     audioRetainDays: env.AUDIO_RETAIN_DAYS
       ? parseInteger(env.AUDIO_RETAIN_DAYS, 30, 'AUDIO_RETAIN_DAYS')
+      : 30,
+    evidenceRetainDays: env.EVIDENCE_RETAIN_DAYS
+      ? parseInteger(env.EVIDENCE_RETAIN_DAYS, 30, 'EVIDENCE_RETAIN_DAYS')
       : 30,
     livenessFlashThreshold: env.LIVENESS_FLASH_THRESHOLD
       ? parseFloat(env.LIVENESS_FLASH_THRESHOLD)

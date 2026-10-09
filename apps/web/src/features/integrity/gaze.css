@@ -1,0 +1,73 @@
+.gaze-panel {
+  margin-top: 0.75rem;
+  border: 1px solid #d5deeb;
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  background: #fff;
+}
+.gaze-panel > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.gaze-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+.gaze-dial {
+  max-width: 280px;
+  width: 100%;
+}
+.gaze-dial svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.gaze-dial text {
+  font-size: 9px;
+  fill: #44506a;
+}
+.gaze-readouts,
+.gaze-stats-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.75rem;
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+}
+.gaze-readouts dt,
+.gaze-stats-grid dt {
+  color: #5a6783;
+}
+.gaze-readouts dd,
+.gaze-stats-grid dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.gaze-calibrate-prompt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.85rem;
+}
+.gaze-calibration-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(15, 23, 42, 0.92);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+.gaze-calibration-dot {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow: 0 0 0 8px rgba(56, 189, 248, 0.35);
+}

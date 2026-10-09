@@ -1,10 +1,14 @@
 import type { AttemptContext } from './browserIntegrity.js';
+import { createPhoneEvidence } from './phoneEvidence.js';
 import {
-  createPhoneConfirmation,
   relativePose,
   type HeadPose,
   type VisionObservation,
+  type VisionSample,
 } from './visionSignals.js';
+
+/** Minimum spacing between frames sent to the vision worker (a few readings per second). */
+export const FRAME_INTERVAL_MS = 300;
 
 export interface CameraSnapshot {
   readonly phase: 'off' | 'loading' | 'permission' | 'live';
@@ -61,6 +65,8 @@ export function createCameraSession(
   env: CameraEnvironment,
   getAttempt: () => AttemptContext,
   publish: (snapshot: CameraSnapshot) => void,
+  /** Optional per-observation hook (eye-gaze tracker, statistics). Never receives images. */
+  onSample?: (sample: VisionSample) => void,
 ) {
   let state = emptyCamera();
   let disposed = false;
@@ -76,7 +82,7 @@ export function createCameraSession(
   let pending = false;
   let frameStarted = -Infinity;
   const remove: Array<() => void> = [];
-  const phone = createPhoneConfirmation();
+  const phone = createPhoneEvidence();
   const notify = () => {
     if (!disposed) publish(state);
   };
@@ -125,7 +131,7 @@ export function createCameraSession(
       !valid(token) ||
       state.phase !== 'live' ||
       pending ||
-      env.monotonicNow() - frameStarted < 1000
+      env.monotonicNow() - frameStarted < FRAME_INTERVAL_MS
     )
       return;
     pending = true;
@@ -215,16 +221,22 @@ export function createCameraSession(
           latest = observation;
           latestAt = env.monotonicNow();
           if (observation.faces !== 1 || observation.pose === null) baseline = null;
-          const confirmed = phone.sample(observation.phone, latestAt);
+          const evidence = phone.sample({
+            score: observation.phoneScore ?? (observation.phone ? 0.6 : null),
+            fresh: observation.phoneFresh ?? true,
+            now: latestAt,
+            box: observation.phoneBox ?? null,
+            faceBox: observation.faceBox ?? null,
+          });
           state = {
             ...state,
             faces: observation.faces,
             phone:
               observation.phoneAvailable === false
                 ? 'unavailable'
-                : confirmed
+                : evidence.state === 'confirmed'
                   ? 'observed'
-                  : observation.phone
+                  : evidence.state === 'candidate'
                     ? 'candidate'
                     : 'not_observed',
             earbuds: observation.earbuds ?? null,
@@ -243,6 +255,7 @@ export function createCameraSession(
                 : null,
           };
           notify();
+          onSample?.({ observation, at: latestAt, phoneEvidence: evidence });
         },
         () => {
           if (valid(token)) stop('Vision engine unavailable — exam remains usable');

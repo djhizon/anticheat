@@ -2,13 +2,22 @@ import { useEffect, useState } from 'react';
 import type { InstructorAttemptSummary } from '@exam-anti-cheat/contracts/exam';
 
 import { IntegrityTimeline } from '../integrity/IntegrityTimeline.js';
+import { EvidenceGallery } from '../evidence/EvidenceGallery.js';
+import type { EvidenceApi } from '../evidence/evidenceApi.js';
 import type { InstructorTimelineApi } from './api.js';
 
 /**
  * Instructor view of the unified integrity log for one student attempt. The
  * log is a set of leads to read in context, never an automatic verdict.
  */
-export function AttemptTimelineDashboard({ api }: { readonly api: InstructorTimelineApi }) {
+export function AttemptTimelineDashboard({
+  api,
+  evidence,
+}: {
+  readonly api: InstructorTimelineApi;
+  /** When provided, saved photos are shown inline in the log and as a gallery below it. */
+  readonly evidence?: Pick<EvidenceApi, 'listEvidence' | 'loadEvidenceImage'> | undefined;
+}) {
   const [attempts, setAttempts] = useState<readonly InstructorAttemptSummary[] | null>(null);
   const [selected, setSelected] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +66,21 @@ export function AttemptTimelineDashboard({ api }: { readonly api: InstructorTime
           </select>
         </div>
       )}
-      {selected !== '' && <IntegrityTimeline attemptId={selected} api={api} />}
+      {selected !== '' && (
+        <IntegrityTimeline
+          attemptId={selected}
+          api={api}
+          loadEvidenceImage={evidence?.loadEvidenceImage}
+        />
+      )}
+      {selected !== '' && evidence !== undefined && (
+        <EvidenceGallery
+          attemptId={selected}
+          listEvidence={evidence.listEvidence}
+          loadImage={evidence.loadEvidenceImage}
+          note="Still photos saved when local checks noticed something unusual. Treat them as leads for a conversation, not proof."
+        />
+      )}
     </section>
   );
 }

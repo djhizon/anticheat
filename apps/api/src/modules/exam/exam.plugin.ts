@@ -68,6 +68,7 @@ export function createExamPlugin(
     gemini,
     undefined,
     config.audioRetainDays,
+    config.evidenceRetainDays,
   );
 
   const routes = new ExamRoutes(

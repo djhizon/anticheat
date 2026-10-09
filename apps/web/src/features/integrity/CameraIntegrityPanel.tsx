@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AttemptContext } from './browserIntegrity.js';
 import { createCameraSession, emptyCamera } from './cameraSession.js';
 import { cameraEnvironment } from './cameraEnvironment.js';
 import { faceDirection } from './faceDirection.js';
 import { createGazeReporter } from './gazeReporter.js';
+import { useEvidenceCapture } from '../evidence/useEvidenceCapture.js';
+import { createEyeGazeTracker } from './eyeGazeTracker.js';
+import type { GazeSample } from './gazeEstimator.js';
+import { GazePanel } from './GazePanel.js';
 import type { ExamApi } from '../exam/api.js';
 import {
   captureVisionFrame,
@@ -12,30 +16,78 @@ import {
   type ServerVisionStatus,
 } from './serverVision.js';
 
+/** An eye-gaze sample older than this no longer counts as current. */
+const GAZE_FRESH_MS = 1500;
+
 export function CameraIntegrityPanel({
   attempt,
   autoStart = false,
   api,
+  onGazeSample,
+  paused = false,
 }: {
   readonly attempt: AttemptContext;
+  /**
+   * Eye-gaze hook: called for every smoothed, calibrated gaze sample (about 2-4 per second while
+   * one face is visible). Debounce before logging. Never receives images.
+   */
+  readonly onGazeSample?: (sample: GazeSample) => void;
+  /**
+   * True while the camera gate has paused answering: no evidence snapshots are taken and no
+   * gaze events are logged until it resumes.
+   */
+  readonly paused?: boolean;
   /** Start once on mount when consent was given; a failure is never retried. */
   readonly autoStart?: boolean;
   /** Used for the opt-in server (OWL-ViT) second opinion; omitted means browser checks only. */
   readonly api?:
     | (Pick<ExamApi, 'getServerVisionEnabled' | 'postVisionCheck'> &
-        Partial<Pick<ExamApi, 'uploadTelemetry' | 'patchEvents'>>)
+        Partial<Pick<ExamApi, 'uploadTelemetry' | 'patchEvents' | 'postEvidence'>>)
     | undefined;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const current = useRef(attempt);
   current.current = attempt;
   const controller = useRef<ReturnType<typeof createCameraSession> | null>(null);
+  const onGaze = useRef(onGazeSample);
+  onGaze.current = onGazeSample;
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
+  /** Latest eye-gaze sample; ignored once older than GAZE_FRESH_MS (tracking lost). */
+  const latestGaze = useRef<GazeSample | null>(null);
+  const freshGaze = (): GazeSample | null => {
+    const sample = latestGaze.current;
+    return sample !== null && performance.now() - sample.t <= GAZE_FRESH_MS ? sample : null;
+  };
+  const gazeTracker = useMemo(
+    () =>
+      createEyeGazeTracker({
+        onSample: (sample) => {
+          latestGaze.current = sample;
+          try {
+            onGaze.current?.(sample);
+          } catch {
+            // A consumer error must never stop camera checks.
+          }
+        },
+      }),
+    // A fresh tracker (statistics + calibration) per attempt.
+    [attempt.id],
+  );
   const [snapshot, setSnapshot] = useState(emptyCamera);
   const [cameraLabel, setCameraLabel] = useState('');
   const objects = true;
   const [lowLight, setLowLight] = useState(false);
   const [serverVision, setServerVision] = useState(false);
   const [serverStatus, setServerStatus] = useState<ServerVisionStatus>({ state: 'not_checked' });
+  useEvidenceCapture({
+    attemptId: attempt.id,
+    active: attempt.active && !paused,
+    snapshot,
+    video,
+    api,
+    gaze: freshGaze,
+  });
   const live = snapshot.phase === 'live';
   const running = snapshot.phase !== 'off';
   const readings = live && snapshot.faces !== null;
@@ -46,8 +98,11 @@ export function CameraIntegrityPanel({
       cameraEnvironment(video.current, setCameraLabel, objects),
       () => current.current,
       setSnapshot,
+      (sample) => gazeTracker.push(sample),
     );
     controller.current = session;
+    gazeTracker.reset();
+    latestGaze.current = null;
     setSnapshot(emptyCamera());
     setLowLight(false);
     // Auto-start runs once per attempt (never from a retry loop). Capture stays
@@ -57,7 +112,7 @@ export function CameraIntegrityPanel({
       session.destroy();
       controller.current = null;
     };
-  }, [attempt.id, attempt.active, autoStart, objects]);
+  }, [attempt.id, attempt.active, autoStart, objects, gazeTracker]);
 
   // Debounced direction / face-count / phone events go to the unified integrity log.
   const reporter = useRef<ReturnType<typeof createGazeReporter> | null>(null);
@@ -76,16 +131,18 @@ export function CameraIntegrityPanel({
     };
   }, [attempt.id, attempt.active, api]);
   useEffect(() => {
-    if (!live) {
+    if (!live || paused) {
       reporter.current?.pause();
       return;
     }
+    // Prefer the eye-gaze signal (head + iris, calibrated); fall back to head pose.
+    const gaze = freshGaze();
     reporter.current?.sample({
       faces: snapshot.faces,
-      pose: snapshot.relative ?? snapshot.pose,
+      pose: gaze ? { yaw: gaze.yaw, pitch: gaze.pitch } : (snapshot.relative ?? snapshot.pose),
       phone: snapshot.phone,
     });
-  }, [live, snapshot]);
+  }, [live, snapshot, paused]);
 
   useEffect(() => {
     if (!api?.getServerVisionEnabled) return;
@@ -151,7 +208,7 @@ export function CameraIntegrityPanel({
       </div>
       <p className="muted">
         Camera checks start automatically when the exam opens (you can stop and restart them) and
-        run at most once per second. Missing models are not treated as clear results.
+        run a few times per second on this device. Missing models are not treated as clear results.
       </p>
       <div className="cam-preview">
         <video
@@ -240,6 +297,7 @@ export function CameraIntegrityPanel({
           Calibrate face direction
         </button>
       )}
+      <GazePanel tracker={gazeTracker} live={live} />
       <p className="muted">
         Direction is relative to your calibrated pose and camera coordinates—not eye gaze or proof
         of cheating.

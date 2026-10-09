@@ -141,6 +141,46 @@ export interface TransparencyEvent {
   readonly description: string;
 }
 
+export const EVIDENCE_SOURCES = ['webcam', 'screen', 'desk_camera'] as const;
+export type EvidenceSource = (typeof EVIDENCE_SOURCES)[number];
+
+/** Why a snapshot was taken. Shared by the laptop client, the iPhone app and the API. */
+export const EVIDENCE_TRIGGERS = [
+  'multiple_faces',
+  'no_face',
+  'phone_detected',
+  'look_away',
+  'overlay_detected',
+  'disallowed_app_foreground',
+  'extra_person',
+  'left_frame',
+  'hands_not_visible',
+] as const;
+export type EvidenceTrigger = (typeof EVIDENCE_TRIGGERS)[number];
+
+/** Limits enforced by the API and mirrored by clients. */
+export const EVIDENCE_MAX_BYTES = 300 * 1024;
+export const EVIDENCE_MIN_GAP_MS = 30_000;
+export const EVIDENCE_MAX_PER_ATTEMPT = 60;
+
+export interface EvidenceSnapshotMeta {
+  readonly id: string;
+  readonly source: EvidenceSource;
+  readonly trigger: EvidenceTrigger;
+  readonly capturedAt: string;
+}
+
+export interface EvidenceListResponse {
+  readonly snapshots: readonly EvidenceSnapshotMeta[];
+}
+
+export interface EvidenceUploadRequest {
+  readonly source: EvidenceSource;
+  readonly trigger: EvidenceTrigger;
+  readonly capturedAt: string;
+  readonly imageJpegBase64: string;
+}
+
 export interface TranscriptEntry {
   readonly capturedAt: string;
   readonly text: string;

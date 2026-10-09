@@ -51,6 +51,18 @@ export function startDesktopWatcher(
       reportedCapture.add(label);
       send({ event: 'capture_display_connected' }).catch(() => {});
     }
+    // Another app in front is an evidence trigger once it is reported repeatedly (the
+    // capture hook applies the 2 s hold). Demo mode disables environment checks.
+    if (
+      typeof window !== 'undefined' &&
+      snapshot.runMode !== 'demo' &&
+      snapshot.foregroundApp !== 'unknown' &&
+      !OWN_APPS.has(snapshot.foregroundApp)
+    ) {
+      window.dispatchEvent(
+        new CustomEvent('evidence-trigger', { detail: { trigger: 'disallowed_app_foreground' } }),
+      );
+    }
     const suspicious = snapshot.displayCount > 1 || !OWN_APPS.has(snapshot.foregroundApp);
     const key = `${snapshot.foregroundApp}|${snapshot.displayCount}`;
     if (key === last) return;

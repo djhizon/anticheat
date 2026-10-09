@@ -27,6 +27,7 @@ function rows(overrides: Partial<TimelineRows> = {}): TimelineRows {
     revisions: [],
     phones: [],
     audits: [],
+    evidence: [],
     ...overrides,
   };
 }
@@ -201,6 +202,45 @@ describe('buildTimeline', () => {
     ]);
     expect(typing[0]?.data).toEqual({ keystrokes: 2, medianDwellMs: 90, medianFlightMs: 120 });
   });
+
+  it('maps evidence snapshots to non-accusatory notices carrying only ids', () => {
+    const entries = buildTimeline(
+      rows({
+        evidence: [
+          {
+            id: 'e1',
+            source: 'webcam',
+            trigger: 'multiple_faces',
+            captured_at: '2026-09-15T00:02:00.000Z',
+          },
+          {
+            id: 'e2',
+            source: 'screen',
+            trigger: 'overlay_detected',
+            captured_at: '2026-09-15T00:03:00.000Z',
+          },
+          {
+            id: 'e3',
+            source: 'desk_camera',
+            trigger: 'left_frame',
+            captured_at: '2026-09-15T00:04:00.000Z',
+          },
+          { id: 'e4', source: 'webcam', trigger: 'look_away', captured_at: 'not a date' },
+        ],
+      }),
+    );
+    const photos = entries.filter((e) => e.kind === 'evidence_snapshot');
+    expect(photos.map((e) => [e.source, e.severity])).toEqual([
+      ['camera', 'notice'],
+      ['desktop', 'notice'],
+      ['phone', 'notice'],
+    ]);
+    expect(photos[0]).toMatchObject({
+      summary: 'Photo saved: another person in view',
+      data: { evidenceId: 'e1', trigger: 'multiple_faces', source: 'webcam' },
+    });
+    expect(photos[2]?.summary).toBe('Photo saved: nobody in view of the desk camera');
+  });
 });
 
 describe('CSV export', () => {
@@ -284,5 +324,35 @@ describe('IntegrityService.getTimeline over a real database', () => {
     ]);
     const log = service.getTimeline('a1', new Set(['gaze']));
     expect(log?.map((e) => e.kind)).toEqual(['gaze_down', 'gaze_away']);
+  });
+
+  it('lists stored evidence snapshots in the log without their image bytes', () => {
+    db.exec('PRAGMA foreign_keys = OFF;');
+    db.exec('DROP TRIGGER published_assignment_only;');
+    db.exec(`
+      INSERT INTO exam_assignments (id, exam_version_id, student_id, assigned_at)
+        VALUES ('as1', 'v1', 'u1', '2026-09-15T00:00:00.000Z');
+      INSERT INTO exam_attempts (id, assignment_id, status, attempt_seed, started_at, base_deadline, effective_deadline)
+        VALUES ('a1', 'as1', 'in_progress', 's', '2026-09-15T00:00:00.000Z', '2026-09-15T01:00:00.000Z', '2026-09-15T01:00:00.000Z');
+    `);
+    const id = service.recordEvidence({
+      attemptId: 'a1',
+      source: 'webcam',
+      trigger: 'no_face',
+      capturedAt: new Date('2026-09-15T00:05:00.000Z'),
+      bytes: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+      now: new Date('2026-09-15T00:05:01.000Z'),
+    });
+    const log = service.getTimeline('a1', new Set(['camera']));
+    expect(log).toEqual([
+      {
+        at: '2026-09-15T00:05:00.000Z',
+        source: 'camera',
+        kind: 'evidence_snapshot',
+        severity: 'notice',
+        summary: 'Photo saved: no face in view',
+        data: { evidenceId: id, trigger: 'no_face', source: 'webcam' },
+      },
+    ]);
   });
 });

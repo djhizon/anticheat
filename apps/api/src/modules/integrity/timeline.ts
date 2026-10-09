@@ -338,6 +338,38 @@ function revisionEntries(rows: TimelineRows['revisions']): Entry[] {
   return out;
 }
 
+/** Plain, non-accusatory description of why a photo was saved. */
+const EVIDENCE_TEXT: Record<string, string> = {
+  multiple_faces: 'another person in view',
+  no_face: 'no face in view',
+  phone_detected: 'a possible phone in view',
+  look_away: 'looked away for a while',
+  overlay_detected: 'a possible overlay on screen',
+  disallowed_app_foreground: 'another app in front',
+  extra_person: 'another person in view of the desk camera',
+  left_frame: 'nobody in view of the desk camera',
+  hands_not_visible: 'hands not visible to the desk camera',
+};
+
+const EVIDENCE_SOURCE: Record<string, IntegrityTimelineSource> = {
+  webcam: 'camera',
+  screen: 'desktop',
+  desk_camera: 'phone',
+};
+
+function evidenceEntry(row: TimelineRows['evidence'][number]): Entry | null {
+  const at = iso(row.captured_at);
+  if (at === null) return null;
+  const source = EVIDENCE_SOURCE[row.source] ?? 'system';
+  const reason = EVIDENCE_TEXT[row.trigger] ?? row.trigger.replaceAll('_', ' ');
+  const what = row.source === 'screen' ? 'Screenshot' : 'Photo';
+  return entry(at, source, 'evidence_snapshot', 'notice', `${what} saved: ${reason}`, {
+    evidenceId: row.id,
+    trigger: row.trigger,
+    source: row.source,
+  });
+}
+
 const AUDIT_TEXT: Record<string, string> = {
   'auth.logged_in': 'The student signed in',
   'auth.logged_out': 'The student signed out',
@@ -414,6 +446,7 @@ export function buildTimeline(rows: TimelineRows): IntegrityTimelineEntry[] {
     if (at !== null)
       push(entry(at, 'phone', 'phone_pairing_started', 'info', 'A phone pairing was started'));
   }
+  for (const row of rows.evidence) push(evidenceEntry(row));
   for (const row of rows.audits) {
     const at = iso(row.occurred_at);
     if (at !== null)

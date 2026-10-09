@@ -87,6 +87,13 @@ export interface TimelineRows {
   }>;
   readonly phones: ReadonlyArray<{ created_at: string; last_seen_at: string | null }>;
   readonly audits: ReadonlyArray<{ occurred_at: string; action: string }>;
+  /** Metadata only: image bytes are never loaded into the timeline. */
+  readonly evidence: ReadonlyArray<{
+    id: string;
+    source: string;
+    trigger: string;
+    captured_at: string;
+  }>;
 }
 
 export class IntegrityRepository {
@@ -169,6 +176,81 @@ export class IntegrityRepository {
          VALUES (?, ?, ?, ?)`,
       )
       .run(randomUUID(), attemptId, foregroundApp, displayCount);
+  }
+
+  // ── Evidence snapshots (triggered still JPEGs, never video) ─────────────────
+
+  insertEvidence(row: {
+    readonly id: string;
+    readonly attemptId: string;
+    readonly source: string;
+    readonly trigger: string;
+    readonly capturedAt: string;
+    readonly createdAt: string;
+    readonly bytes: Buffer;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO evidence_snapshots (id, attempt_id, source, trigger, captured_at, created_at, mime, bytes)
+         VALUES (?, ?, ?, ?, ?, ?, 'image/jpeg', ?)`,
+      )
+      .run(
+        row.id,
+        row.attemptId,
+        row.source,
+        row.trigger,
+        row.capturedAt,
+        row.createdAt,
+        new Uint8Array(row.bytes),
+      );
+  }
+
+  countEvidence(attemptId: string): number {
+    const row = this.db
+      .prepare('SELECT COUNT(*) AS n FROM evidence_snapshots WHERE attempt_id = ?')
+      .get(attemptId) as unknown as { n: number };
+    return Number(row.n);
+  }
+
+  /** Snapshots saved for this (attempt, source, trigger) at or after the ISO time. */
+  countEvidenceSince(attemptId: string, source: string, trigger: string, sinceIso: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM evidence_snapshots
+         WHERE attempt_id = ? AND source = ? AND trigger = ? AND created_at >= ?`,
+      )
+      .get(attemptId, source, trigger, sinceIso) as unknown as { n: number };
+    return Number(row.n);
+  }
+
+  listEvidence(
+    attemptId: string,
+  ): ReadonlyArray<{ id: string; source: string; trigger: string; captured_at: string }> {
+    return this.db
+      .prepare(
+        `SELECT id, source, trigger, captured_at FROM evidence_snapshots
+         WHERE attempt_id = ? ORDER BY captured_at ASC, rowid ASC`,
+      )
+      .all(attemptId) as unknown as ReadonlyArray<{
+      id: string;
+      source: string;
+      trigger: string;
+      captured_at: string;
+    }>;
+  }
+
+  getEvidence(attemptId: string, id: string): { mime: string; bytes: Uint8Array } | null {
+    const row = this.db
+      .prepare('SELECT mime, bytes FROM evidence_snapshots WHERE attempt_id = ? AND id = ?')
+      .get(attemptId, id) as unknown as { mime: string; bytes: Uint8Array } | undefined;
+    return row ?? null;
+  }
+
+  deleteEvidenceBefore(cutoffIso: string): number {
+    const result = this.db
+      .prepare('DELETE FROM evidence_snapshots WHERE created_at < ?')
+      .run(cutoffIso);
+    return Number(result.changes);
   }
 
   // ── Audio transcripts (text only; raw audio is never stored) ────────────────
@@ -338,6 +420,11 @@ export class IntegrityRepository {
         meta.studentId,
         meta.startedAt,
         end,
+      ),
+      evidence: all(
+        `SELECT id, source, trigger, captured_at FROM evidence_snapshots
+          WHERE attempt_id = ? ORDER BY captured_at, rowid LIMIT 100`,
+        attemptId,
       ),
     };
   }

@@ -158,6 +158,16 @@ export function StudentExamPage({
     };
   }, [examApi]);
 
+  const evidenceView = useMemo(() => {
+    const list = examApi?.listEvidence;
+    const image = examApi?.loadEvidenceImage;
+    if (!examApi || !list || !image) return undefined;
+    return {
+      listEvidence: (id: string) => list.call(examApi, id),
+      loadImage: (id: string, evidenceId: string) => image.call(examApi, id, evidenceId),
+    };
+  }, [examApi]);
+
   const loadTranscript = useCallback(
     (attemptId: string) => examApi?.getTranscript?.(attemptId) ?? Promise.resolve([]),
     [examApi],
@@ -1015,6 +1025,7 @@ export function StudentExamPage({
                   attempt={attemptProps}
                   autoStart={sensorsConsented}
                   api={examApi}
+                  paused={cameraPaused}
                 />
               </Suspense>
             </div>
@@ -1126,6 +1137,7 @@ export function StudentExamPage({
                 load={loadTransparencyReport}
                 loadTranscript={loadTranscript}
                 timelineApi={timelineApi}
+                evidence={evidenceView}
               />
             )}
           </main>

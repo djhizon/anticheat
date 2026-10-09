@@ -19,6 +19,7 @@ import { appendFileSync, existsSync, statSync, writeFileSync } from 'fs';
 import { createAppController, createHelperCall } from './appControl';
 import { classifyDisplays, detectVirtualMachine } from './environment';
 import { defaultRunMode, mayCloseApps, planModeSwitch, type RunMode } from './mode';
+import { captureScreenSnapshot } from './screenSnapshot';
 import { readJudgeBuild, readRunMode, writeRunMode } from './settings';
 import {
   checkCanConnect,
@@ -544,6 +545,17 @@ ipcMain.handle('get-display-count', (event) => {
 ipcMain.handle('get-environment-risk', (event) => {
   if (!trustedAppFrame(event)) throw new Error('Untrusted application request.');
   return getEnvironmentRisk();
+});
+// One still of the primary screen for an evidence snapshot; only while an attempt is being
+// watched, and never a stream (see screenSnapshot.ts for the throttle and size cap).
+ipcMain.handle('capture-screen-snapshot', (event) => {
+  if (!trustedAppFrame(event)) throw new Error('Untrusted application request.');
+  if (!watcherInterval) return null;
+  return captureScreenSnapshot({
+    getSources: (options) => desktopCapturer.getSources(options),
+    primaryDisplay: () => screen.getPrimaryDisplay(),
+    now: Date.now,
+  });
 });
 ipcMain.handle('get-foreground-app', (event) => {
   if (!trustedAppFrame(event)) throw new Error('Untrusted application request.');

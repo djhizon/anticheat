@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 
 import { DomainError } from '@exam-anti-cheat/contracts';
 import type { GeminiRotatingClient } from './gemini.js';
@@ -22,13 +22,20 @@ import {
 import { transcribeAudio } from './whisper.js';
 import { checkForAiGeneration } from './aiCheck.js';
 import { computeSimilarityReport, SIMILARITY_THRESHOLD } from './similarity.js';
-import { VIRTUAL_CAMERA_LABEL } from '@exam-anti-cheat/contracts/exam';
+import {
+  EVIDENCE_MAX_PER_ATTEMPT,
+  EVIDENCE_MIN_GAP_MS,
+  VIRTUAL_CAMERA_LABEL,
+} from '@exam-anti-cheat/contracts/exam';
 import type {
   InstructorAttemptSummary,
   IntegrityTimelineEntry,
   IntegrityTimelineSource,
   AiCheckResult,
   AiCheckRunResponse,
+  EvidenceSnapshotMeta,
+  EvidenceSource,
+  EvidenceTrigger,
   InstructorExamVersion,
   SimilarityRunResponse,
   TransparencyEvent,
@@ -75,6 +82,13 @@ export class LivenessRateLimitError extends Error {
   constructor() {
     super('Too many liveness checks requested. Wait a few minutes and try again.');
     this.name = 'LivenessRateLimitError';
+  }
+}
+
+export class EvidenceRateLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EvidenceRateLimitError';
   }
 }
 
@@ -175,6 +189,8 @@ export class IntegrityService {
       randomBytes(32).toString('hex'),
     // Transcript text older than this many days is deleted (AUDIO_RETAIN_DAYS).
     private readonly audioRetainDays: number = 30,
+    // Evidence snapshots older than this many days are deleted (EVIDENCE_RETAIN_DAYS); 0 keeps them.
+    private readonly evidenceRetainDays: number = 30,
   ) {}
 
   private requireGemini(): GeminiRotatingClient {
@@ -491,6 +507,65 @@ export class IntegrityService {
     return this.repo.deleteAudioTranscriptsBefore(cutoff.toISOString());
   }
 
+  // ── Evidence snapshots ───────────────────────────────────────────────────────
+
+  /**
+   * Stores one validated JPEG. Enforces at most one per (attempt, source, trigger)
+   * per 30 s and 60 per attempt; throws EvidenceRateLimitError past either limit.
+   */
+  recordEvidence(input: {
+    readonly attemptId: string;
+    readonly source: EvidenceSource;
+    readonly trigger: EvidenceTrigger;
+    readonly capturedAt: Date;
+    readonly bytes: Buffer;
+    readonly now?: Date;
+  }): string {
+    const now = input.now ?? new Date();
+    this.sweepExpiredEvidence(now);
+    if (this.repo.countEvidence(input.attemptId) >= EVIDENCE_MAX_PER_ATTEMPT) {
+      throw new EvidenceRateLimitError('The evidence limit for this attempt is reached.');
+    }
+    const since = new Date(now.getTime() - EVIDENCE_MIN_GAP_MS).toISOString();
+    if (this.repo.countEvidenceSince(input.attemptId, input.source, input.trigger, since) > 0) {
+      throw new EvidenceRateLimitError('An evidence snapshot for this trigger was just saved.');
+    }
+    const id = randomUUID();
+    this.repo.insertEvidence({
+      id,
+      attemptId: input.attemptId,
+      source: input.source,
+      trigger: input.trigger,
+      capturedAt: input.capturedAt.toISOString(),
+      createdAt: now.toISOString(),
+      bytes: input.bytes,
+    });
+    return id;
+  }
+
+  /** Deletes evidence older than the retention window (0 days keeps everything). */
+  sweepExpiredEvidence(now: Date = new Date()): number {
+    if (this.evidenceRetainDays <= 0) return 0;
+    const cutoff = new Date(now.getTime() - this.evidenceRetainDays * 86_400_000);
+    return this.repo.deleteEvidenceBefore(cutoff.toISOString());
+  }
+
+  listEvidence(attemptId: string): EvidenceSnapshotMeta[] {
+    this.sweepExpiredEvidence();
+    return this.repo.listEvidence(attemptId).map((row) => ({
+      id: row.id,
+      source: row.source as EvidenceSource,
+      trigger: row.trigger as EvidenceTrigger,
+      capturedAt: row.captured_at,
+    }));
+  }
+
+  getEvidenceImage(attemptId: string, id: string): { mime: string; bytes: Buffer } | null {
+    this.sweepExpiredEvidence();
+    const row = this.repo.getEvidence(attemptId, id);
+    return row ? { mime: row.mime, bytes: Buffer.from(row.bytes) } : null;
+  }
+
   getTranscript(attemptId: string): Array<{ capturedAt: string; text: string }> {
     this.sweepExpiredTranscripts();
     return this.repo
@@ -506,6 +581,7 @@ export class IntegrityService {
     const meta = this.repo.getAttemptTimelineMeta(attemptId);
     if (meta === null) return null;
     this.sweepExpiredTranscripts();
+    this.sweepExpiredEvidence();
     const entries = buildTimeline(this.repo.getTimelineRows(attemptId, meta));
     return sources === undefined ? entries : entries.filter((e) => sources.has(e.source));
   }

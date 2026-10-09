@@ -151,6 +151,11 @@ export class PhonePresenceService {
     return { ok: true, remainingMs: challenge.issued + PHONE_LEASE_MS - now };
   }
 
+  /** Attempt a valid, unexpired phone credential is paired to; throws unauthorized otherwise. */
+  attemptIdForCredential(value: unknown): string {
+    return this.authenticate(value).attempt_id;
+  }
+
   /** Optional desk-camera flags from the phone. Flags only; never images. Does not touch the lease.
    * These are cooperative signals authenticated only by the pairing credential: whoever holds
    * it can send or withhold them. They are leads for a human reviewer, not verdicts. */

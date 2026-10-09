@@ -7,7 +7,11 @@ It was written from the code, not from intent; limitations are stated.
 
 "On-device (browser)" runs in the student's browser tab (WASM, CPU). "On-device
 (server process)" runs in the API process or a child process on the same
-machine as `npm run dev`; nothing leaves the machine.
+machine as `npm run dev`. Camera and screen frames are analysed locally and are not
+streamed anywhere. The one exception is evidence snapshots: when a local check
+holds an unusual condition (see "Evidence snapshots" below), a single downscaled
+still photo is saved to the local API database for the instructor, and the
+student sees it in their report.
 
 | Component                                                        | What it does                                                                                                            | Where it runs                                                          | Model and approx size                                                                      | Works offline?                                                                                |
 | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
@@ -43,6 +47,32 @@ webcam resolution are often missed, so a result is a lead for a human
 reviewer, never a verdict. Per-label score thresholds can be tuned in
 `apps/api/vendor/yolo_server.py` (`LABEL_THRESHOLDS`, default 0.4).
 
+### Eye gaze and the phone detector (browser, on-device)
+
+Gaze is estimated locally from the same FaceLandmarker run that gives head pose: no new
+model, no image leaves the device. Gaze = head yaw/pitch (face transform) + eye-in-head
+direction, where the eye term blends (a) the iris centres (landmarks 468/473) relative to the
+eye corners (33/133, 362/263) and lids (159/145, 386/374) with (b) the
+`eyeLookIn/Out/Up/Down` blendshapes. The result is smoothed with a One-Euro filter and shown
+on the "Gaze details" dial (compass bearing, head vs eyes, 5 s trail) next to statistics
+(time on screen, look-aways of 1 s or more, per-direction dwell, blink rate, face present %,
+multiple-face events, tracking quality, phone detections, vision frames/s). An optional
+5-point calibration (centre plus four corners, about 1.7 s each) fits an offset and per-axis
+gain; "Centre only" is the fallback, and with no calibration the camera centre is used.
+
+Limits: expect roughly +-5 to 10 degrees on a typical webcam. Glasses (glare, thick frames),
+dim or back-lit rooms, a camera far from the screen, and extreme head angles all degrade it,
+and the blink rate misses fast blinks at a few frames per second. The "tracking quality"
+figure is a proxy (face size, iris landmarks, pose, eye openness) because FaceLandmarker
+exposes no per-face confidence. Gaze is context for a human reviewer, never a verdict.
+
+Phone detector: EfficientDet-Lite0 now returns up to 3 'cell phone' boxes at a 0.4 candidate
+floor (run about once a second). A phone is only "Detected" when 3 of the last 5 detector
+frames scored >= 0.5, or one frame scored >= 0.75; weaker evidence shows as "Possible phone".
+Boxes overlapping the face are flagged but not discarded, because a phone held to the ear
+overlaps the face. Logic: `phoneEvidence.ts`; gaze maths: `gazeEstimator.ts`; statistics:
+`gazeStats.ts`; tracker and hook: `eyeGazeTracker.ts`.
+
 ## How the cloud parts degrade
 
 - **No `GEMINI_API_KEYS`:** `exam.plugin.ts` logs that AI checks are disabled
@@ -75,6 +105,24 @@ reviewer, never a verdict. Per-label score thresholds can be tuned in
    stored (never audio), and it is deleted after `AUDIO_RETAIN_DAYS` (default 30).
 5. Detection models make mistakes. Every signal is shown to the student and
    labelled as a lead for a human, never an automatic verdict.
+
+## Evidence snapshots
+
+- **What:** when a local check holds for at least 2 seconds (more than one
+  face, no face, a phone, a long look-away of 5 s or more, an overlay, or, in
+  the desktop app, another app in front), the laptop takes one still frame from
+  the already-open camera (at most 640 px wide, JPEG quality 0.6, 300 KB cap). In
+  the desktop app, overlay and foreground-app triggers also save one still of
+  the primary screen. The paired iPhone desk camera may send one still for its
+  own triggers. This is never continuous video.
+- **Limits:** one snapshot per attempt, source and trigger every 30 seconds, and
+  60 per attempt. The client and the API both enforce this.
+- **Who sees it:** the instructor (Evidence gallery) and the owning student
+  (transparency report). The student agrees to this in the consent list.
+- **Retention:** stored in the API's SQLite database and deleted after
+  `EVIDENCE_RETAIN_DAYS` (default 30; 0 keeps them until the attempt is removed).
+- **Honesty note:** a snapshot is a lead for a human, not proof. A screen
+  snapshot may show whatever was on the screen at that moment.
 
 ## Offline demo
 

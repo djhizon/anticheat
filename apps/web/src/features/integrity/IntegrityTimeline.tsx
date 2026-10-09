@@ -21,6 +21,58 @@ const sourceMeta: Record<IntegrityTimelineSource, { icon: string; label: string;
   system: { icon: '⚙️', label: 'System', noun: 'notes' },
 };
 
+/**
+ * Entries that point at a saved still photo get a "View photo" button. The image is fetched
+ * only when asked for, shown as a small thumbnail, and its blob URL is revoked on unmount.
+ */
+function EvidenceLink({
+  attemptId,
+  evidenceId,
+  load,
+}: {
+  readonly attemptId: string;
+  readonly evidenceId: string;
+  readonly load: (attemptId: string, id: string) => Promise<string>;
+}) {
+  const [state, setState] = useState<'idle' | 'loading' | 'failed' | { readonly url: string }>(
+    'idle',
+  );
+  const url = typeof state === 'object' ? state.url : null;
+  useEffect(
+    () => () => {
+      if (url !== null && url.startsWith('blob:')) URL.revokeObjectURL(url);
+    },
+    [url],
+  );
+  if (url !== null) {
+    return (
+      <a href={url} target="_blank" rel="noreferrer" className="timeline-evidence">
+        <img src={url} alt="Saved photo for this entry" />
+      </a>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="timeline-evidence-link"
+      disabled={state === 'loading'}
+      onClick={() => {
+        setState('loading');
+        load(attemptId, evidenceId).then(
+          (loaded) => setState({ url: loaded }),
+          () => setState('failed'),
+        );
+      }}
+    >
+      {state === 'loading'
+        ? 'Loading photo…'
+        : state === 'failed'
+          ? 'Photo unavailable'
+          : 'View photo'}
+    </button>
+  );
+}
+
 const severityLabel = { info: 'Info', notice: 'Worth a look', flag: 'Review' } as const;
 
 function durationSeconds(entries: readonly IntegrityTimelineEntry[]): number {
@@ -72,10 +124,13 @@ export function IntegrityTimeline({
   attemptId,
   api,
   title = 'Integrity log',
+  loadEvidenceImage,
 }: {
   readonly attemptId: string;
   readonly api: IntegrityTimelineApi;
   readonly title?: string;
+  /** When provided, entries that reference a saved photo offer a "View photo" button. */
+  readonly loadEvidenceImage?: ((attemptId: string, id: string) => Promise<string>) | undefined;
 }) {
   const [entries, setEntries] = useState<readonly IntegrityTimelineEntry[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -143,7 +198,8 @@ export function IntegrityTimeline({
       <h3 className="integrity-timeline__title">{title}</h3>
       <p className="transparency-note">
         Everything monitoring recorded for this attempt, in time order. Entries are leads for a
-        person to review in context, not verdicts. No images or audio are stored.
+        person to review in context, not verdicts. Audio is never stored; the only images are the
+        occasional still photos saved for unusual conditions.
       </p>
       {failed && <p role="alert">The integrity log could not be loaded. Try again later.</p>}
       {!failed && entries === null && <p role="status">Loading log…</p>}
@@ -199,7 +255,21 @@ export function IntegrityTimeline({
                         <span aria-hidden="true">{sourceMeta[entry.source].icon}</span>{' '}
                         {sourceMeta[entry.source].label}
                       </span>
-                      <span className="timeline-item__summary">{entry.summary}</span>
+                      <span className="timeline-item__summary">
+                        {entry.summary}
+                        {loadEvidenceImage !== undefined &&
+                          typeof entry.data?.evidenceId === 'string' && (
+                            <>
+                              {' '}
+                              <EvidenceLink
+                                key={entry.data.evidenceId}
+                                attemptId={attemptId}
+                                evidenceId={entry.data.evidenceId}
+                                load={loadEvidenceImage}
+                              />
+                            </>
+                          )}
+                      </span>
                       <span className="timeline-item__severity">
                         {severityLabel[entry.severity]}
                       </span>

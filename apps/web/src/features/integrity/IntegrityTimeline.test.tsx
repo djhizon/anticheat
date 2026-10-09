@@ -122,3 +122,53 @@ it('appears inside the student transparency report when a timeline api is provid
   expect(container.querySelector('.integrity-timeline')).not.toBeNull();
   expect(container.textContent).toContain('Head turned to the left for 6 s');
 });
+
+it('offers View photo on evidence entries and loads the image only on click', async () => {
+  const withPhoto: IntegrityTimelineEntry[] = [
+    ...entries,
+    {
+      at: '2026-09-15T00:04:00.000Z',
+      source: 'camera',
+      kind: 'evidence_snapshot',
+      severity: 'notice',
+      summary: 'Photo saved: another person in view',
+      data: { evidenceId: 'ev1', trigger: 'multiple_faces', source: 'webcam' },
+    },
+  ];
+  const api = {
+    getTimeline: vi.fn(async () => withPhoto),
+    downloadTimeline: vi.fn(async () => {}),
+  };
+  const loadEvidenceImage = vi.fn(async () => 'https://example.test/photo.jpg');
+  await act(async () =>
+    root.render(
+      <IntegrityTimeline attemptId="a1" api={api} loadEvidenceImage={loadEvidenceImage} />,
+    ),
+  );
+  const buttons = [...container.querySelectorAll('button.timeline-evidence-link')];
+  expect(buttons).toHaveLength(1);
+  expect(loadEvidenceImage).not.toHaveBeenCalled();
+  await act(async () => (buttons[0] as HTMLButtonElement).click());
+  expect(loadEvidenceImage).toHaveBeenCalledWith('a1', 'ev1');
+  expect(container.querySelector('.timeline-evidence img')?.getAttribute('src')).toBe(
+    'https://example.test/photo.jpg',
+  );
+});
+
+it('shows no View photo button without an image loader', async () => {
+  const api = {
+    getTimeline: vi.fn(async () => [
+      {
+        at: '2026-09-15T00:04:00.000Z',
+        source: 'camera' as const,
+        kind: 'evidence_snapshot',
+        severity: 'notice' as const,
+        summary: 'Photo saved: no face in view',
+        data: { evidenceId: 'ev1' },
+      },
+    ]),
+    downloadTimeline: vi.fn(async () => {}),
+  };
+  await act(async () => root.render(<IntegrityTimeline attemptId="a1" api={api} />));
+  expect(container.querySelector('.timeline-evidence-link')).toBeNull();
+});

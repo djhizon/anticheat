@@ -11,6 +11,8 @@ import type {
   TransparencyEvent,
   IntegrityTimelineEntry,
   TranscriptEntry,
+  EvidenceSnapshotMeta,
+  EvidenceUploadRequest,
 } from '@exam-anti-cheat/contracts/exam';
 
 import type { FetchLike } from '../auth/api.js';
@@ -20,6 +22,7 @@ import {
   timelineUrl,
   type TimelineFormat,
 } from '../integrity/timelineApi.js';
+import { createEvidenceApi } from '../evidence/evidenceApi.js';
 
 export interface ExamProblem {
   readonly code:
@@ -297,6 +300,10 @@ export interface ExamApi {
   /** Unified chronological integrity log (same data the instructor sees). */
   getTimeline?(attemptId: string): Promise<readonly IntegrityTimelineEntry[]>;
   downloadTimeline?(attemptId: string, format: TimelineFormat): Promise<void>;
+  /** Triggered still snapshots (see features/evidence). */
+  postEvidence?(attemptId: string, request: EvidenceUploadRequest): Promise<void>;
+  listEvidence?(attemptId: string): Promise<readonly EvidenceSnapshotMeta[]>;
+  loadEvidenceImage?(attemptId: string, id: string): Promise<string>;
 }
 
 export class BrowserExamApi implements ExamApi {
@@ -681,6 +688,22 @@ export class BrowserExamApi implements ExamApi {
         types.has(event.type as string) &&
         severities.has(event.severity as string),
     );
+  }
+
+  private evidence() {
+    return createEvidenceApi(this.baseUrl, this.csrfTokenProvider, this.fetchImpl);
+  }
+
+  postEvidence(attemptId: string, request: EvidenceUploadRequest): Promise<void> {
+    return this.evidence().postEvidence(attemptId, request);
+  }
+
+  listEvidence(attemptId: string): Promise<readonly EvidenceSnapshotMeta[]> {
+    return this.evidence().listEvidence(attemptId);
+  }
+
+  loadEvidenceImage(attemptId: string, id: string): Promise<string> {
+    return this.evidence().loadEvidenceImage(attemptId, id);
   }
 
   async getTranscript(attemptId: string): Promise<readonly TranscriptEntry[]> {

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { formatClock } from './transcriptLog.js';
 import { IntegrityTimeline } from './IntegrityTimeline.js';
 import type { IntegrityTimelineApi } from './timelineApi.js';
+import { EvidenceGallery, type EvidenceGalleryProps } from '../evidence/EvidenceGallery.js';
 import type { TranscriptEntry, TransparencyEvent } from '@exam-anti-cheat/contracts/exam';
 
 const typeIcon: Record<TransparencyEvent['type'], string> = {
@@ -21,12 +22,15 @@ export function TransparencyReport({
   load,
   loadTranscript,
   timelineApi,
+  evidence,
 }: {
   readonly attemptId: string;
   readonly load: (attemptId: string) => Promise<readonly TransparencyEvent[]>;
   readonly loadTranscript?: (attemptId: string) => Promise<readonly TranscriptEntry[]>;
   /** When provided, the same unified log the instructor sees is shown below. */
   readonly timelineApi?: IntegrityTimelineApi | undefined;
+  /** When provided, the still snapshots saved for this attempt are listed too. */
+  readonly evidence?: Pick<EvidenceGalleryProps, 'listEvidence' | 'loadImage'> | undefined;
 }) {
   const [events, setEvents] = useState<readonly TransparencyEvent[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -90,7 +94,21 @@ export function TransparencyReport({
         </ol>
       )}
       {timelineApi !== undefined && (
-        <IntegrityTimeline attemptId={attemptId} api={timelineApi} title="Full integrity log" />
+        <IntegrityTimeline
+          attemptId={attemptId}
+          api={timelineApi}
+          title="Full integrity log"
+          loadEvidenceImage={evidence?.loadImage}
+        />
+      )}
+      {evidence !== undefined && (
+        <EvidenceGallery
+          attemptId={attemptId}
+          listEvidence={evidence.listEvidence}
+          loadImage={evidence.loadImage}
+          title="Photos saved"
+          note="If something unusual was detected (another person, a phone, looking away for a long time), one still photo was saved for your instructor. These are all of them."
+        />
       )}
       {transcript.length > 0 && (
         <section aria-labelledby="transcript-title" className="transparency-transcript">
