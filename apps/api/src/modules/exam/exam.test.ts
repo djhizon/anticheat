@@ -696,6 +696,33 @@ describe('exam delivery boundary', () => {
     ]);
   });
 
+  it('runs opt-in backend vision on in-progress attempts and logs detected devices', async () => {
+    const owner = await registerStudent('vision@example.test');
+    const other = await registerStudent('other@example.test');
+    const seeded = await seedExam();
+    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: owner.userId });
+    const started = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
+    const integrity = { recordAppEvent: vi.fn() };
+    const detector = vi.fn(async () => ({
+      status: 'ok' as const,
+      detections: [{ label: 'person', score: 0.99 }, { label: 'cell phone', score: 0.8 }],
+    }));
+    const path = `/exam/attempts/${attemptId}/vision-check`;
+    const frame = { imageBase64: `data:image/jpeg;base64,${Buffer.from('jpeg').toString('base64')}` };
+
+    expect((await exam.routes.handle(studentRequest(owner, 'POST', path, frame))).status).toBe(404); // disabled by default
+    const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity as unknown as IntegrityService, null, detector);
+    expect((await routes.handle(studentRequest(other, 'POST', path, frame))).status).toBe(404);
+    expect((await routes.handle(studentRequest(owner, 'POST', path, { imageBase64: 'not base64!' }))).status).toBe(400);
+    expect(detector).not.toHaveBeenCalled();
+
+    const checked = await routes.handle(studentRequest(owner, 'POST', path, frame));
+    expect(checked.body).toEqual({ status: 'ok', detections: [{ label: 'cell phone', score: 0.8 }] });
+    expect(detector).toHaveBeenCalledWith(Buffer.from('jpeg').toString('base64'));
+    expect(integrity.recordAppEvent).toHaveBeenCalledWith(attemptId, 'flag:vision_cell_phone', 1);
+  });
+
   it('checks audio ownership before inference and reports inference failures instead of empty success', async () => {
     const owner = await registerStudent('audio@example.test');
     const other = await registerStudent('other@example.test');

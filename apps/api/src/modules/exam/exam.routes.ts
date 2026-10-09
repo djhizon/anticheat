@@ -18,6 +18,7 @@ import { ExamService } from './exam.service.js';
 import type { IntegrityService } from '../integrity/integrityService.js';
 import { uploadRecordingChunk } from '../integrity/graph.js';
 import type { PhonePresenceService } from '../integrity/phonePresence.js';
+import type { VisionResult } from '../integrity/backendVision.js';
 
 export type ExamResponseHeaderValue = string | readonly string[];
 
@@ -220,6 +221,8 @@ export class ExamRoutes {
     private readonly config: ApiConfig,
     private readonly integrity: IntegrityService | null = null,
     private readonly phonePresence: PhonePresenceService | null = null,
+    // Opt-in (ENABLE_BACKEND_VISION): server-side OWL-ViT detection via the Python bridge.
+    private readonly visionDetector: ((imageBase64: string) => Promise<VisionResult>) | null = null,
   ) {}
 
   async handle(request: AuthRequest): Promise<ExamResponse> {
@@ -460,6 +463,32 @@ export class ExamRoutes {
           parsePathId<'QuestionVersionId'>(similarityMatch[2] ?? '', 'Question ID'),
         );
         return jsonResponse(request, this.config.allowedOrigins, 200, result);
+      }
+
+      // ── Backend vision: second-opinion object detection on a camera frame ─
+      const visionMatch = visionPattern.exec(path);
+      if (method === 'POST' && visionMatch !== null && this.visionDetector !== null) {
+        const principal = this.requireStudent(request);
+        this.boundary.validateUnsafe(request, principal);
+        const attemptId = parsePathId<'AttemptId'>(visionMatch[1] ?? '', 'Attempt ID');
+        const delivery = await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
+        if (delivery.attempt.status !== 'in_progress') {
+          throw new DomainError('conflict', 'Vision checks are only accepted while the attempt is in progress.');
+        }
+        const body = parseObject(request.body, 'Vision body required');
+        const image = typeof body.imageBase64 === 'string' ? body.imageBase64.replace(/^data:image\/\w+;base64,/u, '') : '';
+        if (image === '' || image.length > 2_000_000 || !/^[A-Za-z0-9+/=]+$/u.test(image)) {
+          throw new DomainError('validation_failed', 'A base64 camera frame under 1.5 MB is required.');
+        }
+        const result = await this.visionDetector(image);
+        const threats = (result.detections ?? []).filter((detection) => detection.label !== 'person');
+        for (const threat of threats) {
+          this.integrity?.recordAppEvent(String(attemptId), `flag:vision_${threat.label.replaceAll(' ', '_')}`, 1);
+        }
+        return jsonResponse(request, this.config.allowedOrigins, 200, {
+          status: result.status,
+          detections: threats.map((threat) => ({ label: threat.label, score: threat.score })),
+        });
       }
 
       // ── Pack 8: Phone enrollment ──────────────────────────────────────────

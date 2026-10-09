@@ -8,6 +8,7 @@ import { SecureTokenGenerator, type TokenGenerator } from '../auth/session.js';
 import { GeminiRotatingClient } from '../integrity/gemini.js';
 import { IntegrityRepository } from '../integrity/integrityRepository.js';
 import { IntegrityService } from '../integrity/integrityService.js';
+import { detectObjectsRemotely } from '../integrity/backendVision.js';
 import { ExamRepository } from './exam.repository.js';
 import { ExamRoutes } from './exam.routes.js';
 import { ExamService } from './exam.service.js';
@@ -64,7 +65,14 @@ export function createExamPlugin(
   }
   const integrity: IntegrityService | null = new IntegrityService(new IntegrityRepository(database), gemini);
 
-  const routes = new ExamRoutes(service, boundary, config, integrity, phonePresence);
+  const routes = new ExamRoutes(
+    service,
+    boundary,
+    config,
+    integrity,
+    phonePresence,
+    config.backendVisionEnabled ? detectObjectsRemotely : null,
+  );
 
   return { repository, service, routes, integrity, phonePresence };
 }

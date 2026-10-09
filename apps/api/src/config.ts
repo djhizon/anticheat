@@ -13,6 +13,7 @@ export interface ApiConfig {
   readonly csrfCookieName: string;
   readonly csrfHeaderName: string;
   readonly freshExamGenerationEnabled: boolean;
+  readonly backendVisionEnabled: boolean;
   readonly geminiKeys: readonly string[];
   readonly geminiModel: string;
   readonly geminiEmbeddingModel: string;
@@ -129,6 +130,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     csrfCookieName: 'eac_csrf',
     csrfHeaderName: 'x-csrf-token',
     freshExamGenerationEnabled,
+    backendVisionEnabled: parseBoolean(env.ENABLE_BACKEND_VISION, false, 'ENABLE_BACKEND_VISION'),
     geminiKeys: env.GEMINI_API_KEYS ? env.GEMINI_API_KEYS.split(',').map(k => k.trim()).filter(k => k !== '') : [],
     geminiModel: env.GEMINI_MODEL?.trim() || 'gemini-3.6-flash',
     geminiEmbeddingModel: env.GEMINI_EMBEDDING_MODEL?.trim() || 'gemini-embedding-exp-03-07',

@@ -47,6 +47,8 @@ export class IntegrityService {
     for (const app of data.apps) {
       if (app.display_count > 1) {
         events.push({ timestamp: app.created_at, type: 'HARDWARE', severity: 'high', description: `Multiple displays detected (${app.display_count})` });
+      } else if (app.foreground_app.startsWith('flag:vision_')) {
+        events.push({ timestamp: app.created_at, type: 'VISION', severity: 'high', description: `Server vision detected: ${app.foreground_app.slice(12).replaceAll('_', ' ')}` });
       } else if (app.foreground_app.startsWith('flag:')) {
         events.push({ timestamp: app.created_at, type: 'SOFTWARE', severity: 'medium', description: `Flagged behaviour: ${app.foreground_app.slice(5).replaceAll('_', ' ')}` });
       } else if (app.foreground_app.startsWith('🎙️')) {
