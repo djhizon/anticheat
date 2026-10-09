@@ -59,6 +59,10 @@ put the phone face-down. Details: [docs/iphone-presence.md](docs/iphone-presence
 | Student      | `demo.student@example.test`    | `Demo exam password 2026!`       |
 | Instructor   | `demo.instructor@example.test` | `Demo instructor password 2026!` |
 
+Or create your own account: choose **Sign up** on the sign-in screen and register with any
+email. In the Mac app the account is stored locally on that Mac; when email accounts are
+configured (Supabase), a confirmation email is sent first.
+
 ## Develop
 
 Node ≥ 24.7 (`.nvmrc`). `npm run demo` checks the machine, installs, seeds and starts the API
