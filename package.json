@@ -20,6 +20,7 @@
     "dev:web": "npm run dev --workspace @exam-anti-cheat/web",
     "demo:seed": "npm run demo:seed --workspace @exam-anti-cheat/api",
     "setup:whisper": "bash scripts/setup-whisper.sh",
+    "setup:vision": "bash scripts/setup-vision.sh",
     "vision:prepare": "node scripts/prepare-vision-assets.mjs",
     "vision:verify": "node scripts/prepare-vision-assets.mjs --verify",
     "vision:smoke": "node scripts/vision-smoke.mjs",

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -26,34 +27,52 @@ type SpawnVision = () => ChildProcess;
 interface Pending {
   readonly resolve: (value: VisionResult) => void;
   readonly reject: (reason: Error) => void;
-  readonly timer: ReturnType<typeof setTimeout>;
+  readonly payload: string;
+  /** Started only once the request is actually sent to a ready server. */
+  timer: ReturnType<typeof setTimeout> | null;
 }
 
 const defaultScript = fileURLToPath(new URL('../../../vendor/yolo_server.py', import.meta.url));
+const venvPython = fileURLToPath(new URL('../../../vendor/venv/bin/python', import.meta.url));
+
+/** VISION_PYTHON, else the venv from `npm run setup:vision`, else python3 on PATH. */
+export function visionPython(
+  env: NodeJS.ProcessEnv = process.env,
+  venvExists = existsSync(venvPython),
+): string {
+  return env.VISION_PYTHON || (venvExists ? venvPython : 'python3');
+}
 
 export class VisionClient {
   private process: ChildProcess | null = null;
   private stdoutBuffer = '';
+  private ready = false;
+  private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly pending: Pending[] = [];
 
   constructor(
-    private readonly spawnVision: SpawnVision = () => spawn('python3', [defaultScript]),
+    private readonly spawnVision: SpawnVision = () => spawn(visionPython(), [defaultScript]),
     private readonly timeoutMs = 20000,
     private readonly maxPending = 16,
+    // Loading OWL-ViT takes ~10s warm and much longer on the first model download.
+    private readonly startupTimeoutMs = 300000,
   ) {}
 
   detect(imageBase64: string): Promise<VisionResult> {
     if (this.pending.length >= this.maxPending) {
       return Promise.reject(new Error('Vision server is busy.'));
     }
-    const child = this.start();
+    this.start();
     return new Promise<VisionResult>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        // A timed-out request leaves the response stream out of step, so restart.
-        this.fail(new Error('Vision request timed out.'));
-      }, this.timeoutMs);
-      this.pending.push({ resolve, reject, timer });
-      child.stdin?.write(`${JSON.stringify({ image_base64: imageBase64 })}\n`);
+      const request: Pending = {
+        resolve,
+        reject,
+        payload: `${JSON.stringify({ image_base64: imageBase64 })}\n`,
+        timer: null,
+      };
+      this.pending.push(request);
+      // Until the model reports READY, requests wait unsent and untimed.
+      if (this.ready) this.send(request);
     });
   }
 
@@ -66,6 +85,11 @@ export class VisionClient {
     const child = this.spawnVision();
     this.process = child;
     this.stdoutBuffer = '';
+    this.ready = false;
+    this.startupTimer = setTimeout(
+      () => this.fail(new Error('Vision model did not finish loading.')),
+      this.startupTimeoutMs,
+    );
 
     child.stdout?.on('data', (data: Buffer | string) => {
       // stdout chunks can split or merge JSON lines, so buffer until a newline.
@@ -75,7 +99,13 @@ export class VisionClient {
       for (const line of lines.filter(Boolean)) this.settle(line);
     });
     child.stderr?.on('data', (data: Buffer | string) => {
-      console.log('[OWL-ViT]', data.toString().trim());
+      const text = data.toString();
+      console.log('[OWL-ViT]', text.trim());
+      if (!this.ready && this.process === child && /^READY$/mu.test(text)) {
+        this.ready = true;
+        if (this.startupTimer) clearTimeout(this.startupTimer);
+        for (const request of this.pending) this.send(request);
+      }
     });
     child.on('exit', () => {
       if (this.process === child) this.fail(new Error('Vision server exited.'));
@@ -86,10 +116,18 @@ export class VisionClient {
     return child;
   }
 
+  private send(request: Pending): void {
+    request.timer = setTimeout(() => {
+      // A timed-out request leaves the response stream out of step, so restart.
+      this.fail(new Error('Vision request timed out.'));
+    }, this.timeoutMs);
+    this.process?.stdin?.write(request.payload);
+  }
+
   private settle(line: string): void {
     const next = this.pending.shift();
     if (!next) return;
-    clearTimeout(next.timer);
+    if (next.timer) clearTimeout(next.timer);
     try {
       next.resolve(JSON.parse(line) as VisionResult);
     } catch {
@@ -100,9 +138,11 @@ export class VisionClient {
   private fail(error: Error): void {
     const child = this.process;
     this.process = null;
+    this.ready = false;
+    if (this.startupTimer) clearTimeout(this.startupTimer);
     child?.kill();
     for (const request of this.pending.splice(0)) {
-      clearTimeout(request.timer);
+      if (request.timer) clearTimeout(request.timer);
       request.reject(error);
     }
   }
