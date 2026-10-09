@@ -321,10 +321,10 @@ function StudentWorkspace({
               <li>
                 <span className="consent-icon">☁️</span>
                 <div>
-                  <strong>Cloud Screen Recording</strong>
+                  <strong>Optional Screen Recording</strong>
                   <p>
-                    Your screen and microphone will be continuously recorded and uploaded to the
-                    cloud for appeal reviews.
+                    Only if you turn it on: your screen is recorded in short segments that are saved
+                    to your own computer. Nothing is uploaded.
                   </p>
                 </div>
               </li>
@@ -340,8 +340,9 @@ function StudentWorkspace({
                 <div>
                   <strong>AI Integrity Check</strong>
                   <p>
-                    Answers may be analysed by Gemini AI for signs of AI-generated text after
-                    submission.
+                    Your instructor may ask Gemini AI to review written answers for signs of
+                    AI-generated text. Results are a lead for a conversation, never an automatic
+                    penalty.
                   </p>
                 </div>
               </li>

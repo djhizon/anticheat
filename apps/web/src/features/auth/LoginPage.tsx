@@ -84,20 +84,18 @@ export function LoginPage(): React.ReactElement {
           <span />
         </div>
         <p className="auth-kicker">Pack 8 Active</p>
-        <h1 id="auth-intro-title">Strict Exam Environment</h1>
+        <h1 id="auth-intro-title">Fair, Transparent Exams</h1>
         <p className="auth-intro-copy">
-          Your exam is secured by advanced machine learning, native OS hardware tracking, and
-          physical environment validation.
+          On-device AI checks your camera, audio and typing during the exam. You see every monitor
+          before you start and everything recorded after you finish.
         </p>
         <div className="auth-promise" role="note">
           <span className="promise-icon" aria-hidden="true">
             🛡️
           </span>
           <span>
-            <strong>Anti-Cheat Enabled.</strong>
-            <small>
-              All behavior, background apps, and audio are continuously monitored and logged.
-            </small>
+            <strong>Consent first.</strong>
+            <small>Every signal is a lead for a human to review, never an automatic verdict.</small>
           </span>
         </div>
       </section>
