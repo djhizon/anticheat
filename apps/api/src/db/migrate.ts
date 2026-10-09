@@ -1,5 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
+import { sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
+import { pathToFileURL } from 'node:url';
 
 export interface Migration {
   readonly version: number;
@@ -7,10 +9,21 @@ export interface Migration {
   readonly sql: string;
 }
 
-const migrationDirectory = new URL('./migrations/', import.meta.url);
+/**
+ * Migrations live next to this module in source builds. The bundled desktop server copies them
+ * next to the bundle (`dist/migrations`) and points `MIGRATIONS_DIR` at them.
+ */
+function resolveMigrationDirectory(): URL {
+  const override = process.env.MIGRATIONS_DIR?.trim();
+  if (override) {
+    return pathToFileURL(override.endsWith(sep) ? override : `${override}${sep}`);
+  }
+  return new URL('./migrations/', import.meta.url);
+}
 const migrationFilePattern = /^(\d{4})_([a-z0-9_-]+)\.sql$/u;
 
 export function loadMigrations(): readonly Migration[] {
+  const migrationDirectory = resolveMigrationDirectory();
   return readdirSync(migrationDirectory, { withFileTypes: true })
     .filter((entry) => entry.isFile())
     .map((entry) => {

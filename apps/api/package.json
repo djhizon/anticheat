@@ -9,7 +9,9 @@
     "build": "npm run typecheck",
     "test:e2e": "vitest run --config ../../vitest.config.ts src/server.test.ts",
     "test": "vitest run --config ../../vitest.config.ts src",
-    "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --useUnknownInCatchVariables --forceConsistentCasingInFileNames --skipLibCheck src/*.ts src/db/*.ts src/modules/auth/*.ts src/modules/exam/*.ts"
+    "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --useUnknownInCatchVariables --forceConsistentCasingInFileNames --skipLibCheck src/*.ts src/db/*.ts src/modules/auth/*.ts src/modules/exam/*.ts",
+    "build:bundle": "node ../../scripts/build-api-bundle.mjs",
+    "smoke:bundle": "node ../../scripts/api-bundle-smoke.mjs"
   },
   "devDependencies": {
     "vite-node": "^3.2.4"

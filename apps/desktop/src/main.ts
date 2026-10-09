@@ -10,6 +10,7 @@ import {
   dialog,
   desktopCapturer,
   shell,
+  utilityProcess,
 } from 'electron';
 
 import { execSync } from 'child_process';
@@ -19,6 +20,13 @@ import { createAppController, createHelperCall } from './appControl';
 import { classifyDisplays, detectVirtualMachine } from './environment';
 import { mayCloseApps, planModeSwitch, type RunMode } from './mode';
 import { readRunMode, writeRunMode } from './settings';
+import {
+  checkCanConnect,
+  checkPortFree,
+  nodeChildProcess,
+  startRuntime,
+  type RuntimeHandle,
+} from './runtime';
 
 const WEB_URL = 'http://127.0.0.1:5173/';
 const APP_WATCH_INTERVAL_MS = 2000;
@@ -28,6 +36,11 @@ let watcherInterval: ReturnType<typeof setInterval> | null = null;
 // Demo is the safe default; the persisted choice is loaded once the app is ready.
 let runMode: RunMode = 'demo';
 let appController: ReturnType<typeof createAppController> | null = null;
+let runtime: RuntimeHandle | null = null;
+
+// `npm run dev` keeps using the Vite + API dev servers; otherwise the bundled server is started.
+const useDevServers =
+  process.argv.includes('--use-dev-servers') || process.env.EAC_USE_DEV_SERVERS === '1';
 
 function trustedAppFrame(event: Electron.IpcMainInvokeEvent): boolean {
   return (
@@ -457,13 +470,53 @@ ipcMain.handle('get-display-count', () => getDisplayCount());
 ipcMain.handle('get-environment-risk', () => getEnvironmentRisk());
 ipcMain.handle('get-foreground-app', () => getForegroundApp());
 
+async function startLocalServer(): Promise<boolean> {
+  if (useDevServers) return true;
+  runtime = await startRuntime({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    repoRoot: path.join(__dirname, '../../..'),
+    userDataPath: app.getPath('userData'),
+    forkUtility: (entry, options) =>
+      utilityProcess.fork(entry, [], {
+        cwd: options.cwd,
+        env: options.env,
+        stdio: 'pipe',
+        serviceName: 'Exam Anti-Cheat server',
+      }),
+    forkNode: (entry, options) => nodeChildProcess(entry, options),
+    isPortFree: checkPortFree,
+    canConnect: checkCanConnect,
+    showError: async (title, message) => {
+      await dialog.showMessageBox({ type: 'error', title, message, buttons: ['Quit'] });
+    },
+    log: (line) => diagnostic('server-runtime', line),
+  });
+  return runtime !== null;
+}
+
 app.whenReady().then(async () => {
   runMode = readRunMode(app.getPath('userData'));
+  if (!(await startLocalServer())) {
+    app.quit();
+    return;
+  }
   if (process.platform === 'darwin') {
     await systemPreferences.askForMediaAccess('camera');
     await systemPreferences.askForMediaAccess('microphone');
   }
   void createWindow();
+});
+
+let stoppingRuntime = false;
+app.on('before-quit', (event) => {
+  if (!runtime || stoppingRuntime) return;
+  stoppingRuntime = true;
+  event.preventDefault();
+  void runtime.stop().finally(() => {
+    runtime = null;
+    app.quit();
+  });
 });
 
 app.on('window-all-closed', () => {
