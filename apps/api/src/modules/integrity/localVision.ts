@@ -138,7 +138,9 @@ export function createLocalVision(options: {
       timeoutMs,
     );
     inFlight = { ...next, timer };
-    const copy = next.jpeg.slice();
+    // A Node Buffer is often a view into a shared pool; transferring its ArrayBuffer throws
+    // DataCloneError and kills the server. Copy into a fresh, exactly-sized buffer first.
+    const copy = toTransferable(next.jpeg);
     worker.postMessage({ type: 'run', id: next.id, jpeg: copy }, [copy.buffer]);
   }
 
@@ -228,4 +230,11 @@ export function createLocalVision(options: {
       shutdown(new Error('Local detector stopped.'), false);
     },
   };
+}
+
+/** A standalone copy whose ArrayBuffer is exactly its bytes, so it can be transferred safely. */
+export function toTransferable(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+  const copy = new Uint8Array(new ArrayBuffer(bytes.byteLength));
+  copy.set(bytes);
+  return copy;
 }

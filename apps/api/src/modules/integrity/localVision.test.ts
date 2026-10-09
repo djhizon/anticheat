@@ -182,3 +182,13 @@ describe('isLoopback', () => {
     expect(isLoopback(undefined)).toBe(false);
   });
 });
+
+it('copies pooled Node Buffers into transferable bytes (no DataCloneError)', async () => {
+  const { toTransferable } = await import('./localVision.js');
+  for (const size of [3 * 1024, 9 * 1024]) {
+    const pooled = Buffer.from('x'.repeat(size));
+    const copy = toTransferable(pooled);
+    expect(copy.buffer.byteLength).toBe(size);
+    expect(() => structuredClone(copy, { transfer: [copy.buffer] })).not.toThrow();
+  }
+});

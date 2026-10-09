@@ -17,10 +17,11 @@ targets:
   ExamCompanion:
     type: application
     platform: iOS
-    sources: [Sources]
+    sources: [Sources, Resources]
     settings:
       base:
         TARGETED_DEVICE_FAMILY: '1'
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: Info.plist
       properties:
