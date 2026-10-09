@@ -823,6 +823,13 @@ export function StudentExamPage({
               <>
                 <button
                   className="topbar-submit"
+                  onClick={() => setShowLivenessModal(true)}
+                  type="button"
+                >
+                  🙋 Verify I&apos;m here
+                </button>
+                <button
+                  className="topbar-submit"
                   onClick={() => setShowPhoneModal(true)}
                   type="button"
                 >
@@ -1047,7 +1054,6 @@ export function StudentExamPage({
           onComplete={() => {
             setShowLivenessModal(false);
             setExamPaused(false);
-            setCurrentQuestionIndex((i) => i + 1);
           }}
         />
       )}

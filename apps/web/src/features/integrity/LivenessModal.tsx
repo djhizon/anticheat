@@ -45,7 +45,13 @@ export function LivenessModal({ attemptId, examApi, videoEl, onComplete }: Liven
   }, [attemptId, examApi]);
 
   const handleCapture = async (activeChallenge: LivenessChallenge | null = challenge) => {
-    if (!videoEl || !activeChallenge) return;
+    if (!activeChallenge) return;
+    if (!videoEl) {
+      if (timerRef.current) clearInterval(timerRef.current);
+      setResultMsg('📷 Start the camera panel first, then verify again.');
+      setTimeout(() => onComplete(false), 2500);
+      return;
+    }
     if (timerRef.current) clearInterval(timerRef.current);
     setSubmitting(true);
 
