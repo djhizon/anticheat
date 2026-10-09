@@ -5,6 +5,7 @@ options:
     iOS: '16.0'
 settings:
   base:
+    IPHONEOS_DEPLOYMENT_TARGET: '16.0'
     SWIFT_VERSION: '5.0'
     TARGETED_DEVICE_FAMILY: '1'
     SUPPORTS_MACCATALYST: NO
@@ -17,6 +18,9 @@ targets:
     type: application
     platform: iOS
     sources: [Sources]
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: '1'
     info:
       path: Info.plist
       properties:
@@ -27,6 +31,8 @@ targets:
         UIRequiresFullScreen: true
         NSLocalNetworkUsageDescription: Connect to your exam laptop on Wi-Fi to send foreground-only presence checks.
         NSCameraUsageDescription: Optional desk camera. Your phone checks, on the device, how many people are in view and whether hands are near the keyboard. Only simple yes/no and count results are sent; images never leave the phone.
+        # ATS: NSAllowsLocalNetworking exempts LAN/.local hosts only; internet hosts stay HTTPS-only.
+        # Release builds additionally refuse http:// pairing links in app code (PresenceController.allowsDemoHTTP).
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         CFBundleURLTypes:

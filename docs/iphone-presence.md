@@ -39,6 +39,40 @@ manual acceptance of this workflow.
   accepted without presence. Submission/deadline ends the phone credential's
   authority. Successful answer idempotency replays remain available.
 
+## Supported devices
+
+- iPhone XR and every newer iPhone (A12 Bionic or later). iPhone only; iPad is
+  not a target (`TARGETED_DEVICE_FAMILY = 1`), portrait, full screen.
+- iOS 16.0 or later. The XR tops out at iOS 18 and never receives iOS 26, so the
+  deployment target is 16.0 and no API newer than iOS 16 is used unguarded
+  (`onChange` uses an `#available(iOS 17)` branch with an iOS 16 fallback).
+- Desk camera: capture is limited to 640x480 at 5 fps; Vision runs on a
+  background queue on about one frame every 2 seconds.
+
+## Install options
+
+- **Xcode to your own iPhone, free Apple ID:** works with a personal team. The
+  signed app expires after 7 days and must be re-installed from Xcode; limited
+  to a few apps per Apple ID. Enable Developer Mode on the phone.
+- **TestFlight:** requires a paid Apple Developer Program account (USD 99/year)
+  to upload builds; testers then install without a Mac.
+
+## Local Network permission
+
+On first connection iOS shows: "Exam Companion would like to find and connect to
+devices on your local network" with the app's explanation (connect to your exam
+laptop on Wi-Fi to send foreground-only presence checks). Students must tap
+**Allow**. If they tap Don't Allow, pairing fails silently; fix it in
+Settings > Privacy & Security > Local Network (or Settings > Exam Companion).
+The app does not use Bonjour, so no `NSBonjourServices` key is declared. The
+camera prompt appears only if the optional desk camera is switched on.
+
+ATS: the plist sets only `NSAllowsLocalNetworking`, which exempts LAN IPs and
+`.local` hosts from the HTTPS requirement, so a laptop at `http://192.168.x.x`
+can be reached. Internet hosts stay HTTPS-only, and Release builds also refuse
+`http://` pairing links in code (only Debug allows the HTTP demo flow); Release
+pairing therefore needs an HTTPS laptop origin.
+
 ## Build and install on the real phone
 
 From the repository root:

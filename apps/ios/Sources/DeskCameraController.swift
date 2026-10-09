@@ -55,7 +55,8 @@ final class DeskCameraController: NSObject, ObservableObject, AVCaptureVideoData
               let input = try? AVCaptureDeviceInput(device: device) else { return false }
         session.beginConfiguration()
         defer { session.commitConfiguration() }
-        session.sessionPreset = .medium
+        // Modest input keeps Vision cheap on A12-class phones (iPhone XR); one frame per ~2 s is analysed.
+        session.sessionPreset = session.canSetSessionPreset(.vga640x480) ? .vga640x480 : .medium
         // On any failure, remove what this attempt added so a retry starts clean.
         var addedInput: AVCaptureInput?
         var addedOutput: AVCaptureOutput?
@@ -73,7 +74,9 @@ final class DeskCameraController: NSObject, ObservableObject, AVCaptureVideoData
         session.addOutput(output)
         addedOutput = output
         // Low frame rate: we analyse one frame every ~2 s anyway.
-        if (try? device.lockForConfiguration()) != nil {
+        let wanted = 5.0
+        let supported = device.activeFormat.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= wanted && wanted <= $0.maxFrameRate }
+        if supported, (try? device.lockForConfiguration()) != nil {
             device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 5)
             device.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 5)
             device.unlockForConfiguration()
