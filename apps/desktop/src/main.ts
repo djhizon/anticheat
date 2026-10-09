@@ -18,6 +18,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { appendFileSync, existsSync, statSync, writeFileSync } from 'fs';
 import { createAppController, createHelperCall, readDemoExemptions } from './appControl';
+import { registerRecordingDownloads } from './recordingDownloads';
 import { classifyDisplays, detectVirtualMachine } from './environment';
 import { defaultRunMode, mayCloseApps, planModeSwitch, type RunMode } from './mode';
 import {
@@ -564,6 +565,11 @@ export async function createWindow(): Promise<void> {
   // click inside the consented exam). In that case the primary screen is used
   // without a second picker; if it cannot be identified, the picker is shown.
   let screenPickerOpen = false;
+  registerRecordingDownloads({
+    session: session.defaultSession,
+    moviesDir: app.getPath('videos'),
+    log: diagnostic,
+  });
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     if (screenPickerOpen) {
       callback({});

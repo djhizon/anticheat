@@ -8,7 +8,7 @@ export const NO_PAUSE_STATEMENT =
 export function recordingStorageStatement(recordingUpload: boolean): string {
   return recordingUpload
     ? "Segments are uploaded to the school's secure OneDrive for exam review. Quality adapts to your connection; if the connection is poor, segments are saved on your computer instead."
-    : 'Recordings stay on this computer: segments are saved to your Downloads folder and are never uploaded. Your instructor may ask you for them.';
+    : 'Recordings stay on this computer: segments are saved on this computer (Mac app: Movies › ExamGuard Recordings) and are never uploaded. Your instructor may ask you for them.';
 }
 
 export interface ConsentListProps {

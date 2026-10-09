@@ -46,7 +46,7 @@ export interface ScreenRecorderOptions {
 }
 
 export const LOCAL_ONLY_STATUS =
-  'Recordings stay on this computer • segments are saved to your Downloads and never uploaded.';
+  'Recordings stay on this computer • segments are saved on this computer (Mac app: Movies › ExamGuard Recordings) and never uploaded.';
 
 function isDesktopApp(): boolean {
   return typeof navigator !== 'undefined' && /Electron/iu.test(navigator.userAgent ?? '');
@@ -165,7 +165,7 @@ export function createScreenRecorder(
         localOnly
           ? LOCAL_ONLY_STATUS
           : notice ||
-              'Recording on this computer • segments are saved to your Downloads, not uploaded.',
+              'Recording on this computer • segments are saved on this computer (Mac app: Movies › ExamGuard Recordings), not uploaded.',
       );
       return;
     }
