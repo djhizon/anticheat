@@ -7,6 +7,7 @@ import type {
   ExamGenerationResponse,
   ExamSubmitRequest,
   ExamSubmitResponse,
+  TransparencyEvent,
 } from '@exam-anti-cheat/contracts/exam';
 
 import type { FetchLike } from '../auth/api.js';
@@ -236,6 +237,7 @@ export interface ExamApi {
   patchEvents(attemptId: string, body: any): Promise<any>;
   speedtest(dummyData: string): Promise<void>;
   uploadRecordingChunk(attemptId: string, index: number, chunkBase64: string): Promise<void>;
+  getTransparencyReport?(attemptId: string): Promise<readonly TransparencyEvent[]>;
 }
 
 export class BrowserExamApi implements ExamApi {
@@ -448,6 +450,16 @@ export class BrowserExamApi implements ExamApi {
 
   async uploadRecordingChunk(attemptId: string, index: number, chunkBase64: string): Promise<void> {
     await this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/recording`, 'POST', { index, chunk: chunkBase64 } as any, true);
+  }
+
+  async getTransparencyReport(attemptId: string): Promise<readonly TransparencyEvent[]> {
+    const body = await this.request(`/exam/attempts/${encodeURIComponent(attemptId)}/transparency`, 'GET');
+    if (!isRecord(body) || !Array.isArray(body.events)) throw new ExamApiError(fallbackProblem);
+    const types = new Set(['HARDWARE', 'SOFTWARE', 'VISION', 'GAZE', 'AUDIO']);
+    const severities = new Set(['low', 'medium', 'high']);
+    return body.events.filter((event): event is TransparencyEvent =>
+      isRecord(event) && isString(event.timestamp) && isString(event.description) &&
+      types.has(event.type as string) && severities.has(event.severity as string));
   }
 
   private delivery(body: unknown): ExamDeliveryProjection {

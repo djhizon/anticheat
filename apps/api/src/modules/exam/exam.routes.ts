@@ -410,7 +410,7 @@ export class ExamRoutes {
         const body = parseObject(request.body, 'Events body required');
         this.integrity.recordAppEvent(
           String(attemptId),
-          String(body.foregroundApp ?? body.event ?? 'unknown').slice(0, 200),
+          String(body.foregroundApp ?? (body.event === undefined ? 'unknown' : `flag:${String(body.event)}`)).slice(0, 200),
           Number(body.displayCount ?? 1),
         );
         return jsonResponse(request, this.config.allowedOrigins, 200, { ok: true });
@@ -429,6 +429,16 @@ export class ExamRoutes {
         const body = parseObject(request.body, 'Telemetry body required');
         const accepted = this.integrity.recordTelemetry(String(attemptId), body);
         return jsonResponse(request, this.config.allowedOrigins, 202, { accepted });
+      }
+
+      // ── Transparency report: what was recorded about this attempt ────────
+      const transparencyMatch = transpPattern.exec(path);
+      if (method === 'GET' && transparencyMatch !== null && this.integrity !== null) {
+        const principal = this.requireStudent(request);
+        const attemptId = parsePathId<'AttemptId'>(transparencyMatch[1] ?? '', 'Attempt ID');
+        await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
+        const events = await this.integrity.getTransparencyReport(String(attemptId));
+        return jsonResponse(request, this.config.allowedOrigins, 200, { events });
       }
 
       // ── Pack 8: Phone enrollment ──────────────────────────────────────────

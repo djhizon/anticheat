@@ -1,5 +1,5 @@
 import { createKeystrokeDynamics } from '../integrity/keystrokeDynamics.js';
-import React, { Suspense, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import React, { Suspense, useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import type {
   ExamAnswerSaveResponse,
   ExamAnswerValue,
@@ -12,6 +12,7 @@ import { usePhonePresence } from '../integrity/usePhonePresence.js';
 import { LivenessModal } from '../integrity/LivenessModal.js';
 import { embedWatermark } from '../integrity/watermark.js';
 import { shouldKick } from '../integrity/tabGuard.js';
+import { TransparencyReport } from '../integrity/TransparencyReport.js';
 
 const AudioPanel = React.lazy(() => import('../integrity/AudioPanel.js').then((m) => ({ default: m.AudioPanel })));
 const CameraIntegrityPanel = React.lazy(() => import('../integrity/CameraIntegrityPanel.js').then((m) => ({ default: m.CameraIntegrityPanel })));
@@ -82,6 +83,10 @@ export function StudentExamPage({
   // ── Violation / kick tracking (tab guard is in App.tsx) ───────────────
   // Kick thresholds live in tabGuard so the exam page and the app shell agree.
   const kickViolation = shouldKick(violations);
+  const loadTransparencyReport = useCallback(
+    (attemptId: string) => examApi?.getTransparencyReport?.(attemptId) ?? Promise.resolve([]),
+    [examApi],
+  );
 
   // ── Focus-loss and page-hide — fire violations ────────────────────────
   useEffect(() => {
@@ -827,6 +832,9 @@ export function StudentExamPage({
                 →
               </button>
             </div>
+            {!isActive && examApi?.getTransparencyReport !== undefined && (
+              <TransparencyReport attemptId={visibleDelivery.attempt.id} load={loadTransparencyReport} />
+            )}
           </main>
 
           {/* RIGHT SIDEBAR: Audio + Exam Info */}

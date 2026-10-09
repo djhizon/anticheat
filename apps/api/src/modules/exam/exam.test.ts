@@ -620,6 +620,28 @@ describe('exam delivery boundary', () => {
     expect([count('keystroke_events'), count('gaze_events'), count('voice_events')]).toEqual([1, 1, 1]);
   });
 
+  it('shows the attempt owner a transparency report of recorded events', async () => {
+    const owner = await registerStudent('transparency@example.test');
+    const other = await registerStudent('other@example.test');
+    const seeded = await seedExam();
+    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: owner.userId });
+    const started = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
+    const integrity = new IntegrityService(new IntegrityRepository(auth.database), {} as GeminiRotatingClient);
+    const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity);
+    const base = `/exam/attempts/${attemptId}`;
+    await routes.handle(studentRequest(owner, 'PATCH', `${base}/events`, { event: 'keystroke_violation' }));
+    await routes.handle(studentRequest(owner, 'PATCH', `${base}/events`, { foregroundApp: 'Exam', displayCount: 2 }));
+
+    expect((await routes.handle(studentRequest(other, 'GET', `${base}/transparency`))).status).toBe(404);
+    const report = await routes.handle(studentRequest(owner, 'GET', `${base}/transparency`));
+    expect(report.status).toBe(200);
+    expect((report.body as { events: Array<{ type: string; description: string }> }).events).toEqual([
+      expect.objectContaining({ type: 'SOFTWARE', description: 'Flagged behaviour: keystroke violation' }),
+      expect.objectContaining({ type: 'HARDWARE', description: 'Multiple displays detected (2)' }),
+    ]);
+  });
+
   it('checks audio ownership before inference and reports inference failures instead of empty success', async () => {
     const owner = await registerStudent('audio@example.test');
     const other = await registerStudent('other@example.test');

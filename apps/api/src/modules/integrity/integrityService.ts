@@ -11,6 +11,7 @@ import {
   type GeneratedChallenge,
 } from './liveness.js';
 import { checkForAiGeneration, type AiCheckReport } from './aiCheck.js';
+import type { TransparencyEvent } from '@exam-anti-cheat/contracts/exam';
 
 export interface LivenessVerifyResponse {
   readonly passed: boolean;
@@ -31,15 +32,19 @@ export interface TelemetryCounts {
 }
 
 export class IntegrityService {
-  async getTransparencyReport(attemptId: string) {
+  async getTransparencyReport(attemptId: string): Promise<TransparencyEvent[]> {
     const data = this.repo.getTransparencyEvents(attemptId);
     
-    const events: Array<{ timestamp: string; type: string; description: string; severity: 'low'|'medium'|'high' }> = [];
+    const events: TransparencyEvent[] = [];
     
     for (const app of data.apps) {
       if (app.display_count > 1) {
         events.push({ timestamp: app.created_at, type: 'HARDWARE', severity: 'high', description: `Multiple displays detected (${app.display_count})` });
-      } else if (app.foreground_app) {
+      } else if (app.foreground_app.startsWith('flag:')) {
+        events.push({ timestamp: app.created_at, type: 'SOFTWARE', severity: 'medium', description: `Flagged behaviour: ${app.foreground_app.slice(5).replaceAll('_', ' ')}` });
+      } else if (app.foreground_app.startsWith('🎙️')) {
+        events.push({ timestamp: app.created_at, type: 'AUDIO', severity: 'low', description: app.foreground_app.replace(/^🎙️\s*/u, '') });
+      } else if (app.foreground_app && app.foreground_app !== 'unknown') {
         events.push({ timestamp: app.created_at, type: 'SOFTWARE', severity: 'medium', description: `Unauthorized app focused: ${app.foreground_app}` });
       }
     }

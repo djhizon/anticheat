@@ -132,3 +132,15 @@ export interface SimilarityReportResponse {
   readonly threshold: number;
   readonly generatedAt: string;
 }
+
+/** One entry in the student-facing record of what monitoring captured. */
+export interface TransparencyEvent {
+  readonly timestamp: string;
+  readonly type: 'HARDWARE' | 'SOFTWARE' | 'VISION' | 'GAZE' | 'AUDIO';
+  readonly severity: 'low' | 'medium' | 'high';
+  readonly description: string;
+}
+
+export interface TransparencyReportResponse {
+  readonly events: readonly TransparencyEvent[];
+}
