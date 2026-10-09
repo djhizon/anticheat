@@ -70,6 +70,8 @@ around safely. Demo mode is specific to the judge build; regular builds of the a
 direction asks for confirmation, and an attempt taken in Demo mode is marked as such in its
 transparency report.
 
+While an exam attempt is in progress the window goes full screen and cannot be minimized or closed; leaving focus is recorded in the integrity timeline but never blocked in Demo mode. To leave full screen in Demo mode press **Esc** (or ⌘⇧Q); in Strict mode the only way out mid-exam is the **⌘⇧Q** emergency exit, which asks for confirmation and is recorded.
+
 ## Demo accounts
 
 The judge build seeds these demo accounts on its first launch (a few seconds after the window

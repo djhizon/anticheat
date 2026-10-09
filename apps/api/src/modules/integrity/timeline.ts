@@ -87,6 +87,24 @@ interface AppMapping {
 }
 
 const FLAG_MAP: Record<string, AppMapping> = {
+  window_minimize_blocked: {
+    source: 'desktop',
+    kind: 'window_minimize_blocked',
+    severity: 'notice',
+    summary: 'An attempt to minimize or hide the exam window was blocked',
+  },
+  fullscreen_exit_blocked: {
+    source: 'desktop',
+    kind: 'fullscreen_exit_blocked',
+    severity: 'notice',
+    summary: 'An attempt to leave full screen was blocked and full screen was restored',
+  },
+  lockdown_emergency_exit: {
+    source: 'desktop',
+    kind: 'lockdown_emergency_exit',
+    severity: 'flag',
+    summary: 'The student ended the exam window lockdown with the emergency exit',
+  },
   focus_lost: {
     source: 'browser',
     kind: 'focus_lost',

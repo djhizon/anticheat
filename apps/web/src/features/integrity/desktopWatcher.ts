@@ -12,7 +12,16 @@ export interface DesktopWatcherBridge {
   startWatcher(attemptId: string): void;
   stopWatcher(): void;
   onAppSnapshot(callback: (snapshot: AppSnapshot) => void): () => void;
+  /** Exam-window lockdown events (blocked minimize, left fullscreen, focus lost, emergency exit). */
+  onLockdownEvent?(callback: (event: { attemptId: string; event: string }) => void): () => void;
 }
+
+const LOCKDOWN_EVENTS = new Set([
+  'window_minimize_blocked',
+  'fullscreen_exit_blocked',
+  'focus_lost',
+  'lockdown_emergency_exit',
+]);
 
 // The lockdown shell itself (and the dev-mode Electron binary) is expected focus.
 const OWN_APPS = new Set(['Exam Anti-Cheat', 'Electron']);
@@ -72,9 +81,14 @@ export function startDesktopWatcher(
       () => {},
     );
   });
+  const unsubscribeLockdown = bridge.onLockdownEvent?.((payload) => {
+    if (payload.attemptId !== attemptId || !LOCKDOWN_EVENTS.has(payload.event)) return;
+    send({ event: payload.event }).catch(() => {});
+  });
   bridge.startWatcher(attemptId);
   return () => {
     unsubscribe();
+    unsubscribeLockdown?.();
     bridge.stopWatcher();
   };
 }

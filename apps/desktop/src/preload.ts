@@ -42,6 +42,12 @@ contextBridge.exposeInMainWorld('electronExam', {
     ipcRenderer.on('app-snapshot', listener);
     return () => ipcRenderer.removeListener('app-snapshot', listener);
   },
+  onLockdownEvent: (callback: (event: { attemptId: string; event: string }) => void) => {
+    const listener = (_event: unknown, payload: { attemptId: string; event: string }) =>
+      callback(payload);
+    ipcRenderer.on('lockdown-event', listener);
+    return () => ipcRenderer.removeListener('lockdown-event', listener);
+  },
   onEmergencyExit: (callback: () => void) => ipcRenderer.on('emergency-exit', callback),
 });
 

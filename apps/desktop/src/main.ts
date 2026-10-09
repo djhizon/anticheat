@@ -19,6 +19,7 @@ import { appendFileSync, existsSync, statSync, writeFileSync } from 'fs';
 import { createAppController, createHelperCall } from './appControl';
 import { classifyDisplays, detectVirtualMachine } from './environment';
 import { defaultRunMode, mayCloseApps, planModeSwitch, type RunMode } from './mode';
+import { createLockdown, type LockdownBrowserWindow } from './lockdownWindow';
 import { captureScreenSnapshot } from './screenSnapshot';
 import { readJudgeBuild, readRunMode, writeRunMode } from './settings';
 import {
@@ -40,6 +41,32 @@ let judgeBuild = false;
 let runMode: RunMode = defaultRunMode(false);
 let appController: ReturnType<typeof createAppController> | null = null;
 let runtime: RuntimeHandle | null = null;
+
+// Exam-window lockdown (fullscreen/kiosk, minimize and close blocking) while an attempt runs.
+const lockdown = createLockdown({
+  getWindow: () => mainWindow as unknown as LockdownBrowserWindow | null,
+  getMode: () => runMode,
+  getPrimaryBounds: () => screen.getPrimaryDisplay().bounds,
+  setLockedMenu: (template) =>
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate(template as Electron.MenuItemConstructorOptions[]),
+    ),
+  restoreMenu: () => buildAppMenu(),
+  confirmEmergencyExit: async (window) =>
+    (
+      await dialog.showMessageBox(window as unknown as BrowserWindow, {
+        type: 'warning',
+        title: 'End exam lockdown?',
+        message: 'End exam lockdown? This will be recorded.',
+        buttons: ['Cancel', 'End lockdown'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      })
+    ).response === 1,
+  app: app as unknown as Parameters<typeof createLockdown>[0]['app'],
+  log: (event) => diagnostic(event),
+});
 
 // `npm run dev` keeps using the Vite + API dev servers; otherwise the bundled server is started.
 const useDevServers =
@@ -249,6 +276,7 @@ export async function switchRunMode(target: RunMode): Promise<void> {
 
 // Keep an OS-owned exit available even when the renderer crashes.
 function buildAppMenu(): void {
+  if (lockdown.isActive()) return; // The locked-down menu stays until lockdown ends.
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       { label: 'Exam Anti-Cheat', submenu: [{ role: 'quit' }] },
@@ -513,6 +541,10 @@ export async function createWindow(): Promise<void> {
 
   // Emergency exit: Cmd+Shift+Q (macOS)
   globalShortcut.register('CommandOrControl+Shift+Q', () => {
+    if (lockdown.isActive()) {
+      void lockdown.emergencyExit();
+      return;
+    }
     mainWindow?.webContents.send('emergency-exit');
     setTimeout(() => {
       globalShortcut.unregisterAll();
@@ -523,6 +555,7 @@ export async function createWindow(): Promise<void> {
   mainWindow.on('closed', () => {
     appController?.reset();
     appController = null;
+    lockdown.exit();
     mainWindow = null;
     stopWatcher();
   });
@@ -531,11 +564,13 @@ export async function createWindow(): Promise<void> {
 ipcMain.on('start-watcher', (event, attemptId: unknown) => {
   if (!trustedAppFrame(event) || !validAttemptId(attemptId)) return;
   startWatcher(attemptId);
+  lockdown.enter(attemptId);
 });
 
 ipcMain.on('stop-watcher', (event) => {
   if (!trustedAppFrame(event)) return;
   stopWatcher();
+  lockdown.exit();
 });
 
 ipcMain.handle('get-display-count', (event) => {
