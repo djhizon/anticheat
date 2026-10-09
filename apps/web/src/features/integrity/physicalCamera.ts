@@ -1,4 +1,5 @@
-const virtualLabel = /obs|virtual|camtwist|snap camera|manycam|epoccam|ndi video/i;
+import { VIRTUAL_CAMERA_LABEL as virtualLabel } from '@exam-anti-cheat/contracts/exam';
+
 export function selectCamera(devices: readonly MediaDeviceInfo[]): MediaDeviceInfo | undefined {
   const candidates = devices.filter(
     (d) => d.kind === 'videoinput' && d.label.trim() && !virtualLabel.test(d.label),

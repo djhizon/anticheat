@@ -40,7 +40,15 @@ const validSignature = signNonce(
 
 it('records an unavailable lazy gesture engine without passing or reusing the challenge', async () => {
   const repo = gestureRepo();
-  const result = await service(repo).verifyLiveness('a', 'nonce', 3, {}, undefined, validSignature);
+  const result = await service(repo).verifyLiveness(
+    'a',
+    'nonce',
+    3,
+    {},
+    undefined,
+    validSignature,
+    'FaceTime HD Camera',
+  );
   expect(result.passed).toBe(false);
   expect(result.detail).toContain('Gesture engine unavailable');
   expect(repo.markLivenessChallengeUsed).toHaveBeenCalledWith('nonce');
@@ -62,4 +70,57 @@ it('issues challenges signed for their attempt', () => {
   const challenge = service(repo).issueLivenessChallenge('a', new Date().toISOString());
   expect(challenge.signature).toBe(signNonce({ attemptId: 'a', ...challenge }, secret));
   expect(challenge.signature).not.toBe(signNonce({ attemptId: 'other', ...challenge }, secret));
+});
+
+function flashRepo() {
+  return {
+    ...gestureRepo(),
+    getLivenessChallenge: () => ({
+      ...gestureRepo().getLivenessChallenge(),
+      challenge_type: 'flash',
+    }),
+  };
+}
+const flashSignature = signNonce(
+  { attemptId: 'a', nonce: 'nonce', type: 'flash', expiresAt },
+  secret,
+);
+
+it('rejects OBS and other virtual cameras, and missing camera labels', async () => {
+  for (const label of ['OBS Virtual Camera', 'Camo', 'DroidCam Source 3', undefined]) {
+    const result = await service(flashRepo()).verifyLiveness(
+      'a',
+      'nonce',
+      3,
+      { brightnessDelta: 30 },
+      undefined,
+      flashSignature,
+      label,
+    );
+    expect(result.passed).toBe(false);
+    expect(result.detail).toMatch(/virtual camera|No native camera/i);
+  }
+});
+
+it('passes a flash challenge only when the measured brightness rises on a native webcam', async () => {
+  const lit = await service(flashRepo()).verifyLiveness(
+    'a',
+    'nonce',
+    3,
+    { brightnessDelta: 14.2 },
+    undefined,
+    flashSignature,
+    'FaceTime HD Camera',
+  );
+  expect(lit.passed).toBe(true);
+  const flat = await service(flashRepo()).verifyLiveness(
+    'a',
+    'nonce',
+    3,
+    { brightnessDelta: 0.4 },
+    undefined,
+    flashSignature,
+    'FaceTime HD Camera',
+  );
+  expect(flat.passed).toBe(false);
 });

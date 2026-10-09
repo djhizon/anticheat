@@ -14,6 +14,7 @@ import {
 } from './liveness.js';
 import { checkForAiGeneration } from './aiCheck.js';
 import { computeSimilarityReport, SIMILARITY_THRESHOLD } from './similarity.js';
+import { VIRTUAL_CAMERA_LABEL } from '@exam-anti-cheat/contracts/exam';
 import type {
   AiCheckResult,
   AiCheckRunResponse,
@@ -167,6 +168,7 @@ export class IntegrityService {
     payload: Record<string, unknown>,
     imageBase64?: string,
     signature?: unknown,
+    cameraLabel?: string,
   ): Promise<LivenessVerifyResponse> {
     const row = this.repo.getLivenessChallenge(nonce);
     if (!row || row.attempt_id !== attemptId || row.used) {
@@ -182,7 +184,15 @@ export class IntegrityService {
     this.repo.markLivenessChallengeUsed(nonce);
 
     let result: { passed: boolean; detail: string };
-    if (row.challenge_type === 'flash') {
+    if (!cameraLabel || VIRTUAL_CAMERA_LABEL.test(cameraLabel)) {
+      // Only a native hardware webcam counts; OBS and other virtual feeds fail.
+      result = {
+        passed: false,
+        detail: cameraLabel
+          ? `Virtual camera "${cameraLabel.slice(0, 60)}" is not allowed. Use the built-in webcam.`
+          : 'No native camera was identified. Use the built-in webcam.',
+      };
+    } else if (row.challenge_type === 'flash') {
       const brightnessDelta = Number(payload.brightnessDelta ?? 0);
       result = verifyFlashChallenge(brightnessDelta);
     } else if (row.challenge_type === 'gesture') {
@@ -210,7 +220,7 @@ export class IntegrityService {
       layer,
       result.passed ? 'pass' : 'fail',
       nonce,
-      JSON.stringify({ ...payload, detail: result.detail }),
+      JSON.stringify({ ...payload, camera: cameraLabel ?? null, detail: result.detail }),
     );
 
     return { passed: result.passed, layer, detail: result.detail };

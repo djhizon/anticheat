@@ -1,14 +1,14 @@
 import React, { useEffect, useState, useRef } from 'react';
 import type { ExamApi, LivenessChallenge } from '../exam/api.js';
+import { captureLivenessEvidence } from './livenessCapture.js';
 
 interface LivenessModalProps {
   readonly attemptId: string;
   readonly examApi: ExamApi;
-  readonly videoEl: HTMLVideoElement | null;
   readonly onComplete: (success: boolean) => void;
 }
 
-export function LivenessModal({ attemptId, examApi, videoEl, onComplete }: LivenessModalProps) {
+export function LivenessModal({ attemptId, examApi, onComplete }: LivenessModalProps) {
   const [loading, setLoading] = useState(true);
   const [challenge, setChallenge] = useState<LivenessChallenge | null>(null);
   const [timeLeft, setTimeLeft] = useState(30);
@@ -46,53 +46,31 @@ export function LivenessModal({ attemptId, examApi, videoEl, onComplete }: Liven
 
   const handleCapture = async (activeChallenge: LivenessChallenge | null = challenge) => {
     if (!activeChallenge) return;
-    if (!videoEl) {
-      if (timerRef.current) clearInterval(timerRef.current);
-      setResultMsg('📷 Start the camera panel first, then verify again.');
-      setTimeout(() => onComplete(false), 2500);
-      return;
-    }
     if (timerRef.current) clearInterval(timerRef.current);
     setSubmitting(true);
 
     try {
-      // Flash screen if it's a flash challenge before capture
-      if (activeChallenge.type === 'flash') {
-        const flashDiv = document.createElement('div');
-        flashDiv.style.position = 'fixed';
-        flashDiv.style.inset = '0';
-        flashDiv.style.backgroundColor = '#ffffff';
-        flashDiv.style.zIndex = '999999';
-        document.body.appendChild(flashDiv);
-        await new Promise((r) => setTimeout(r, 100)); // wait for screen to brighten
-        flashDiv.remove();
-      }
-
-      const canvas = document.createElement('canvas');
-      canvas.width = videoEl.videoWidth || 640;
-      canvas.height = videoEl.videoHeight || 480;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-      }
-
-      const b64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
-
+      // Opens the native webcam itself; OBS/virtual cameras are refused here.
+      const evidence = await captureLivenessEvidence(activeChallenge.type);
       const res = await examApi.postLivenessVerify(attemptId, {
         nonce: activeChallenge.nonce,
         signature: activeChallenge.signature,
         layer: 3,
-        payload: {
-          brightnessDelta: activeChallenge.type === 'flash' ? 10.0 : undefined, // mock delta for now
-        },
-        imageBase64: b64,
+        payload:
+          evidence.brightnessDelta === undefined
+            ? {}
+            : { brightnessDelta: evidence.brightnessDelta },
+        imageBase64: evidence.imageBase64,
+        camera: { label: evidence.cameraLabel },
       });
 
-      setResultMsg(res.passed ? '✅ Verification Passed!' : '❌ Verification Failed!');
-      setTimeout(() => onComplete(res.passed), 2000);
-    } catch (e) {
-      setResultMsg('❌ Error submitting verification');
-      setTimeout(() => onComplete(false), 2000);
+      setResultMsg(res.passed ? '✅ Verification Passed!' : `❌ ${res.detail}`);
+      setTimeout(() => onComplete(res.passed), 2500);
+    } catch (error) {
+      setResultMsg(
+        `❌ ${error instanceof Error ? error.message : 'Error submitting verification'}`,
+      );
+      setTimeout(() => onComplete(false), 3000);
     }
   };
 

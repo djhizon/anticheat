@@ -164,6 +164,10 @@ function parsePathId<Brand extends string>(value: string, field: string): Opaque
   return decoded as Opaque<string, Brand>;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function parseObject(value: unknown, message: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new DomainError('validation_failed', message);
@@ -415,9 +419,12 @@ export class ExamRoutes {
           String(attemptId),
           String(body.nonce ?? ''),
           Number(body.layer ?? 2),
-          body as Record<string, unknown>,
+          isRecord(body.payload) ? body.payload : {},
           body.imageBase64 ? String(body.imageBase64) : undefined,
           body.signature,
+          isRecord(body.camera) && typeof body.camera.label === 'string'
+            ? body.camera.label
+            : undefined,
         );
         return jsonResponse(request, this.config.allowedOrigins, 200, result);
       }

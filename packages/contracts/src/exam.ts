@@ -185,3 +185,11 @@ export interface AiCheckRunResponse {
   /** True when more answers existed than one run checks. */
   readonly truncated: boolean;
 }
+
+/**
+ * Camera labels of software/virtual sources (OBS, phone-as-webcam apps, effect
+ * filters). Exams accept only a native hardware webcam; both the browser and
+ * the API reject these. Labels are a strong heuristic, not hardware attestation.
+ */
+export const VIRTUAL_CAMERA_LABEL =
+  /obs|virtual|camtwist|snap camera|manycam|epoccam|ndi|xsplit|mmhmm|camo\b|droidcam|ivcam|iriun|nvidia broadcast|splitcam|youcam|vcam|e2esoft|logi capture|streamlabs|chromacam|webcamoid|screen capture/i;

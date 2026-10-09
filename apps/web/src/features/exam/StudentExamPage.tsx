@@ -1050,7 +1050,6 @@ export function StudentExamPage({
         <LivenessModal
           attemptId={visibleDelivery.attempt.id}
           examApi={examApi}
-          videoEl={document.querySelector('video')}
           onComplete={() => {
             setShowLivenessModal(false);
             setExamPaused(false);
