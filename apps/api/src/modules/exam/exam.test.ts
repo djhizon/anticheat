@@ -642,6 +642,18 @@ describe('exam delivery boundary', () => {
     ]);
   });
 
+  it('keeps integrity monitoring available without Gemini keys', async () => {
+    const owner = await registerStudent('nokeys@example.test');
+    const seeded = await seedExam();
+    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: owner.userId });
+    const started = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
+    expect(config.geminiKeys).toHaveLength(0);
+    const telemetry = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/attempts/${attemptId}/telemetry`, { keystrokes: [] }));
+    expect(telemetry.status).toBe(202);
+    expect((await exam.routes.handle(studentRequest(owner, 'GET', `/exam/attempts/${attemptId}/transparency`))).status).toBe(200);
+  });
+
   it('checks audio ownership before inference and reports inference failures instead of empty success', async () => {
     const owner = await registerStudent('audio@example.test');
     const other = await registerStudent('other@example.test');

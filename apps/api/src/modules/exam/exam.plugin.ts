@@ -41,29 +41,28 @@ export function createExamPlugin(
     assertPhoneCanAnswer: (attemptId) => phonePresence.assertCanAnswer(attemptId),
   });
 
-  // Pack 8: Build integrity services if Gemini keys are configured
-  let integrity: IntegrityService | null = null;
+  // Integrity monitoring always runs; Gemini only powers the AI-backed checks.
+  let gemini: GeminiRotatingClient | null = null;
   if (config.geminiKeys.length > 0) {
     // Keys 0-4 → question generation  |  Keys 5-9 → AI-check & liveness
     // If fewer than 6 keys, share all keys across both pools.
     const allKeys = config.geminiKeys;
     const aiCheckKeys = allKeys.length >= 6 ? allKeys.slice(5) : allKeys;
-    const gemini = new GeminiRotatingClient({
+    gemini = new GeminiRotatingClient({
       keys: aiCheckKeys,
       model: config.geminiModel,
       embeddingModel: config.geminiEmbeddingModel,
     });
-    const integrityRepo = new IntegrityRepository(database);
-    integrity = new IntegrityService(integrityRepo, gemini);
     console.log(
       `[exam-plugin] Gemini ready — ${aiCheckKeys.length} key(s) for AI-check/liveness, ` +
       `${Math.min(5, allKeys.length)} key(s) for question generation`,
     );
   } else {
     console.warn(
-      '[exam-plugin] No GEMINI_API_KEYS configured — AI features and legacy phone mode disabled. Native phone presence is available.',
+      '[exam-plugin] No GEMINI_API_KEYS configured — AI checks disabled; integrity monitoring and native phone presence remain available.',
     );
   }
+  const integrity: IntegrityService | null = new IntegrityService(new IntegrityRepository(database), gemini);
 
   const routes = new ExamRoutes(service, boundary, config, integrity, phonePresence);
 

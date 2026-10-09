@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto';
+
+import { DomainError } from '@exam-anti-cheat/contracts';
 import type { GeminiRotatingClient } from './gemini.js';
 import type { IntegrityRepository } from './integrityRepository.js';
 import {
@@ -74,8 +76,17 @@ export class IntegrityService {
 
   constructor(
     private readonly repo: IntegrityRepository,
-    private readonly gemini: GeminiRotatingClient,
+    // Null when no GEMINI_API_KEYS are configured: monitoring still works,
+    // only the Gemini-backed checks report that they are unavailable.
+    private readonly gemini: GeminiRotatingClient | null,
   ) {}
+
+  private requireGemini(): GeminiRotatingClient {
+    if (this.gemini === null) {
+      throw new DomainError('invalid_state', 'AI checks need GEMINI_API_KEYS to be configured.');
+    }
+    return this.gemini;
+  }
 
   // ── Liveness ─────────────────────────────────────────────────────────────────
 
@@ -142,7 +153,7 @@ export class IntegrityService {
   // ── AI Check ─────────────────────────────────────────────────────────────────
 
   async runAiCheck(question: string, answer: string): Promise<AiCheckReport> {
-    return checkForAiGeneration(this.gemini, question, answer);
+    return checkForAiGeneration(this.requireGemini(), question, answer);
   }
 
   // ── Phone Enrollment ─────────────────────────────────────────────────────────
