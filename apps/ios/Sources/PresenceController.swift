@@ -81,7 +81,7 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
         } else {
             status = pending == nil ? "Scan the laptop QR to pair." : "Confirm the laptop address, then connect."
         }
-        UIApplication.shared.isIdleTimerDisabled = active && paired
+        UIApplication.shared.isIdleTimerDisabled = IdleTimerPolicy.keepAwake(active: active, paired: paired, reconnecting: busy || credential != nil)
         if active && paired && deskCameraWanted { startDeskCamera() }
     }
 
@@ -118,27 +118,22 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
         self.session = session
         busy = true
         status = pairingCode == nil ? "Reconnecting…" : "Pairing…"
+        UIApplication.shared.isIdleTimerDisabled = IdleTimerPolicy.keepAwake(active: gate.active, paired: paired, reconnecting: true)
         task = Task { [weak self] in
             guard let self else { return }
             do {
                 var secret = credential
                 if let pairingCode {
-                    // The Local Network permission alert can make the scene inactive.
-                    // Trigger it without a one-use secret, then recheck before claiming.
-                    var probe = URLRequest(url: origin)
-                    probe.httpMethod = "HEAD"
-                    _ = try await session.data(for: probe)
-                    try self.check(generation)
-                    let claim: Claim = try await self.post(session, origin, "claim", ["code": pairingCode])
-                    try self.check(generation)
-                    guard claim.credential.range(of: "^[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil else { throw PairingError.rejected }
-                    secret = claim.credential
+                    secret = try await self.claimWithRetry(session, origin, pairingCode, generation)
                     self.pending = nil
                 }
                 guard let secret else { throw PairingError.rejected }
                 self.credential = secret; self.origin = origin; self.paired = true; self.busy = false
                 UIApplication.shared.isIdleTimerDisabled = true
+                var rejections = RejectionTracker()
+                let clock = ContinuousClock()
                 while self.gate.permits(generation) && !Task.isCancelled {
+                    let started = clock.now
                     do {
                         try self.check(generation)
                         let challenge: Challenge = try await self.post(session, origin, "challenge", ["credential": secret])
@@ -148,23 +143,67 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
                         ])
                         try self.check(generation)
                         guard ack.ok else { throw PairingError.rejected }
+                        rejections.recordSuccess()
                         self.connected = true; self.lastAcknowledged = Date()
                         self.status = "Connected — keep this app open."
-                    } catch PairingError.rejected { throw PairingError.rejected }
-                    catch {
+                    } catch PairingError.rejected {
+                        // Credentials survive an API restart and a claim code is single-use, so the only
+                        // thing the protocol allows is one fresh challenge before giving up.
+                        try self.check(generation)
+                        if rejections.recordRejection() == .giveUp { throw PairingError.rejected }
+                        self.connected = false
+                        self.status = "Reconnecting…"
+                    } catch {
                         try self.check(generation)
                         self.connected = false
                         self.status = "Connection lost — check Wi-Fi and laptop servers. Retrying while open…"
                     }
-                    try await Task.sleep(nanoseconds: 2_000_000_000)
+                    let elapsed = started.duration(to: clock.now)
+                    let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+                    try await Task.sleep(nanoseconds: UInt64(HeartbeatSchedule.sleepSeconds(elapsed: seconds) * 1e9))
                 }
+            } catch PairingError.network {
+                // Pairing never completed (retries exhausted); keep the unused QR so the user can tap Connect again.
+                guard self.gate.permits(generation), !Task.isCancelled else { return }
+                self.busy = false; self.connected = false
+                self.status = "Could not reach the laptop. Check Wi-Fi, then tap Connect to try again."
+                UIApplication.shared.isIdleTimerDisabled = IdleTimerPolicy.keepAwake(active: self.gate.active, paired: self.paired, reconnecting: false)
             } catch {
                 guard self.gate.permits(generation), !Task.isCancelled else { return }
                 self.busy = false; self.connected = false
-                self.status = "Pairing expired, was replaced, or the connection failed. Create a new QR on the laptop."
-                self.credential = nil; self.paired = false
+                self.status = "Pairing expired, was replaced, or was rejected. Create a new QR on the laptop."
+                self.credential = nil; self.paired = false; self.pending = nil
                 self.deskCamera.stop()
                 UIApplication.shared.isIdleTimerDisabled = false
+            }
+        }
+    }
+
+    /// Probe + claim. Transient failures retry with backoff while the QR stays pending; only a definite
+    /// rejection (401/403/404/410) surfaces as `.rejected`.
+    private func claimWithRetry(_ session: URLSession, _ origin: URL, _ code: String, _ generation: Int) async throws -> String {
+        var attempt = 1
+        while true {
+            do {
+                // The Local Network permission alert can make the scene inactive.
+                // Trigger it without a one-use secret, then recheck before claiming.
+                var probe = URLRequest(url: origin)
+                probe.httpMethod = "HEAD"
+                _ = try await session.data(for: probe)
+                try check(generation)
+                let claim: Claim = try await post(session, origin, "claim", ["code": code])
+                try check(generation)
+                guard claim.credential.range(of: "^[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil else { throw PairingError.rejected }
+                return claim.credential
+            } catch PairingError.rejected {
+                throw PairingError.rejected
+            } catch {
+                try check(generation)
+                guard let delay = PairingRetryPolicy.delayAfter(attempt: attempt) else { throw PairingError.network }
+                status = "Reconnecting…"
+                try await Task.sleep(nanoseconds: UInt64(delay * 1e9))
+                try check(generation)
+                attempt += 1
             }
         }
     }
@@ -179,7 +218,7 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw PairingError.network }
-        if response.statusCode == 401 || response.statusCode == 403 { throw PairingError.rejected }
+        if FailurePolicy.classify(statusCode: response.statusCode) == .definiteRejection { throw PairingError.rejected }
         guard response.statusCode == 200 else { throw PairingError.network }
         return try JSONDecoder().decode(T.self, from: data)
     }

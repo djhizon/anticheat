@@ -47,3 +47,49 @@ struct PairingLink {
 }
 
 enum PairingError: Error { case invalidLink, rejected, network }
+
+/// How a failed request should be treated. Only a definite server rejection may discard a credential
+/// or pending pairing; everything else (timeouts, offline, 5xx, 409 stale challenge) is retried.
+enum FailureKind: Equatable { case definiteRejection, transient }
+
+enum FailurePolicy {
+    static func classify(statusCode: Int) -> FailureKind {
+        [401, 403, 404, 410].contains(statusCode) ? .definiteRejection : .transient
+    }
+}
+
+/// Pairing probe/claim retry schedule: 1 s, 2 s, 4 s, 4 s between at most 5 tries.
+enum PairingRetryPolicy {
+    static let maxAttempts = 5
+    /// Seconds to wait after the given failed attempt (1-based), or nil when out of tries.
+    static func delayAfter(attempt: Int) -> TimeInterval? {
+        guard attempt >= 1, attempt < maxAttempts else { return nil }
+        return min(pow(2, Double(attempt - 1)), 4)
+    }
+}
+
+/// Heartbeats are scheduled against a fixed period, not period + round-trip time.
+enum HeartbeatSchedule {
+    static let interval: TimeInterval = 2
+    static func sleepSeconds(elapsed: TimeInterval) -> TimeInterval { max(0, interval - max(0, elapsed)) }
+}
+
+/// The server keeps credentials in its database, so an API restart does not invalidate them, and a
+/// claim code is single-use (no re-claim is possible). One 401/403 therefore gets exactly one fresh
+/// challenge attempt; a second consecutive rejection means the credential is truly gone.
+struct RejectionTracker {
+    enum Decision: Equatable { case retryOnce, giveUp }
+    private(set) var consecutive = 0
+    mutating func recordRejection() -> Decision {
+        consecutive += 1
+        return consecutive <= 1 ? .retryOnce : .giveUp
+    }
+    mutating func recordSuccess() { consecutive = 0 }
+}
+
+enum IdleTimerPolicy {
+    /// Stay awake while active and a pairing exists, including while reconnecting.
+    static func keepAwake(active: Bool, paired: Bool, reconnecting: Bool) -> Bool {
+        active && (paired || reconnecting)
+    }
+}

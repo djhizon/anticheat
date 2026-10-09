@@ -77,8 +77,20 @@ App Store upload, paid purchase, or provisioning change is automated here.
    Tap **Connect to laptop** and allow **Local Network** access when requested.
    If that permission alert pauses the app, tap Connect again after allowing it.
    A credential-free probe runs before consuming the single-use QR code.
-5. Keep the app on screen. It disables automatic idle sleep only while paired
-   and active; it restores the normal idle timer when inactive/stopped.
+5. Keep the app on screen. It disables automatic idle sleep only while active
+   with a pairing or credential (paired or reconnecting); it restores the
+   normal idle timer when inactive/stopped.
+
+Reliability behavior: only a definite server rejection (401/403/404/410) clears
+the pending QR or credential and asks for a new scan. Timeouts, offline errors,
+and 5xx during the pairing probe/claim show "Reconnecting…" and retry up to 5
+tries (1 s, 2 s, 4 s, 4 s backoff) while keeping the QR; if all fail, the QR is
+kept and the user can tap Connect again. Heartbeats run on a fixed 2 s schedule
+(sleep = 2 s minus the cycle's elapsed time). Credentials are stored in the
+database, so an API restart does not invalidate them and claim codes are
+single-use (re-claim is impossible); a single 401/403 on the heartbeat loop
+therefore gets exactly one fresh challenge attempt, and a second consecutive
+rejection unpairs.
 
 Only Debug builds accept plain HTTP, and only for private IPv4 addresses.
 Release pairing requires HTTPS; TLS validation is never disabled. Even on
