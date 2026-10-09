@@ -15,7 +15,7 @@ checklist under **"Existing code and assets"**.
 > Third-party assets: whisper.cpp (MIT, built from upstream at setup time, not
 > committed), the OpenAI Whisper `ggml-base` model, Google OWL-ViT
 > (`google/owlvit-base-patch32`, Apache-2.0) via Hugging Face Transformers,
-> MediaPipe Tasks Vision, TensorFlow.js hand-pose, and npm dependencies in
+> MediaPipe Tasks Vision, Apple Vision (iOS), and npm dependencies in
 > `package-lock.json`.
 
 ## Pre-existing (before the hackathon)
@@ -49,6 +49,12 @@ Every item is its own commit; see [CHANGELOG.md](../CHANGELOG.md) and
   ingestion.
 - Reliability: integrity monitoring works without cloud keys; Gemini retries
   and model fixes.
+- Accounts: Supabase email flows (confirm sign-up, forgot, reset and change password, change email) with branded templates and a Microsoft Graph `auth-mailer` edge function.
+- Recording: opt-in adaptive cloud recording that measures uplink, picks a quality tier and uploads segments in the background with local fallback.
+- Liveness: passive random colour flash, with head-turn and spoken-word alternatives; hand-gesture challenge and TensorFlow dependencies removed.
+- Device rules: native-webcam-only, VM and capture-display blocking, and a mid-exam camera guard.
+- iPhone desk camera: on-device Apple Vision counts people and hands; only flags leave the phone.
+- Sharing and setup: `npm run share` (ngrok static domain), `npm run setup:desktop`, `npm run supabase:templates`.
 - Quality: green typecheck, lint and tests, CI on every push, docs and demo
   script.
 
