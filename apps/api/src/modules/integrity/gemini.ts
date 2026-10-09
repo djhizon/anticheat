@@ -1,6 +1,6 @@
 /**
  * Gemini API client with round-robin key rotation across multiple API keys.
- * Model: gemini-3.6-flash for generation, gemini-embedding-exp-03-07 for embeddings.
+ * Model: gemini-3.6-flash for generation, gemini-embedding-001 for embeddings.
  */
 
 export interface GeminiConfig {
@@ -47,6 +47,9 @@ export interface GeminiEmbedResponse {
   readonly embedding: { readonly values: readonly number[] };
 }
 
+const RETRYABLE_STATUS = new Set([429, 500, 503]);
+export const DEFAULT_EMBEDDING_MODEL = 'gemini-embedding-001';
+
 export class GeminiRotatingClient {
   private index = 0;
 
@@ -62,14 +65,14 @@ export class GeminiRotatingClient {
     return key!;
   }
 
-  private async fetchGemini(endpoint: string, body: unknown, retries = 2): Promise<unknown> {
-    const key = this.nextKey();
-    const url = `https://generativelanguage.googleapis.com/v1beta/${endpoint}?key=${key}`;
+  private async fetchGemini(endpoint: string, body: unknown, retries = 3): Promise<unknown> {
+    const url = `https://generativelanguage.googleapis.com/v1beta/${endpoint}`;
 
     for (let attempt = 0; attempt <= retries; attempt++) {
+      // A fresh key per attempt, sent as a header so it never lands in URLs or logs.
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': this.nextKey() },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(30_000),
       });
@@ -78,15 +81,14 @@ export class GeminiRotatingClient {
         return response.json() as unknown;
       }
 
-      // Rate limit — rotate to next key and retry
-      if (response.status === 429 && attempt < retries) {
-        this.index = (this.index + 1) % this.config.keys.length;
-        await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+      // Rate limits and transient overloads: back off, then retry on the next key.
+      if (RETRYABLE_STATUS.has(response.status) && attempt < retries) {
+        await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
         continue;
       }
 
       const errorText = await response.text().catch(() => 'unknown error');
-      throw new Error(`Gemini API error ${response.status}: ${errorText}`);
+      throw new Error(`Gemini API error ${response.status}: ${errorText.slice(0, 300)}`);
     }
 
     throw new Error('Gemini API: all retries exhausted.');
@@ -102,7 +104,8 @@ export class GeminiRotatingClient {
       generationConfig: {
         responseMimeType: 'application/json',
         temperature: 0.1,
-        maxOutputTokens: 1024,
+        // Thinking models spend ~500 tokens reasoning before the JSON answer.
+        maxOutputTokens: 2048,
       },
     };
 
@@ -145,6 +148,6 @@ export function loadGeminiConfig(): GeminiConfig {
   return {
     keys,
     model: process.env.GEMINI_MODEL ?? 'gemini-3.6-flash',
-    embeddingModel: process.env.GEMINI_EMBEDDING_MODEL ?? 'gemini-embedding-exp-03-07',
+    embeddingModel: process.env.GEMINI_EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
   };
 }

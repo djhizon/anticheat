@@ -157,7 +157,7 @@ export async function generateExamQuestions(
   const gemini = new GeminiRotatingClient({
     keys: genKeys,
     model: opts.model ?? 'gemini-3.6-flash',
-    embeddingModel: opts.embeddingModel ?? 'gemini-embedding-exp-03-07',
+    embeddingModel: opts.embeddingModel ?? 'gemini-embedding-001',
   });
 
   const count = opts.count ?? 10;

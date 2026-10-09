@@ -137,7 +137,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
           .filter((k) => k !== '')
       : [],
     geminiModel: env.GEMINI_MODEL?.trim() || 'gemini-3.6-flash',
-    geminiEmbeddingModel: env.GEMINI_EMBEDDING_MODEL?.trim() || 'gemini-embedding-exp-03-07',
+    geminiEmbeddingModel: env.GEMINI_EMBEDDING_MODEL?.trim() || 'gemini-embedding-001',
     audioRetainDays: env.AUDIO_RETAIN_DAYS
       ? parseInteger(env.AUDIO_RETAIN_DAYS, 30, 'AUDIO_RETAIN_DAYS')
       : 30,
