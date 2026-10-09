@@ -14,3 +14,4 @@ known issues are documented in [docs/AUDIT.md](docs/AUDIT.md).
 ## Hackathon progress
 
 - **Fix #1** — phone status lookup queried a non-existent `integrity_phone_enrollments` table and crashed; now uses `phone_enrollments` (with regression test).
+- **Fix #2** — vision bridge split stdout on a literal `\n` and wrote one to the Python server, so no request/response ever parsed; now uses real newlines and buffers partial lines.
