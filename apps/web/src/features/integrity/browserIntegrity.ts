@@ -1,6 +1,6 @@
 /**
  * Shared types used across integrity modules.
- * The original Codex "Browser Activity Lab" engine was removed in Pack 8.
+ * The original Codex "Browser Activity Lab" engine was removed.
  */
 
 export interface AttemptContext {

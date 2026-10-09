@@ -105,7 +105,6 @@ export function LoginPage(): React.ReactElement {
           <span />
           <span />
         </div>
-        <p className="auth-kicker">Pack 8 Active</p>
         <h1 id="auth-intro-title">Fair, Transparent Exams</h1>
         <p className="auth-intro-copy">
           On-device AI checks your camera, audio and typing during the exam. You see every monitor

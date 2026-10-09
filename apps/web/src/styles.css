@@ -939,7 +939,7 @@ dd {
   }
 }
 
-/* Pack 8: Paste blocked toast */
+/* Paste blocked toast */
 .paste-toast {
   position: fixed;
   top: 1rem;
@@ -1095,7 +1095,7 @@ dd {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   PACK 8 — 3-COLUMN EXAM SHELL + CONSENT MODAL
+   3-COLUMN EXAM SHELL + CONSENT MODAL
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Exam shell (full viewport) ─────────────────────────────────────────── */
@@ -1649,7 +1649,7 @@ dd {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   PACK 8 — CLEAN SIDEBAR PANELS + WIDER CONSENT MODAL
+   CLEAN SIDEBAR PANELS + WIDER CONSENT MODAL
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* Widen consent modal */
@@ -1870,7 +1870,7 @@ dd {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   PACK 8 — CAMERA ALERTS + TRANSCRIPT
+   CAMERA ALERTS + TRANSCRIPT
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* Phone / attention alert overlays on camera */
