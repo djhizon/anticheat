@@ -26,6 +26,23 @@ contextBridge.exposeInMainWorld('electronExam', {
   boostBrightness: (attemptId: string) =>
     ipcRenderer.invoke('display:boost-brightness', attemptId) as Promise<unknown>,
   restoreBrightness: () => ipcRenderer.invoke('display:restore-brightness') as Promise<unknown>,
+  getCameraAttestation: (label: string, options?: { refresh: boolean }) =>
+    ipcRenderer.invoke(
+      'camera-attestation',
+      label,
+      ...(options && typeof options.refresh === 'boolean' ? [{ refresh: options.refresh }] : []),
+    ) as Promise<{
+      verdict: 'hardware' | 'virtual' | 'unknown';
+      kind: 'builtin' | 'usb' | 'continuity' | 'virtual' | 'unknown';
+      reasons: string[];
+      matchedDevice: {
+        name: string;
+        kind: 'builtin' | 'usb' | 'continuity' | 'virtual' | 'unknown';
+        transportType: string;
+        modelID: string;
+        manufacturer: string;
+      } | null;
+    }>,
   reportRenderFailure: () => ipcRenderer.send('renderer-failure'),
   onAppSnapshot: (
     callback: (snapshot: {

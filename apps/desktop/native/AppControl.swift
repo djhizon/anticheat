@@ -3,6 +3,8 @@ import Foundation
 import Darwin
 import CoreGraphics
 import IOKit
+import AVFoundation
+import CoreMediaIO
 
 struct Identity: Codable, Equatable {
     let pid: Int32
@@ -37,6 +39,8 @@ struct Reply: Encodable {
     var supported: Bool? = nil
     var brightness: Double? = nil
     var method: String? = nil
+    // Video capture devices (camera-list); read-only enumeration, no stream is opened.
+    var cameras: [CameraEntry]? = nil
 }
 enum Failure: Error { case unavailable }
 
@@ -272,7 +276,156 @@ func brightnessReply(_ request: Request) -> Reply {
     return Reply(supported: true, brightness: backend.get() ?? wanted, method: backend.name)
 }
 
+// MARK: - Camera hardware attestation (camera-list)
+// Read-only: AVCaptureDevice discovery plus CoreMediaIO properties. No capture session or stream is
+// ever opened, so no camera (TCC) permission is needed; enumeration works while access is
+// "not determined". The browser only sees labels; this lets the Mac app tell a real sensor from a
+// Camera Extension / DAL plug-in (OBS, Camo, ...) that copies a harmless-looking name.
+struct CameraEntry: Codable {
+    let name: String
+    let uniqueID: String
+    let modelID: String
+    let manufacturer: String
+    let deviceType: String
+    /// CoreMediaIO transport type as a four-character code ("bltn", "usb", "virt", ...) or "unknown".
+    let transportType: String
+    let isConnected: Bool
+    /// Bundle id of the CoreMediaIO plug-in / Camera Extension that provides the device, if found.
+    let plugInBundleId: String?
+    let kind: String
+    let reasons: [String]
+}
+
+struct CameraFacts {
+    let deviceType: String
+    let transport: UInt32?
+    let plugInBundleId: String?
+}
+
+func fourCC(_ text: String) -> UInt32 {
+    return text.utf8.prefix(4).reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+}
+func fourCCText(_ value: UInt32) -> String {
+    let bytes = [24, 16, 8, 0].map { UInt8((value >> UInt32($0)) & 0xff) }
+    guard value != 0, bytes.allSatisfy({ $0 >= 0x20 && $0 < 0x7f }),
+          let text = String(bytes: bytes, encoding: .ascii) else { return "unknown" }
+    return text.trimmingCharacters(in: .whitespaces)
+}
+
+let transportBuiltIn = fourCC("bltn")
+let transportVirtual = fourCC("virt")
+/// Physical buses a real external camera can be attached through.
+let physicalTransports: [UInt32: String] = [
+    fourCC("usb "): "USB", fourCC("thun"): "Thunderbolt", fourCC("pci "): "PCI", fourCC("fire"): "FireWire"
+]
+let continuityPlugIn = "com.apple.cmio.ContinuityCaptureAgent"
+let builtInDeviceType = "AVCaptureDeviceTypeBuiltInWideAngleCamera"
+let continuityDeviceTypes: Set<String> = ["AVCaptureDeviceTypeContinuityCamera", "AVCaptureDeviceTypeDeskViewCamera"]
+
+/// Pure classifier (fixtures in --self-test): builtin | usb | continuity | virtual | unknown.
+func classifyCamera(_ facts: CameraFacts) -> (kind: String, reasons: [String]) {
+    let transport = facts.transport ?? 0
+    let transportName = fourCCText(transport)
+    let plugIn = facts.plugInBundleId
+    let applePlugIn = plugIn.map { $0.hasPrefix("com.apple.") } ?? false
+    if transport == transportVirtual {
+        return ("virtual", ["CoreMediaIO transport type is virtual" + (plugIn.map { " (provided by \($0))" } ?? "")])
+    }
+    if let plugIn = plugIn, plugIn.range(of: "ScreenCapture", options: .caseInsensitive) != nil {
+        return ("virtual", ["Screen-capture device (\(plugIn)), not a camera sensor"])
+    }
+    if let plugIn = plugIn, !applePlugIn {
+        if let bus = physicalTransports[transport] ?? (transport == transportBuiltIn ? "built-in" : nil) {
+            return ("unknown", ["Third-party camera driver \(plugIn) reports a \(bus) transport; standard webcams use the macOS driver"])
+        }
+        return ("virtual", ["Provided by third-party Camera Extension / DAL plug-in \(plugIn) (transport \(transportName))"])
+    }
+    if plugIn == continuityPlugIn || continuityDeviceTypes.contains(facts.deviceType) {
+        return ("continuity", ["iPhone Continuity Camera (\(plugIn ?? facts.deviceType))"])
+    }
+    if facts.deviceType == builtInDeviceType && (transport == transportBuiltIn || physicalTransports[transport] == "USB") {
+        return ("builtin", ["Built-in camera (macOS driver \(plugIn ?? "unidentified"), transport \(transportName))"])
+    }
+    if let bus = physicalTransports[transport] {
+        guard applePlugIn else {
+            return ("unknown", ["\(bus) camera whose driver plug-in could not be identified"])
+        }
+        return ("usb", ["External \(bus) camera on the macOS driver \(plugIn!)"])
+    }
+    return ("unknown", ["Unrecognised camera (type \(facts.deviceType), transport \(transportName), driver \(plugIn ?? "unidentified"))"])
+}
+
+func cmioAddress(_ selector: Int) -> CMIOObjectPropertyAddress {
+    return CMIOObjectPropertyAddress(mSelector: CMIOObjectPropertySelector(selector),
+                                     mScope: CMIOObjectPropertyScope(kCMIOObjectPropertyScopeGlobal),
+                                     mElement: CMIOObjectPropertyElement(kCMIOObjectPropertyElementMain))
+}
+func cmioUInt32(_ object: CMIOObjectID, _ selector: Int) -> UInt32? {
+    var address = cmioAddress(selector)
+    guard CMIOObjectHasProperty(object, &address) else { return nil }
+    var value: UInt32 = 0
+    var used: UInt32 = 0
+    let status = CMIOObjectGetPropertyData(object, &address, 0, nil, UInt32(MemoryLayout<UInt32>.size), &used, &value)
+    return status == 0 && used == UInt32(MemoryLayout<UInt32>.size) ? value : nil
+}
+func cmioString(_ object: CMIOObjectID, _ selector: Int) -> String? {
+    var address = cmioAddress(selector)
+    guard CMIOObjectHasProperty(object, &address) else { return nil }
+    var value: Unmanaged<CFString>? = nil
+    var used: UInt32 = 0
+    let status = CMIOObjectGetPropertyData(object, &address, 0, nil,
+                                           UInt32(MemoryLayout<Unmanaged<CFString>?>.size), &used, &value)
+    guard status == 0, let text = value?.takeRetainedValue() else { return nil }
+    return text as String
+}
+
+/// CoreMediaIO device UID -> (transport, plug-in bundle id). Empty if CMIO is unavailable.
+func cmioDevices() -> [String: (transport: UInt32?, plugIn: String?)] {
+    let system = CMIOObjectID(kCMIOObjectSystemObject)
+    var address = cmioAddress(Int(kCMIOHardwarePropertyDevices))
+    var size: UInt32 = 0
+    guard CMIOObjectGetPropertyDataSize(system, &address, 0, nil, &size) == 0, size > 0, size < 65536 else { return [:] }
+    var ids = [CMIOObjectID](repeating: 0, count: Int(size) / MemoryLayout<CMIOObjectID>.size)
+    var used: UInt32 = 0
+    guard CMIOObjectGetPropertyData(system, &address, 0, nil, size, &used, &ids) == 0 else { return [:] }
+    var result: [String: (transport: UInt32?, plugIn: String?)] = [:]
+    for id in ids.prefix(Int(used) / MemoryLayout<CMIOObjectID>.size) {
+        guard let uid = cmioString(id, Int(kCMIODevicePropertyDeviceUID)) else { continue }
+        let plugIn = cmioUInt32(id, Int(kCMIODevicePropertyPlugIn)).flatMap {
+            cmioString(CMIOObjectID($0), Int(kCMIOPlugInPropertyBundleID))
+        }
+        result[uid] = (cmioUInt32(id, Int(kCMIODevicePropertyTransportType)), plugIn)
+    }
+    return result
+}
+
+func cameraInventory() -> [CameraEntry] {
+    var types: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera, .deskViewCamera]
+    if #available(macOS 14.0, *) {
+        types += [.external, .continuityCamera]
+    } else {
+        types.append(.externalUnknown)
+    }
+    let devices = AVCaptureDevice.DiscoverySession(deviceTypes: types, mediaType: .video, position: .unspecified).devices
+    let cmio = cmioDevices()
+    return devices.map { device in
+        let native = cmio[device.uniqueID]
+        // CMIO first; AVFoundation's own transportType is the same property and a fallback.
+        let transport = native?.transport ?? (device.transportType != 0 ? UInt32(bitPattern: device.transportType) : nil)
+        let facts = CameraFacts(deviceType: device.deviceType.rawValue, transport: transport, plugInBundleId: native?.plugIn)
+        let verdict = classifyCamera(facts)
+        return CameraEntry(name: device.localizedName, uniqueID: device.uniqueID, modelID: device.modelID,
+                           manufacturer: device.manufacturer, deviceType: device.deviceType.rawValue,
+                           transportType: fourCCText(transport ?? 0), isConnected: device.isConnected,
+                           plugInBundleId: native?.plugIn, kind: verdict.kind, reasons: verdict.reasons)
+    }
+}
+
 func run(_ request: Request) throws -> Reply {
+    if request.action == "camera-list" {
+        guard getppid() == request.hostPid else { throw Failure.unavailable }
+        return Reply(cameras: cameraInventory())
+    }
     if request.action == "brightness-get" || request.action == "brightness-set" {
         guard getppid() == request.hostPid else { throw Failure.unavailable }
         return brightnessReply(request)
@@ -323,6 +476,34 @@ if CommandLine.arguments.dropFirst().elementsEqual(["--self-test"]) {
     precondition(baselineExemptions.allSatisfy { $0.hasPrefix("com.apple.") })
     precondition(clampLevel(1.5) == 1.0 && clampLevel(-0.2) == 0.0 && clampLevel(0.4) == 0.4)
     precondition(clampLevel(Double.nan) == nil && clampLevel(Double.infinity) == nil)
+    // Camera classifier: transport type + plug-in -> kind (fixtures from a real Intel MacBook).
+    let ext = "AVCaptureDeviceTypeExternal"
+    func kind(_ type: String, _ transport: String?, _ plugIn: String?) -> String {
+        return classifyCamera(CameraFacts(deviceType: type, transport: transport.map(fourCC), plugInBundleId: plugIn)).kind
+    }
+    precondition(fourCCText(fourCC("usb ")) == "usb" && fourCCText(0) == "unknown" && fourCCText(fourCC("virt")) == "virt")
+    precondition(kind(builtInDeviceType, "usb ", "com.apple.cmio.uvcassistantextension") == "builtin")
+    precondition(kind(builtInDeviceType, "bltn", "com.apple.cmio.uvcassistantextension") == "builtin")
+    precondition(kind(builtInDeviceType, "bltn", nil) == "builtin")
+    precondition(kind(ext, "usb ", "com.apple.cmio.uvcassistantextension") == "usb")
+    precondition(kind(ext, "thun", "com.apple.cmio.uvcassistantextension") == "usb")
+    precondition(kind(ext, "usb ", nil) == "unknown")
+    precondition(kind(ext, "othr", continuityPlugIn) == "continuity")
+    precondition(kind(ext, nil, continuityPlugIn) == "continuity")
+    precondition(kind("AVCaptureDeviceTypeContinuityCamera", nil, nil) == "continuity")
+    // Virtual: transport 'virt' wins over everything, including a built-in device type or Apple plug-in.
+    precondition(kind(ext, "virt", "com.obsproject.obs-studio.mac-camera-extension") == "virtual")
+    precondition(kind(builtInDeviceType, "virt", "com.apple.cmio.uvcassistantextension") == "virtual")
+    precondition(kind(ext, "virt", nil) == "virtual")
+    // Third-party Camera Extension / DAL plug-in without a physical transport is virtual (Camo, mmhmm...).
+    precondition(kind(ext, nil, "com.reincubate.camo.extension") == "virtual")
+    precondition(kind(ext, "othr", "com.example.cam") == "virtual")
+    // A third-party driver claiming a physical bus is not trusted as hardware, but not locked out.
+    precondition(kind(ext, "usb ", "com.example.vendor-driver") == "unknown")
+    precondition(kind(builtInDeviceType, "bltn", "com.example.fake") == "unknown")
+    precondition(kind(ext, "usb ", "com.apple.cmio.iOSScreenCaptureAssistant") == "virtual")
+    precondition(kind(ext, nil, nil) == "unknown")
+    precondition(kind(ext, "bltn", "com.apple.cmio.uvcassistantextension") == "unknown")
     print("native policy checks passed (fixtures only)")
     exit(0)
 }
@@ -331,6 +512,14 @@ if CommandLine.arguments.dropFirst().elementsEqual(["--self-test"]) {
 if CommandLine.arguments.dropFirst().elementsEqual(["--brightness-get"]) {
     let reply = brightnessReply(Request(action: "brightness-get", hostPid: getppid(), hostExecutable: "", target: nil, demo: nil, level: nil, development: nil))
     if let output = try? JSONEncoder().encode(reply) { FileHandle.standardOutput.write(output) }
+    exit(0)
+}
+
+// Manual probe (read-only, no camera stream): `app-control --camera-list` prints the classified cameras.
+if CommandLine.arguments.dropFirst().elementsEqual(["--camera-list"]) {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    if let output = try? encoder.encode(Reply(cameras: cameraInventory())) { FileHandle.standardOutput.write(output) }
     exit(0)
 }
 

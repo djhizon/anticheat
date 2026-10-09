@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { CameraAttestation } from './cameraAttestation.js';
 import { analyseFeed, checkCamera, feedLooksReal } from './cameraGate.js';
 import { classifyCameras, selectCamera } from './physicalCamera.js';
 
@@ -129,5 +130,78 @@ describe('camera gate', () => {
     expect(await checkCamera({ media, sample: async () => realFrames })).toMatchObject({
       state: 'ok',
     });
+  });
+});
+
+describe('camera gate with Mac hardware attestation', () => {
+  const verdict = (
+    v: CameraAttestation['verdict'],
+    kind: CameraAttestation['kind'],
+    name: string,
+  ): CameraAttestation => ({ verdict: v, kind, reasons: [v], matchedDevice: { name, kind } });
+  const MAC = 'FaceTime HD Camera (Built-in) (05ac:8514)';
+  const DISGUISED = 'FaceTime HD Camera'; // A virtual camera with a harmless name.
+  const table: Record<string, CameraAttestation> = {
+    [MAC]: verdict('hardware', 'builtin', 'FaceTime HD Camera (Built-in)'),
+    [DISGUISED]: verdict('virtual', 'virtual', DISGUISED),
+    'Kwassant Camera': verdict('hardware', 'continuity', 'Kwassant Camera'),
+    'Odd Cam': verdict('unknown', 'unknown', 'Odd Cam'),
+  };
+  const attest = vi.fn(async (label: string) => table[label]!);
+
+  it('blocks with OBS instructions when every camera is attested virtual', async () => {
+    const { media } = fakeMedia([device('fake', DISGUISED)]);
+    const result = await checkCamera({ media, attest, sample: async () => realFrames });
+    expect(result).toMatchObject({ state: 'blocked', reason: 'only_virtual' });
+    if (result.state !== 'blocked') return;
+    expect(result.steps.join(' ')).toMatch(/Quit OBS/);
+    expect(result.cameras.virtual.map((d) => d.deviceId)).toEqual(['fake']);
+    expect(result.cameras.native).toHaveLength(0);
+  });
+
+  it('skips an attested-virtual camera even when it is preferred', async () => {
+    const { media } = fakeMedia([device('fake', DISGUISED), device('mac', MAC)]);
+    const result = await checkCamera({
+      media,
+      attest,
+      preferredId: 'fake',
+      sample: async () => realFrames,
+    });
+    expect(result).toMatchObject({ state: 'ok', deviceId: 'mac' });
+    if (result.state !== 'ok') return;
+    expect(result.attestation).toMatchObject({ verdict: 'hardware', kind: 'builtin' });
+    expect(result.cameras.virtual.map((d) => d.deviceId)).toEqual(['fake']);
+  });
+
+  it('blocks and releases the stream when the acquired track is attested virtual', async () => {
+    // The device list said hardware, but the track handed out carries a virtual camera's label.
+    const { media, stop } = fakeMedia([device('mac', MAC)], { label: DISGUISED });
+    const result = await checkCamera({ media, attest, sample: async () => realFrames });
+    expect(result).toMatchObject({ state: 'blocked', reason: 'only_virtual' });
+    if (result.state === 'blocked') expect(result.title).toMatch(/virtual camera/);
+    expect(stop).toHaveBeenCalled();
+  });
+
+  it('allows unknown hardware but logs camera_unverified', async () => {
+    const report = vi.fn();
+    const { media } = fakeMedia([device('odd', 'Odd Cam')]);
+    const result = await checkCamera({ media, attest, report, sample: async () => realFrames });
+    expect(result).toMatchObject({ state: 'ok', attestation: { verdict: 'unknown' } });
+    expect(report).toHaveBeenCalledWith('camera_unverified');
+  });
+
+  it('accepts an iPhone Continuity Camera as hardware', async () => {
+    const report = vi.fn();
+    const { media } = fakeMedia([device('phone', 'Kwassant Camera')]);
+    const result = await checkCamera({ media, attest, report, sample: async () => realFrames });
+    expect(result).toMatchObject({ state: 'ok', attestation: { kind: 'continuity' } });
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  it('changes nothing in a plain browser (no bridge)', async () => {
+    const { media } = fakeMedia([device('fake', DISGUISED)]);
+    const result = await checkCamera({ media, sample: async () => realFrames });
+    expect(result.state).toBe('ok');
+    if (result.state === 'ok') expect(result.attestation).toBeUndefined();
   });
 });

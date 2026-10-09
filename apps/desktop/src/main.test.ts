@@ -371,6 +371,18 @@ describe('native window recovery', () => {
       expect(isAppUrl('not a url')).toBe(false);
       expect(isAppUrl(undefined)).toBe(false);
     });
+    it('camera-attestation is wired to the trusted app frame check', async () => {
+      const event = await trusted();
+      const handler = mocks.handlers.get('camera-attestation')!;
+      expect(() => handler({ ...event, sender: {} }, 'FaceTime HD Camera')).toThrow('Untrusted');
+      expect(() =>
+        handler(
+          { sender: event.sender, senderFrame: { url: event.senderFrame.url } },
+          'FaceTime HD Camera',
+        ),
+      ).toThrow('Untrusted');
+      expect(() => handler(event, 42)).toThrow('Invalid');
+    });
     it('rejects untrusted callers on every get-* handler', async () => {
       const event = await trusted();
       (screen as unknown as Record<string, unknown>).getAllDisplays = () => [{}];

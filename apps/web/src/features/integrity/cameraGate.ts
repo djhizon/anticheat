@@ -1,5 +1,15 @@
 import { VIRTUAL_CAMERA_LABEL } from '@examguard/contracts/exam';
-import { acquirePhysicalCamera, classifyCameras, type CameraChoices } from './physicalCamera.js';
+import {
+  cameraAttestation,
+  type AttestCamera,
+  type CameraAttestation,
+} from './cameraAttestation.js';
+import {
+  acquirePhysicalCamera,
+  classifyCameras,
+  getPreferredCameraId,
+  type CameraChoices,
+} from './physicalCamera.js';
 
 /** One luminance sample (64x64 by default) of the live feed. */
 export type FeedFrame = ArrayLike<number>;
@@ -22,6 +32,8 @@ export interface CameraOk {
   /** Live stream; the caller owns it and must stop it. */
   readonly stream: MediaStream;
   readonly cameras: CameraChoices;
+  /** Mac app only: the macOS hardware verdict for this camera (absent in a plain browser). */
+  readonly attestation?: CameraAttestation;
 }
 
 export type CameraGateResult = CameraOk | CameraBlock;
@@ -114,6 +126,13 @@ export interface CameraGateOptions {
   readonly sample?: (stream: MediaStream) => Promise<readonly FeedFrame[]>;
   /** Injectable for tests; defaults to the browser user agent. */
   readonly userAgent?: string;
+  /**
+   * Hardware attestation. Defaults to the Mac app bridge when present; null (or a plain browser)
+   * keeps the label-only checks.
+   */
+  readonly attest?: AttestCamera | null;
+  /** Integrity events from the check itself (`camera_unverified`). */
+  readonly report?: (event: string) => void;
 }
 
 const NO_CAMERAS: CameraChoices = { native: [], virtual: [] };
@@ -143,6 +162,19 @@ const VIRTUAL_STEPS = [
   'Close Camo, DroidCam, Snap Camera, Iriun, ManyCam, mmhmm and any other camera app.',
   'Make sure your built-in webcam is not disabled or covered, then press Check again.',
 ];
+
+/** Moves cameras macOS attested as virtual from the native list to the virtual list. */
+export function moveAttestedVirtual(
+  cameras: CameraChoices,
+  attested: ReadonlyMap<string, CameraAttestation>,
+): CameraChoices {
+  const fake = cameras.native.filter((d) => attested.get(d.deviceId)?.verdict === 'virtual');
+  if (fake.length === 0) return cameras;
+  return {
+    native: cameras.native.filter((d) => !fake.includes(d)),
+    virtual: [...cameras.virtual, ...fake],
+  };
+}
 
 function errorName(error: unknown): string {
   return typeof error === 'object' && error !== null
@@ -201,6 +233,15 @@ export async function checkCamera(options: CameraGateOptions = {}): Promise<Came
       devices = await media.enumerateDevices();
     }
     cameras = classifyCameras(devices);
+    // Mac app: a camera macOS reports as virtual (Camera Extension / DAL plug-in) is treated
+    // exactly like a virtual-labelled one, whatever its name says.
+    const attest = options.attest === undefined ? cameraAttestation() : options.attest;
+    const attested = new Map<string, CameraAttestation>();
+    if (attest && cameras.native.length > 0) {
+      const verdicts = await Promise.all(cameras.native.map((d) => attest(d.label)));
+      cameras.native.forEach((d, i) => attested.set(d.deviceId, verdicts[i]!));
+      cameras = moveAttestedVirtual(cameras, attested);
+    }
     if (cameras.native.length === 0) {
       if (cameras.virtual.length > 0)
         return blocked(
@@ -210,13 +251,24 @@ export async function checkCamera(options: CameraGateOptions = {}): Promise<Came
         );
       return fromError(new Error('no camera'));
     }
-    const stream = await acquirePhysicalCamera(media, options.preferredId);
+    // With attestation the pick is limited to cameras macOS did not report as virtual.
+    const wanted = options.preferredId ?? getPreferredCameraId() ?? undefined;
+    const pick = attest
+      ? (cameras.native.find((d) => d.deviceId === wanted) ?? cameras.native[0])!.deviceId
+      : options.preferredId;
+    const stream = await acquirePhysicalCamera(media, pick);
     const track = stream.getVideoTracks()[0];
     const label = track?.label ?? '';
     const deviceId = track?.getSettings().deviceId ?? '';
     if (VIRTUAL_CAMERA_LABEL.test(label)) {
       stream.getTracks().forEach((t) => t.stop());
       return blocked('only_virtual', 'The camera in use is a virtual camera', VIRTUAL_STEPS);
+    }
+    // Re-attest the label of the track actually handed out (the Mac app caches the device list).
+    const attestation = attest ? await attest(label) : undefined;
+    if (attestation?.verdict === 'virtual') {
+      stream.getTracks().forEach((t) => t.stop());
+      return blocked('only_virtual', `macOS reports "${label}" as a virtual camera`, VIRTUAL_STEPS);
     }
     // No test exemption: Chromium's fake device (noise ~600, motion ~8) passes this check itself.
     let frames: readonly FeedFrame[] = [];
@@ -233,7 +285,16 @@ export async function checkCamera(options: CameraGateOptions = {}): Promise<Came
         'If the picture is stuck, unplug and replug an external webcam or restart the browser, then press Check again.',
       ]);
     }
-    return { state: 'ok', label, deviceId, stream, cameras };
+    // Unusual hardware the Mac app cannot classify is allowed, but noted for the reviewer.
+    if (attestation?.verdict === 'unknown') options.report?.('camera_unverified');
+    return {
+      state: 'ok',
+      label,
+      deviceId,
+      stream,
+      cameras,
+      ...(attestation ? { attestation } : {}),
+    };
   } catch (error) {
     return fromError(error);
   }

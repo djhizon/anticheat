@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCameraContinuity, type ContinuityState } from './cameraContinuity.js';
+import type { CameraAttestation } from './cameraAttestation.js';
 import type { CameraBlock, CameraGateResult } from './cameraGate.js';
 
 const blockedResult: CameraBlock = {
@@ -98,6 +99,82 @@ describe('mid-exam camera continuity', () => {
     track.dispatchEvent(new Event('mute'));
     await vi.advanceTimersByTimeAsync(3100);
     expect(report).toHaveBeenCalledWith('camera_feed_paused_track_muted');
+    continuity.stop();
+  });
+});
+
+describe('mid-exam camera attestation (Mac app)', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const answer = (verdict: CameraAttestation['verdict']): CameraAttestation => ({
+    verdict,
+    kind: verdict === 'hardware' ? 'builtin' : verdict === 'virtual' ? 'virtual' : 'unknown',
+    reasons: [],
+    matchedDevice: null,
+  });
+
+  function setup(verdicts: CameraAttestation['verdict'][], results: CameraGateResult[] = []) {
+    const track = Object.assign(new FakeTrack(), { label: 'FaceTime HD Camera' });
+    const media = new EventTarget();
+    const report = vi.fn();
+    const attest = vi.fn(async () => answer(verdicts.shift() ?? 'hardware'));
+    const continuity = createCameraContinuity({
+      check: vi.fn(async () => results.shift() ?? blockedResult),
+      report,
+      onChange: () => {},
+      getTrack: () => track as unknown as MediaStreamTrack,
+      media: media as unknown as MediaDevices,
+      attest,
+    });
+    return { continuity, report, attest, media };
+  }
+
+  it('attests the active camera when first watched and pauses if macOS says virtual', async () => {
+    const { continuity, report, attest } = setup(['virtual']);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(attest).toHaveBeenCalledWith('FaceTime HD Camera');
+    expect(continuity.state()).toMatchObject({ paused: true, reason: 'virtual_camera_attested' });
+    expect(report).toHaveBeenCalledWith('camera_feed_paused_virtual_camera_attested');
+    continuity.stop();
+  });
+
+  it('re-attests on device change and logs camera_unverified once', async () => {
+    const { continuity, report, attest, media } = setup(['hardware', 'unknown', 'unknown']);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(report).not.toHaveBeenCalled();
+    media.dispatchEvent(new Event('devicechange'));
+    await vi.advanceTimersByTimeAsync(0);
+    media.dispatchEvent(new Event('devicechange'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(attest).toHaveBeenCalledTimes(3);
+    expect(report.mock.calls.filter(([e]) => e === 'camera_unverified')).toHaveLength(1);
+    expect(continuity.state().paused).toBe(false);
+    continuity.stop();
+  });
+
+  it('logs camera_unverified when a resume check passes on unverified hardware', async () => {
+    const ok = { ...okResult(), attestation: answer('unknown') } as CameraGateResult;
+    const { continuity, report } = setup(['hardware'], [ok]);
+    continuity.notify('camera_disconnected');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(continuity.state().paused).toBe(false);
+    expect(report).toHaveBeenCalledWith('camera_unverified');
+    continuity.stop();
+  });
+
+  it('does nothing without the Mac bridge', async () => {
+    const track = Object.assign(new FakeTrack(), { label: 'OBS-like name' });
+    const report = vi.fn();
+    const continuity = createCameraContinuity({
+      check: vi.fn(async () => blockedResult),
+      report,
+      onChange: () => {},
+      getTrack: () => track as unknown as MediaStreamTrack,
+      attest: null,
+    });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(report).not.toHaveBeenCalled();
     continuity.stop();
   });
 });

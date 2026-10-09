@@ -25,6 +25,7 @@ import {
   LOCKDOWN_EVENT_CHANNEL,
   type LockdownBrowserWindow,
 } from './lockdownWindow';
+import { registerCameraAttestation } from './cameraAttestation';
 import { registerDisplayBrightness } from './displayBrightness';
 import { createPhoneLan } from './phoneLan';
 import { captureScreenSnapshot } from './screenSnapshot';
@@ -107,6 +108,15 @@ const displayBrightness = registerDisplayBrightness({
       event: 'brightness_restored',
     }),
   log: (event, detail) => diagnostic(event, detail),
+});
+
+// Camera hardware attestation: the selected camera's label checked against macOS device facts.
+registerCameraAttestation({
+  ipcMain: ipcMain as unknown as Parameters<typeof registerCameraAttestation>[0]['ipcMain'],
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  appDir: __dirname,
+  trustedAppFrame,
 });
 
 // `npm run dev` keeps using the Vite + API dev servers; otherwise the bundled server is started.

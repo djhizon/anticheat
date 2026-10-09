@@ -7,6 +7,10 @@ export function setPreferredCameraId(deviceId: string | null): void {
   preferredCameraId = deviceId;
 }
 
+export function getPreferredCameraId(): string | null {
+  return preferredCameraId;
+}
+
 const BUILT_IN_LABEL = /facetime|built.?in|integrated/i;
 
 export interface CameraChoices {

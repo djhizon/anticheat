@@ -87,6 +87,20 @@ overlaps the face. Logic: `phoneEvidence.ts`; gaze maths: `gazeEstimator.ts`; st
   no offline substitute for these two instructor checks; they are leads for a
   human reviewer and nothing in the student flow depends on them.
 
+## Camera hardware attestation (Mac app only)
+
+In a plain browser the camera gate can only judge camera **labels** (plus a live-noise check),
+so a virtual camera renamed to look like a webcam passes the label heuristics. In the Mac app,
+the native helper's read-only `camera-list` action enumerates cameras with AVFoundation and
+CoreMediaIO (no stream is opened, so no camera permission is needed) and classifies each one
+from its transport type and providing plug-in: `builtin`, `usb`, `continuity` (iPhone),
+`virtual` (transport `virt`, or a third-party Camera Extension / DAL plug-in such as OBS or Camo)
+or `unknown`. The browser label is matched to that list by name, and the USB `vendor:product`
+suffix Chromium adds (for example `(05ac:8514)`) must match the device's own ids. Virtual blocks
+the gate with the usual instructions; unknown is allowed and logged as `camera_unverified` so
+unusual hardware is never locked out; hardware is shown as "Verified hardware camera". A third-party
+driver that claims a USB or built-in transport is reported as `unknown`, not trusted.
+
 ## Known limitations (read these before claiming "fully offline")
 
 1. **The hand-gesture liveness challenge was removed.** It downloaded model

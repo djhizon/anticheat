@@ -1,18 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { checkCamera, type CameraBlock, type CameraGateResult } from './cameraGate.js';
+import { hardwareCameraText, type CameraAttestation } from './cameraAttestation.js';
 import { setPreferredCameraId, type CameraChoices } from './physicalCamera.js';
 
 export type CameraGateState =
   | { readonly phase: 'idle' }
   | { readonly phase: 'checking' }
-  | { readonly phase: 'ok'; readonly label: string; readonly deviceId: string }
+  | {
+      readonly phase: 'ok';
+      readonly label: string;
+      readonly deviceId: string;
+      /** Mac app only: the macOS hardware verdict. */
+      readonly attestation?: CameraAttestation;
+    }
   | { readonly phase: 'blocked'; readonly block: CameraBlock };
 
 /**
  * Runs the camera gate and keeps the verified preview stream while the gate is
  * ok. The stream is stopped on re-run and unmount.
  */
-export function useCameraGate(): {
+export function useCameraGate(options: { readonly report?: (event: string) => void } = {}): {
   readonly state: CameraGateState;
   readonly cameras: CameraChoices;
   readonly stream: MediaStream | null;
@@ -25,6 +32,10 @@ export function useCameraGate(): {
   const current = useRef<MediaStream | null>(null);
   const mounted = useRef(true);
   const runId = useRef(0);
+  const report = useRef(options.report);
+  useEffect(() => {
+    report.current = options.report;
+  }, [options.report]);
 
   const release = useCallback(() => {
     current.current?.getTracks().forEach((track) => track.stop());
@@ -46,7 +57,10 @@ export function useCameraGate(): {
       const id = ++runId.current;
       release();
       setState({ phase: 'checking' });
-      const result = await checkCamera(preferredId !== undefined ? { preferredId } : {});
+      const result = await checkCamera({
+        ...(preferredId !== undefined ? { preferredId } : {}),
+        report: (event) => report.current?.(event),
+      });
       if (!mounted.current || id !== runId.current) {
         if (result.state === 'ok') result.stream.getTracks().forEach((track) => track.stop());
         return result;
@@ -56,7 +70,12 @@ export function useCameraGate(): {
         current.current = result.stream;
         setStream(result.stream);
         setPreferredCameraId(result.deviceId || null);
-        setState({ phase: 'ok', label: result.label, deviceId: result.deviceId });
+        setState({
+          phase: 'ok',
+          label: result.label,
+          deviceId: result.deviceId,
+          ...(result.attestation ? { attestation: result.attestation } : {}),
+        });
       } else setState({ phase: 'blocked', block: result });
       return result;
     },
@@ -127,6 +146,7 @@ export function CameraGatePanel({
           Camera check passed. Using: <strong>{state.label}</strong>
         </p>
       )}
+      {state.phase === 'ok' && <CameraAttestationNote attestation={state.attestation} />}
       {state.phase === 'blocked' && (
         <CameraBlockedNotice block={state.block} checking={false} onRetry={() => onCheck()} />
       )}
@@ -161,6 +181,25 @@ export function CameraGatePanel({
       )}
     </section>
   );
+}
+
+/** Mac app only: what macOS says about the camera. Renders nothing in a plain browser. */
+export function CameraAttestationNote({
+  attestation,
+}: {
+  readonly attestation: CameraAttestation | undefined;
+}) {
+  if (!attestation) return null;
+  const verified = hardwareCameraText(attestation);
+  if (verified) return <p className="camera-gate-verified">{verified}</p>;
+  if (attestation.verdict === 'unknown')
+    return (
+      <p className="camera-gate-unverified">
+        This Mac could not confirm the camera is built-in or USB hardware. You can continue; the
+        exam log notes that the camera could not be verified.
+      </p>
+    );
+  return null;
 }
 
 /** Blocking overlay shown mid-exam while the native webcam feed is lost. */

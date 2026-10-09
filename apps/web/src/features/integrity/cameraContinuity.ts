@@ -1,3 +1,4 @@
+import { cameraAttestation, type AttestCamera } from './cameraAttestation.js';
 import type { CameraBlock, CameraGateResult } from './cameraGate.js';
 
 export interface ContinuityState {
@@ -23,6 +24,11 @@ export interface ContinuityOptions {
   readonly tickMs?: number;
   /** While paused the gate re-runs every this many ticks. */
   readonly recheckEveryTicks?: number;
+  /**
+   * Mac app hardware attestation of the active camera, re-run when it is first watched and on
+   * every device change. Defaults to the Mac app bridge; null (or a plain browser) disables it.
+   */
+  readonly attest?: AttestCamera | null;
 }
 
 export interface CameraContinuity {
@@ -54,6 +60,30 @@ export function createCameraContinuity(options: ContinuityOptions): CameraContin
   let watched: MediaStreamTrack | null = null;
   let muteTimer: ReturnType<typeof setTimeout> | null = null;
   let ticks = 0;
+  const attest = options.attest === undefined ? cameraAttestation() : options.attest;
+  const unverified = new Set<string>();
+  let attesting = false;
+  const noteUnverified = (label: string): void => {
+    if (unverified.has(label)) return;
+    unverified.add(label);
+    options.report('camera_unverified');
+  };
+  // A camera macOS reports as virtual pauses answering like a virtual-labelled one.
+  const attestActive = (): void => {
+    const track = options.getTrack();
+    if (!attest || attesting || stopped || state.paused || !track?.label) return;
+    attesting = true;
+    void attest(track.label)
+      .then((result) => {
+        if (stopped || options.getTrack() !== track) return;
+        if (result.verdict === 'virtual') pause('virtual_camera_attested');
+        else if (result.verdict === 'unknown') noteUnverified(track.label);
+      })
+      .catch(() => {})
+      .finally(() => {
+        attesting = false;
+      });
+  };
 
   const set = (next: Partial<ContinuityState>): void => {
     state = { ...state, ...next };
@@ -91,6 +121,7 @@ export function createCameraContinuity(options: ContinuityOptions): CameraContin
     track.addEventListener('unmute', onUnmute);
     if (track.readyState === 'ended') onEnded();
     else if (track.muted) onMute();
+    else attestActive();
   };
 
   function pause(reason: string): void {
@@ -110,6 +141,7 @@ export function createCameraContinuity(options: ContinuityOptions): CameraContin
       .then((result) => {
         if (result.state === 'ok') {
           result.stream.getTracks().forEach((track) => track.stop());
+          if (result.attestation?.verdict === 'unknown') noteUnverified(result.label);
           unwatch();
           set({
             paused: false,
@@ -130,6 +162,7 @@ export function createCameraContinuity(options: ContinuityOptions): CameraContin
 
   const onDeviceChange = (): void => {
     if (state.paused) void recheck();
+    else attestActive();
   };
   options.media?.addEventListener('devicechange', onDeviceChange);
   const timer = setInterval(() => {
