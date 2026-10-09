@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/common.ts",
-    "./exam": "./src/exam.ts"
+    "./exam": "./src/exam.ts",
+    "./findings": "./src/findings.ts"
   }
 }
