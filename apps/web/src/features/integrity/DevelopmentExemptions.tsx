@@ -1,8 +1,10 @@
 import { desktopAppsBridge } from './desktopApps.js';
+import { useDesktopRunMode } from './useDesktopRunMode.js';
 
-/** Deliberately persistent while this development-only native policy is enabled. */
+/** Deliberately persistent while the demo-mode-only native exemptions are enabled. */
 export function DevelopmentExemptions(): React.ReactElement | null {
-  if (typeof desktopAppsBridge()?.listAppTargets !== 'function') return null;
+  const mode = useDesktopRunMode();
+  if (typeof desktopAppsBridge()?.listAppTargets !== 'function' || mode !== 'demo') return null;
   return (
     <aside
       role="note"
@@ -18,8 +20,8 @@ export function DevelopmentExemptions(): React.ReactElement | null {
         fontSize: 14,
       }}
     >
-      Development exemptions active: Terminal and ChatGPT. Remove these exam-policy exemptions
-      before the presentation. Keep the local server terminal running.
+      Demo mode: Terminal and ChatGPT are exempt from the app check. Strict mode has no exemptions.
+      Keep the local server terminal running.
     </aside>
   );
 }

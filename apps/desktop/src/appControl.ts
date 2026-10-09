@@ -30,7 +30,10 @@ export interface ActionResult {
 }
 export type HelperCall = (action: 'list' | CloseMode, target?: AppIdentity) => Promise<unknown>;
 
-export function createHelperCall(executable: string): HelperCall {
+export function createHelperCall(
+  executable: string,
+  isDemo: () => boolean = () => false,
+): HelperCall {
   return (action, target) =>
     new Promise((resolve, reject) => {
       const child = execFile(
@@ -51,7 +54,13 @@ export function createHelperCall(executable: string): HelperCall {
       );
       child.stdin?.on('error', () => {});
       child.stdin?.end(
-        JSON.stringify({ action, target, hostPid: process.pid, hostExecutable: process.execPath }),
+        JSON.stringify({
+          action,
+          target,
+          hostPid: process.pid,
+          hostExecutable: process.execPath,
+          demo: isDemo(),
+        }),
       );
     });
 }

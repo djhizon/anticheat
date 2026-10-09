@@ -21,6 +21,7 @@ struct Request: Decodable {
     let hostPid: Int32
     let hostExecutable: String
     let target: Identity?
+    let demo: Bool?
 }
 struct Reply: Encodable {
     var apps: [Entry]? = nil
@@ -29,13 +30,13 @@ struct Reply: Encodable {
 }
 enum Failure: Error { case unavailable }
 
-// Remove temporary policy exemptions before real exams; retain runtime safety.
+// Development exemptions apply in demo mode only; strict mode never honours them.
 let temporaryExemptions: Set<String> = ["com.apple.Terminal", "com.openai.chat", "com.openai.codex"]
 let baselineExemptions: Set<String> = [
     "com.apple.finder", "com.apple.dock", "com.apple.systemuiserver",
     "com.apple.controlcenter", "com.apple.loginwindow", "com.google.antigravity"
 ]
-let protectedIds = temporaryExemptions.union(baselineExemptions).union([
+let protectedIds = baselineExemptions.union([
     "com.googlecode.iterm2", "com.exam-anti-cheat.desktop"
 ])
 
@@ -129,11 +130,11 @@ func inventory(_ request: Request) throws -> [Entry] {
         guard let value = identity(app), let name = app.localizedName else { throw Failure.unavailable }
         let ownBundle = value.bundlePath == hostIdentity.bundlePath || value.bundlePath.hasPrefix(hostIdentity.bundlePath + "/")
         let runtime = dependencies.contains(value.pid) || ownBundle
-        let temporary = temporaryExemptions.contains(value.bundleId)
+        let temporary = request.demo == true && temporaryExemptions.contains(value.bundleId)
         return Entry(identity: value, name: name,
-                     protected: runtime || protectedIds.contains(value.bundleId),
+                     protected: runtime || temporary || protectedIds.contains(value.bundleId),
                      exempt: ownBundle || value.pid == request.hostPid || temporary || baselineExemptions.contains(value.bundleId),
-                     reason: temporary ? "Temporary development exemption — remove before presentation"
+                     reason: temporary ? "Development exemption (demo mode only)"
                        : runtime ? "Protected exam runtime or local server dependency"
                        : protectedIds.contains(value.bundleId) ? "Protected application — close manually if appropriate" : "")
     }
@@ -161,8 +162,9 @@ if CommandLine.arguments.dropFirst().elementsEqual(["--self-test"]) {
     precondition(relatedPids(parents: [10: 11, 11: 10], roots: [10]) == [10, 11])
     precondition(temporaryExemptions.contains("com.apple.Terminal"))
     precondition(temporaryExemptions.contains("com.openai.codex"))
+    precondition(!protectedIds.contains("com.apple.Terminal"))
     precondition(protectedIds.contains("com.googlecode.iterm2"))
-    print("6 native policy checks passed (fixtures only)")
+    print("7 native policy checks passed (fixtures only)")
     exit(0)
 }
 

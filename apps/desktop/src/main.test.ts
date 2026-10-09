@@ -18,6 +18,7 @@ vi.mock('fs', () => ({
   statSync: vi.fn(),
   writeFileSync: vi.fn(),
 }));
+vi.mock('./settings.js', () => ({ readRunMode: () => 'demo', writeRunMode: vi.fn() }));
 vi.mock('electron', () => ({
   app: {
     whenReady: () => new Promise(() => {}),
@@ -60,12 +61,13 @@ vi.mock('electron', () => ({
     },
   },
   desktopCapturer: { getSources: mocks.getSources },
+  shell: { openPath: vi.fn() },
   systemPreferences: {},
   dialog: { showMessageBox: mocks.showMessageBox },
 }));
 
 import { screen } from 'electron';
-import { createWindow } from './main.js';
+import { createWindow, switchRunMode } from './main.js';
 const flush = async () => {
   for (let i = 0; i < 8; i++) await Promise.resolve();
 };
@@ -261,5 +263,48 @@ describe('native window recovery', () => {
     window.emit('unresponsive');
     await flush();
     expect(window.isDestroyed()).toBe(true);
+  });
+  describe('run mode', () => {
+    async function trustedEvent() {
+      await createWindow();
+      const webContents = mocks.windows.at(-1).webContents;
+      const frame = { url: 'http://127.0.0.1:5173/' };
+      webContents.mainFrame = frame;
+      return { sender: webContents, senderFrame: frame };
+    }
+    it('defaults to demo and refuses close-app-target without quitting anything', async () => {
+      const event = await trustedEvent();
+      expect(await mocks.handlers.get('get-run-mode')!(event)).toBe('demo');
+      const result = (await mocks.handlers.get('close-app-target')!(event, {
+        id: 'x',
+        mode: 'quit',
+      })) as { status: string; message: string };
+      expect(result.status).toBe('refused');
+      expect(result.message).toContain('Demo mode');
+      expect(mocks.showMessageBox).not.toHaveBeenCalled();
+    });
+    it('exposes the mode only to the trusted frame', async () => {
+      const event = await trustedEvent();
+      expect(() => mocks.handlers.get('get-run-mode')!({ ...event, sender: {} })).toThrow(
+        'Untrusted',
+      );
+    });
+    it('asks for confirmation before strict, and strict keeps the existing behaviour', async () => {
+      const event = await trustedEvent();
+      mocks.showMessageBox.mockResolvedValueOnce({ response: 0 });
+      await switchRunMode('strict');
+      expect(mocks.showMessageBox).toHaveBeenCalledTimes(1);
+      expect(await mocks.handlers.get('get-run-mode')!(event)).toBe('demo');
+      await switchRunMode('strict');
+      expect(await mocks.handlers.get('get-run-mode')!(event)).toBe('strict');
+      const result = (await mocks.handlers.get('close-app-target')!(event, {
+        id: 'unknown',
+        mode: 'quit',
+      })) as { status: string; message: string };
+      expect(result.message).not.toContain('Demo mode');
+      expect(() => mocks.handlers.get('close-app-target')!(event, { id: 'x' })).toThrow('Invalid');
+      await switchRunMode('demo'); // Back to demo needs no confirmation.
+      expect(await mocks.handlers.get('get-run-mode')!(event)).toBe('demo');
+    });
   });
 });

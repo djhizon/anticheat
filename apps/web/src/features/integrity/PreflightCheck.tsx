@@ -1,5 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { desktopAppsBridge, parseAppTargets, type DesktopAppTarget } from './desktopApps.js';
+import {
+  desktopAppsBridge,
+  parseAppTargets,
+  readDesktopRunMode,
+  type DesktopAppTarget,
+} from './desktopApps.js';
 
 const RISK_MAP: Record<string, string> = {
   EXTERNAL_MONITOR: 'Multiple Displays Detected. Unplug all external monitors to continue.',
@@ -27,6 +32,7 @@ export function PreflightCheck({
   const [extraDisplays, setExtraDisplays] = useState(false);
   const [vmReason, setVmReason] = useState<string | null>(null);
   const [captureDisplays, setCaptureDisplays] = useState<string[]>([]);
+  const [demo, setDemo] = useState(false);
   const [closing, setClosing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -73,6 +79,11 @@ export function PreflightCheck({
       try {
         if (typeof electronAPI?.listAppTargets !== 'function')
           throw new Error('Restart the rebuilt desktop app.');
+        const isDemo = (await readDesktopRunMode(electronAPI)) === 'demo';
+        if (cancelled) return;
+        setDemo(isDemo);
+        // Demo mode gathers every finding so all of them are listed, then lets the user continue.
+        let findings = false;
         if (typeof electronAPI.getEnvironmentRisk === 'function') {
           let risk: Awaited<ReturnType<NonNullable<typeof electronAPI.getEnvironmentRisk>>> | null =
             null;
@@ -89,9 +100,12 @@ export function PreflightCheck({
           if (vm !== null || captures.length > 0) {
             setVmReason(vm);
             setCaptureDisplays(captures);
-            setRunningApps([]);
-            setLoading(false);
-            return;
+            if (!isDemo) {
+              setRunningApps([]);
+              setLoading(false);
+              return;
+            }
+            findings = true;
           }
         }
         const displays = await electronAPI.getDisplayCount();
@@ -100,16 +114,19 @@ export function PreflightCheck({
           throw new Error('Invalid display response');
         if (displays > 1) {
           setExtraDisplays(true);
-          setRunningApps([]);
-          setLoading(false);
-          return;
+          if (!isDemo) {
+            setRunningApps([]);
+            setLoading(false);
+            return;
+          }
+          findings = true;
         }
 
         const apps = parseAppTargets(await electronAPI.listAppTargets());
         if (cancelled) return;
         const offendingApps = apps.filter((app) => !app.exempt);
 
-        if (offendingApps.length === 0) {
+        if (offendingApps.length === 0 && !findings) {
           onPassedRef.current();
         } else {
           setRunningApps(apps);
@@ -137,7 +154,7 @@ export function PreflightCheck({
   };
 
   async function requestClose(target: DesktopAppTarget, mode: 'quit' | 'force'): Promise<void> {
-    if (!electronAPI || closing || target.protected || target.exempt) return;
+    if (!electronAPI || demo || closing || target.protected || target.exempt) return;
     setClosing(true);
     setError(null);
     try {
@@ -203,14 +220,19 @@ export function PreflightCheck({
       >
         <h2 style={{ color: '#ff6b6b' }}>⚠️ Security Gate ⚠️</h2>
         {error !== null && <p role="alert">{error}</p>}
-        <p style={{ fontSize: '1.1rem', margin: '1rem 0 2rem' }}>
-          Save your work, then request a normal quit. If an app stays open, re-check after 3 seconds
-          to enable a separately confirmed Force Quit. Force Quit can lose unsaved work.
-        </p>
-        <p>
-          Terminal and ChatGPT are temporarily exempt. The exam runtime and its server dependencies
-          cannot be closed here.
-        </p>
+        {demo ? (
+          <p style={{ fontSize: '1.1rem', margin: '1rem 0 2rem' }}>
+            Demo mode: these findings are shown for information only. Nothing is closed or blocked.
+          </p>
+        ) : (
+          <>
+            <p style={{ fontSize: '1.1rem', margin: '1rem 0 2rem' }}>
+              Save your work, then request a normal quit. If an app stays open, re-check after 3
+              seconds to enable a separately confirmed Force Quit. Force Quit can lose unsaved work.
+            </p>
+            <p>The exam runtime and its server dependencies cannot be closed here.</p>
+          </>
+        )}
         {notice !== null && <p role="status">{notice}</p>}
         {vmReason !== null && (
           <p role="alert">
@@ -258,7 +280,7 @@ export function PreflightCheck({
                   {app.reason || RISK_MAP[app.name] || 'Application must be closed before the exam'}
                 </span>
               </div>
-              {!app.protected && !app.exempt && (
+              {!demo && !app.protected && !app.exempt && (
                 <div>
                   <button
                     type="button"
@@ -286,6 +308,11 @@ export function PreflightCheck({
           <button type="button" onClick={onCancel}>
             Sign out
           </button>
+          {demo && (
+            <button type="button" onClick={() => onPassedRef.current()}>
+              Continue (demo mode)
+            </button>
+          )}
           <button
             disabled={closing}
             onClick={handleRefresh}

@@ -9,6 +9,7 @@ import {
   systemPreferences,
   dialog,
   desktopCapturer,
+  shell,
 } from 'electron';
 
 import { execSync } from 'child_process';
@@ -16,12 +17,16 @@ import * as path from 'path';
 import { appendFileSync, existsSync, statSync, writeFileSync } from 'fs';
 import { createAppController, createHelperCall } from './appControl';
 import { classifyDisplays, detectVirtualMachine } from './environment';
+import { mayCloseApps, planModeSwitch, type RunMode } from './mode';
+import { readRunMode, writeRunMode } from './settings';
 
 const WEB_URL = 'http://127.0.0.1:5173/';
 const APP_WATCH_INTERVAL_MS = 2000;
 
 let mainWindow: BrowserWindow | null = null;
 let watcherInterval: ReturnType<typeof setInterval> | null = null;
+// Demo is the safe default; the persisted choice is loaded once the app is ready.
+let runMode: RunMode = 'demo';
 let appController: ReturnType<typeof createAppController> | null = null;
 
 function trustedAppFrame(event: Electron.IpcMainInvokeEvent): boolean {
@@ -116,18 +121,106 @@ ipcMain.handle('list-app-targets', (event) => {
   if (!trustedAppFrame(event) || !appController) throw new Error('Untrusted application request.');
   return appController.list();
 });
+ipcMain.handle('get-run-mode', (event) => {
+  if (!trustedAppFrame(event)) throw new Error('Untrusted application request.');
+  return runMode;
+});
 ipcMain.handle('close-app-target', (event, request: unknown) => {
   if (!trustedAppFrame(event) || !appController || !request || typeof request !== 'object')
     throw new Error('Untrusted application request.');
   const input = request as Record<string, unknown>;
   if (Object.keys(input).sort().join(',') !== 'id,mode')
     throw new Error('Invalid application request.');
+  // Demo mode never quits anything, whatever the renderer asks for.
+  if (!mayCloseApps(runMode))
+    return { status: 'refused', message: 'Demo mode: no applications are closed.' };
   return appController.close(input.id, input.mode);
 });
 
 // Older renderer/preload copies may still send this message. Refuse it without
 // inspecting or signalling processes: display names are not safe PID identities.
 ipcMain.handle('kill-app', () => false);
+
+export async function switchRunMode(target: RunMode): Promise<void> {
+  const plan = planModeSwitch(runMode, target);
+  if (!plan.change) return;
+  if (plan.confirm) {
+    const options: Electron.MessageBoxOptions = {
+      type: 'warning',
+      title: 'Switch to Strict mode?',
+      message: 'Strict mode can ask other applications to quit.',
+      detail:
+        'The pre-flight check will block until other apps are closed. Save your work first. Demo mode never closes or blocks anything.',
+      buttons: ['Cancel', 'Switch to Strict'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    };
+    const response =
+      mainWindow && !mainWindow.isDestroyed()
+        ? await dialog.showMessageBox(mainWindow, options)
+        : await dialog.showMessageBox(options);
+    if (response.response !== 1) return;
+  }
+  runMode = target;
+  try {
+    writeRunMode(app.getPath('userData'), runMode);
+  } catch {
+    diagnostic('settings-write-failed');
+  }
+  buildAppMenu();
+  // Reload so the pre-flight check runs again under the new mode.
+  if (mainWindow && !mainWindow.isDestroyed()) void mainWindow.loadURL(WEB_URL).catch(() => {});
+}
+
+// Keep an OS-owned exit available even when the renderer crashes.
+function buildAppMenu(): void {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      { label: 'Exam Anti-Cheat', submenu: [{ role: 'quit' }] },
+      {
+        label: 'Mode',
+        submenu: [
+          {
+            label: 'Mode: Demo',
+            type: 'radio',
+            checked: runMode === 'demo',
+            click: () => void switchRunMode('demo'),
+          },
+          {
+            label: 'Mode: Strict',
+            type: 'radio',
+            checked: runMode === 'strict',
+            click: () => void switchRunMode('strict'),
+          },
+          { type: 'separator' },
+          {
+            label: 'Open logs folder',
+            click: () => {
+              void shell.openPath(app.getPath('userData'));
+            },
+          },
+        ],
+      },
+      { label: 'Edit', submenu: [{ role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
+      {
+        label: 'Window',
+        submenu: [
+          {
+            label: 'Reload application',
+            accelerator: 'CmdOrCtrl+R',
+            click: () => {
+              void mainWindow?.loadURL(WEB_URL).catch(() => {});
+            },
+          },
+          { role: 'toggleDevTools' },
+          { role: 'minimize' },
+          { role: 'close' },
+        ],
+      },
+    ]),
+  );
+}
 
 export async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
@@ -157,28 +250,7 @@ export async function createWindow(): Promise<void> {
     }
   });
 
-  // Keep an OS-owned exit available even when the renderer crashes.
-  Menu.setApplicationMenu(
-    Menu.buildFromTemplate([
-      { label: 'Exam Anti-Cheat', submenu: [{ role: 'quit' }] },
-      { label: 'Edit', submenu: [{ role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
-      {
-        label: 'Window',
-        submenu: [
-          {
-            label: 'Reload application',
-            accelerator: 'CmdOrCtrl+R',
-            click: () => {
-              void mainWindow?.loadURL(WEB_URL).catch(() => {});
-            },
-          },
-          { role: 'toggleDevTools' },
-          { role: 'minimize' },
-          { role: 'close' },
-        ],
-      },
-    ]),
-  );
+  buildAppMenu();
 
   const window = mainWindow;
   let navigationGeneration = 0;
@@ -187,6 +259,7 @@ export async function createWindow(): Promise<void> {
       app.isPackaged
         ? path.join(process.resourcesPath, 'app-control')
         : path.join(__dirname, '../native-bin/app-control'),
+      () => runMode === 'demo',
     ),
     confirm: async (name, mode) => {
       if (window.isDestroyed()) return false;
@@ -385,6 +458,7 @@ ipcMain.handle('get-environment-risk', () => getEnvironmentRisk());
 ipcMain.handle('get-foreground-app', () => getForegroundApp());
 
 app.whenReady().then(async () => {
+  runMode = readRunMode(app.getPath('userData'));
   if (process.platform === 'darwin') {
     await systemPreferences.askForMediaAccess('camera');
     await systemPreferences.askForMediaAccess('microphone');

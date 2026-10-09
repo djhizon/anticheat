@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electronExam', {
       virtualMachine: string | null;
       captureDisplays: string[];
     }>,
+  getRunMode: () => ipcRenderer.invoke('get-run-mode') as Promise<'demo' | 'strict'>,
   listAppTargets: () => ipcRenderer.invoke('list-app-targets'),
   closeAppTarget: (id: string, mode: 'quit' | 'force') =>
     ipcRenderer.invoke('close-app-target', { id, mode }),

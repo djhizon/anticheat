@@ -15,6 +15,7 @@ import { LoginPage } from './features/auth/LoginPage.js';
 import { createExamApi, ExamApiError, type ExamApi } from './features/exam/api.js';
 import { StudentExamPage } from './features/exam/StudentExamPage.js';
 import { PreflightCheck } from './features/integrity/PreflightCheck.js';
+import { DemoModeBanner } from './features/integrity/DemoModeBanner.js';
 import { DevelopmentExemptions } from './features/integrity/DevelopmentExemptions.js';
 import { acquireBuiltInMicrophone } from './features/integrity/builtInMicrophone.js';
 import { acquirePhysicalCamera } from './features/integrity/physicalCamera.js';
@@ -26,6 +27,7 @@ export function isSessionExpiredError(error: unknown): boolean {
 export function App(): React.ReactElement {
   return (
     <AuthProvider>
+      <DemoModeBanner />
       <DevelopmentExemptions />
       <AuthenticatedApp />
     </AuthProvider>

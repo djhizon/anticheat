@@ -6,7 +6,9 @@ export interface DesktopAppTarget {
   reason: string;
   canForce: boolean;
 }
+export type DesktopRunMode = 'demo' | 'strict';
 export interface DesktopAppsBridge {
+  getRunMode?(): Promise<unknown>;
   getDisplayCount(): Promise<number>;
   getEnvironmentRisk?(): Promise<{ virtualMachine: string | null; captureDisplays: string[] }>;
   listAppTargets(): Promise<unknown>;
@@ -36,4 +38,15 @@ export function parseAppTargets(value: unknown): DesktopAppTarget[] {
     throw new Error('Invalid desktop inventory.');
   }
   return value;
+}
+/** Unknown or unavailable mode is treated as strict: the safe, existing behaviour. */
+export async function readDesktopRunMode(
+  bridge: DesktopAppsBridge | undefined = desktopAppsBridge(),
+): Promise<DesktopRunMode> {
+  try {
+    if (typeof bridge?.getRunMode !== 'function') return 'strict';
+    return (await bridge.getRunMode()) === 'demo' ? 'demo' : 'strict';
+  } catch {
+    return 'strict';
+  }
 }

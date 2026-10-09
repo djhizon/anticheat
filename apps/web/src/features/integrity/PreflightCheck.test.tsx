@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PreflightCheck } from './PreflightCheck.js';
 import { DevelopmentExemptions } from './DevelopmentExemptions.js';
+import { DemoModeBanner } from './DemoModeBanner.js';
 import type { DesktopAppTarget } from './desktopApps.js';
 
 const target = (name = 'Notes', exempt = false): DesktopAppTarget => ({
@@ -134,13 +135,74 @@ describe('desktop preflight recovery', () => {
     expect(passed).not.toHaveBeenCalled();
   });
   it('exempts Terminal and ChatGPT with no close buttons and keeps the reminder visible', async () => {
-    await render(async () => [target('Terminal', true), target('ChatGPT', true)]);
+    await render(async () => [target('Terminal', true), target('ChatGPT', true)], undefined, {
+      getRunMode: async () => 'demo',
+    });
     expect(passed).toHaveBeenCalledTimes(1);
     await act(async () => root.render(<DevelopmentExemptions />));
-    expect(container.textContent).toContain(
-      'Remove these exam-policy exemptions before the presentation',
-    );
+    expect(container.textContent).toContain('Demo mode: Terminal and ChatGPT are exempt');
     expect(container.querySelector('button')).toBeNull();
+  });
+  it('shows the exemptions banner only in demo mode', async () => {
+    await render(async () => [target('Exam', true)], undefined, {
+      getRunMode: async () => 'strict',
+    });
+    await act(async () => root.render(<DevelopmentExemptions />));
+    expect(container.textContent).toBe('');
+  });
+  it('shows the persistent demo banner only in demo mode', async () => {
+    await render(async () => [target('Exam', true)], undefined, { getRunMode: async () => 'demo' });
+    await act(async () => root.render(<DemoModeBanner />));
+    expect(container.textContent).toContain('Demo mode — nothing is closed or blocked');
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render(async () => [target('Exam', true)], undefined, {
+      getRunMode: async () => 'strict',
+    });
+    await act(async () => root.render(<DemoModeBanner />));
+    expect(container.textContent).toBe('');
+  });
+  describe('demo mode', () => {
+    const demo = { getRunMode: async () => 'demo' };
+    it('lists findings with a continue button and no quit buttons', async () => {
+      await render(
+        async () => [target('Notes'), { ...target('Safari'), canForce: true }],
+        () => Promise.resolve(2),
+        {
+          ...demo,
+          getEnvironmentRisk: async () => ({
+            virtualMachine: 'Hypervisor detected',
+            captureDisplays: ['Cam Link'],
+          }),
+        },
+      );
+      expect(container.textContent).toContain('Notes');
+      expect(container.textContent).toContain('Hypervisor detected');
+      expect(container.textContent).toContain('Cam Link');
+      expect(container.textContent).toContain('Multiple Displays Detected');
+      const labels = [...container.querySelectorAll('button')].map((b) => b.textContent);
+      expect(labels).toContain('Continue (demo mode)');
+      expect(labels).not.toContain('Quit normally');
+      expect(labels).not.toContain('Force Quit…');
+      expect(passed).not.toHaveBeenCalled();
+      await act(async () => click('Continue (demo mode)'));
+      expect(passed).toHaveBeenCalledTimes(1);
+    });
+    it('still passes silently when there are no findings', async () => {
+      await render(async () => [target('Exam', true)], undefined, demo);
+      expect(passed).toHaveBeenCalledTimes(1);
+    });
+  });
+  it('strict mode keeps blocking, with quit buttons and no continue button', async () => {
+    await render(
+      async () => [target('Notes')],
+      () => Promise.resolve(2),
+      { getRunMode: async () => 'strict' },
+    );
+    const labels = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(labels).not.toContain('Continue (demo mode)');
+    expect(container.textContent).toContain('Multiple Displays Detected');
+    expect(passed).not.toHaveBeenCalled();
   });
   it('renders force quit only when the native controller grants eligibility', async () => {
     await render(async () => [{ ...target(), canForce: true }, target('Terminal', true)]);
