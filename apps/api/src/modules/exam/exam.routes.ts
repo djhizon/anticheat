@@ -416,6 +416,21 @@ export class ExamRoutes {
         return jsonResponse(request, this.config.allowedOrigins, 200, { ok: true });
       }
 
+      // ── Telemetry batch (keystroke dynamics, gaze, voice activity) ───────
+      const telemetryMatch = telemetryPattern.exec(path);
+      if (method === 'POST' && telemetryMatch !== null && this.integrity !== null) {
+        const principal = this.requireStudent(request);
+        this.boundary.validateUnsafe(request, principal);
+        const attemptId = parsePathId<'AttemptId'>(telemetryMatch[1] ?? '', 'Attempt ID');
+        const delivery = await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
+        if (delivery.attempt.status !== 'in_progress') {
+          throw new DomainError('conflict', 'Telemetry is only accepted while the attempt is in progress.');
+        }
+        const body = parseObject(request.body, 'Telemetry body required');
+        const accepted = this.integrity.recordTelemetry(String(attemptId), body);
+        return jsonResponse(request, this.config.allowedOrigins, 202, { accepted });
+      }
+
       // ── Pack 8: Phone enrollment ──────────────────────────────────────────
       const enrollMatch = enrollPhonePattern.exec(path);
       if (method === 'POST' && enrollMatch !== null && this.integrity !== null) {

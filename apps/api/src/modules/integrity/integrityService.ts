@@ -24,6 +24,12 @@ export interface PhoneEnrollResponse {
   readonly expiresAt: string;
 }
 
+export interface TelemetryCounts {
+  readonly keystrokes: number;
+  readonly gaze: number;
+  readonly voice: number;
+}
+
 export class IntegrityService {
   async getTransparencyReport(attemptId: string) {
     const data = this.repo.getTransparencyEvents(attemptId);
@@ -162,22 +168,50 @@ export class IntegrityService {
   // ── Native Companion ─────────────────────────────────────────────────────────
 
   
-  recordTelemetry(attemptId: string, payload: any): void {
-    if (payload.gaze && Array.isArray(payload.gaze)) {
-      for (const g of payload.gaze) {
-        this.repo.insertGazeEvent(attemptId, new Date(g.timestamp).toISOString(), Number(g.durationMs));
-      }
+  /**
+   * Store one telemetry batch from the browser. Every field is validated and
+   * each list is capped, so malformed or oversized uploads cannot hit the
+   * database CHECK constraints or flood the tables.
+   */
+  recordTelemetry(attemptId: string, payload: Record<string, unknown>): TelemetryCounts {
+    const list = (value: unknown, max: number): Record<string, unknown>[] =>
+      Array.isArray(value)
+        ? value.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null).slice(0, max)
+        : [];
+    const duration = (value: unknown): number | null => {
+      const n = Number(value);
+      return Number.isFinite(n) && n >= 0 && n <= 24 * 60 * 60 * 1000 ? n : null;
+    };
+    const timestamp = (value: unknown): string | null => {
+      const date = new Date(typeof value === 'number' || typeof value === 'string' ? value : NaN);
+      return Number.isNaN(date.getTime()) ? null : date.toISOString();
+    };
+
+    const counts = { keystrokes: 0, gaze: 0, voice: 0 };
+    for (const k of list(payload.keystrokes, 500)) {
+      const dwell = duration(k.dwellMs);
+      const flight = duration(k.flightMs);
+      if (dwell === null || flight === null) continue;
+      const questionId = typeof k.questionId === 'string' && k.questionId !== '' ? k.questionId.slice(0, 128) : 'unknown';
+      this.repo.insertKeystrokeEvent(attemptId, questionId, dwell, flight);
+      counts.keystrokes += 1;
     }
-    if (payload.keystrokes && Array.isArray(payload.keystrokes)) {
-      for (const k of payload.keystrokes) {
-        this.repo.insertKeystrokeEvent(attemptId, k.questionId || 'unknown', Number(k.dwellMs), Number(k.flightMs));
-      }
+    for (const g of list(payload.gaze, 100)) {
+      const at = timestamp(g.timestamp);
+      const ms = duration(g.durationMs);
+      if (at === null || ms === null || ms === 0) continue;
+      this.repo.insertGazeEvent(attemptId, at, Math.max(1, Math.round(ms)));
+      counts.gaze += 1;
     }
-    if (payload.voice && Array.isArray(payload.voice)) {
-      for (const v of payload.voice) {
-        this.repo.insertVoiceEvent(attemptId, new Date(v.timestamp).toISOString(), Number(v.durationMs), Number(v.peakDb || 0));
-      }
+    for (const v of list(payload.voice, 100)) {
+      const at = timestamp(v.timestamp);
+      const ms = duration(v.durationMs);
+      if (at === null || ms === null || ms === 0) continue;
+      const peak = Number(v.peakDb);
+      this.repo.insertVoiceEvent(attemptId, at, Math.max(1, Math.round(ms)), Number.isFinite(peak) ? peak : 0);
+      counts.voice += 1;
     }
+    return counts;
   }
 
   recordAppEvent(attemptId: string, foregroundApp: string, displayCount: number): void {

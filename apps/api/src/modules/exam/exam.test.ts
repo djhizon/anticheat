@@ -15,7 +15,9 @@ import { type TokenGenerator } from '../auth/session.js';
 import { createExamPlugin, type ExamPlugin } from './exam.plugin.js';
 import { MAX_EXTRA_TIME_SECONDS, type SeedPublishedExamResult } from './exam.service.js';
 import { ExamRoutes } from './exam.routes.js';
-import type { IntegrityService } from '../integrity/integrityService.js';
+import { IntegrityService } from '../integrity/integrityService.js';
+import { IntegrityRepository } from '../integrity/integrityRepository.js';
+import type { GeminiRotatingClient } from '../integrity/gemini.js';
 import { transcribeAudio } from '../integrity/whisper.js';
 import { PhonePresenceService } from '../integrity/phonePresence.js';
 
@@ -591,6 +593,31 @@ describe('exam delivery boundary', () => {
       });
       expect({ path, status: preflight.status }).toEqual({ path, status: 204 });
     }
+  });
+
+  it('stores validated telemetry batches for the attempt owner', async () => {
+    const owner = await registerStudent('telemetry@example.test');
+    const other = await registerStudent('other@example.test');
+    const seeded = await seedExam();
+    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: owner.userId });
+    const started = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
+    const integrity = new IntegrityService(new IntegrityRepository(auth.database), {} as GeminiRotatingClient);
+    const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity);
+    const path = `/exam/attempts/${attemptId}/telemetry`;
+    const body = {
+      keystrokes: [{ questionId: 'q1', dwellMs: 80, flightMs: 120 }, { dwellMs: -5, flightMs: 'x' }],
+      gaze: [{ timestamp: '2026-09-15T00:00:01.000Z', durationMs: 4200 }, { timestamp: 'never', durationMs: 10 }],
+      voice: [{ timestamp: Date.parse('2026-09-15T00:00:02.000Z'), durationMs: 900, peakDb: -20 }],
+    };
+
+    expect((await routes.handle(studentRequest(other, 'POST', path, body))).status).toBe(404);
+    const stored = await routes.handle(studentRequest(owner, 'POST', path, body));
+    expect(stored.status).toBe(202);
+    expect(stored.body).toEqual({ accepted: { keystrokes: 1, gaze: 1, voice: 1 } });
+    const count = (table: string) =>
+      (auth.database.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE attempt_id = ?`).get(attemptId) as { n: number }).n;
+    expect([count('keystroke_events'), count('gaze_events'), count('voice_events')]).toEqual([1, 1, 1]);
   });
 
   it('checks audio ownership before inference and reports inference failures instead of empty success', async () => {
