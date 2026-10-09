@@ -3,10 +3,13 @@
 import type { ExamVersionId } from '@exam-anti-cheat/contracts/exam';
 
 import { loadConfig } from './config.js';
+import { loadLocalEnv } from './env.js';
 import { createAuthPlugin } from './modules/auth/auth.plugin.js';
 import { createExamPlugin } from './modules/exam/exam.plugin.js';
 import type { SeedQuestionInput } from './modules/exam/exam.service.js';
 import { generateExamQuestions } from './modules/integrity/questionGenerator.js';
+
+loadLocalEnv();
 
 const demoEmail = process.env.DEMO_STUDENT_EMAIL ?? 'demo.student@example.test';
 const demoPassword = process.env.DEMO_STUDENT_PASSWORD ?? 'Demo exam password 2026!';

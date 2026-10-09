@@ -1,5 +1,7 @@
+import { loadLocalEnv } from './env.js';
 import { createApiServer } from './server.js';
 
+loadLocalEnv();
 const application = createApiServer();
 let shuttingDown = false;
 

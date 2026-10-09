@@ -35,3 +35,4 @@ known issues are documented in [docs/AUDIT.md](docs/AUDIT.md).
 - **Formatting** — applied Prettier to the 60 files that had drifted (formatting only, no behavior change), so `npm run validate` (format + lint + typecheck + tests) passes end to end.
 - **CI** — GitHub Actions runs `npm run validate` on every push and pull request.
 - **Docs** — README rewritten around the consent-first story, demo accounts (student + instructor), optional features and the incremental commit trail.
+- **Config** — the API and demo seed now load the gitignored `.env.local` (repo root or `apps/api/`) at startup; previously credentials only worked when exported in the shell.
