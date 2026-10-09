@@ -31,3 +31,4 @@ test-results/
 /.claude/worktrees/
 /supabase/.temp/
 /apps/desktop/release/
+/lab-output/

@@ -259,3 +259,50 @@ On the XR, check each case with synthetic data:
 
 Use ordinary phone gestures yourself. Browser/phone clicking is intentionally
 left to the user; no hardware test result should be inferred from unit tests.
+
+## Real iPhone lab test
+
+One command runs an isolated lab (API on :3600, web on :5773, throwaway database,
+cloud keys off) on your Wi-Fi address and watches the result live:
+
+```sh
+npm run phone:lab
+```
+
+It seeds the demo data, signs in as the demo student, starts the exam attempt,
+prints a pairing QR plus the private link, and then prints the instructor's view
+of that attempt every 2 seconds. Evidence JPEGs are saved under
+`lab-output/<timestamp>/` (git-ignored). Press `r` for a new QR (it expires after
+2 minutes) and Ctrl+C to stop everything. Use trusted Wi-Fi only.
+
+1. Scan the QR with the iPhone XR Camera app, confirm the address, tap
+   **Connect to laptop**, and allow Local Network access.
+2. In the app, switch on **Desk camera** and allow Camera access.
+3. Follow the placement guide: stand the phone to the side so the rear camera sees
+   the keyboard (inside the dashed box) and the screen.
+4. Optionally open the printed `http://localhost:5773/` URL on the Mac and sign in
+   as the student to see the laptop side. Using **Require iPhone** there replaces
+   the terminal's pairing.
+5. Run the checklist below. Desk-camera notes are rate limited (one of each kind
+   per 30 s), so wait about 30 s between actions.
+
+| Action                                         | Expect in the terminal                                                                                                       |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Pair and sit still, hands on keyboard          | `attempt_started`, then a `phone` line `iphone_paired`. No flags.                                                            |
+| A second person or face steps into the view    | `phone  desk_extra_person` (notice). An `extra_person` snapshot line if evidence is enabled on this build.                   |
+| Extra hands at the keyboard                    | No timeline line by itself (hands are a yes/no value, not a flag). The browser's Require iPhone panel shows the desk status. |
+| Paper with text held in view                   | No dedicated check; expect nothing. Note what you see.                                                                       |
+| Cover the phone lens (after a person was seen) | `phone  desk_left_frame` (notice), plus a `left_frame` snapshot if evidence is enabled.                                      |
+| Hold the phone up to the laptop webcam         | `camera  phone_in_view` from the laptop camera check, only if the Mac browser exam page is open with its camera on.          |
+| Take the iPhone app off screen for over 8 s    | The laptop pauses answering; no timeline line is guaranteed. Return to resume.                                               |
+
+These are leads for a human reviewer, not verdicts. Lighting and angle cause
+false alarms, and any row that stays silent is a result worth writing down.
+
+### Hands-off check
+
+`npm run phone:lab -- --auto` plays the iPhone's part itself (claim, heartbeat,
+desk-camera reports for one person, two people and nobody, and an evidence
+snapshot when the build has that endpoint), then checks the instructor timeline,
+prints PASS, FAIL or SKIP per check, and exits non-zero on any FAIL. It needs no
+phone and is a quick way to confirm the lab works before testing the real XR.
