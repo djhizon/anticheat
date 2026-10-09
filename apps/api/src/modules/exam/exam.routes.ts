@@ -363,6 +363,7 @@ export class ExamRoutes {
         const principal = this.requireStudent(request);
         this.boundary.validateUnsafe(request, principal);
         const attemptId = parsePathId<'AttemptId'>(livVerifyMatch[1] ?? '', 'Attempt ID');
+        await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
         const body = parseObject(request.body, 'Liveness verify body required');
         const result = await this.integrity.verifyLiveness(
           String(attemptId),
@@ -444,6 +445,7 @@ export class ExamRoutes {
       if (method === 'GET' && revisionsMatch !== null && this.integrity !== null) {
         const principal = this.requireStudent(request);
         const attemptId = parsePathId<'AttemptId'>(revisionsMatch[1] ?? '', 'Attempt ID');
+        await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
         const qId = new URL(`http://x${request.path}`).searchParams.get('questionId') ?? '';
         const revisions = this.integrity.getRevisions(String(attemptId), qId);
         return jsonResponse(request, this.config.allowedOrigins, 200, { revisions });
@@ -500,6 +502,7 @@ export class ExamRoutes {
         const principal = this.requireStudent(request);
         this.boundary.validateUnsafe(request, principal);
         const attemptId = parsePathId<'AttemptId'>(recordingMatch[1] ?? '', 'Attempt ID');
+        await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
         
         const body = parseObject(request.body, 'Recording chunk required');
         const chunkBase64 = String(body.chunk ?? '');

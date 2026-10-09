@@ -562,6 +562,24 @@ describe('exam delivery boundary', () => {
     expect(integrity.runAiCheck).toHaveBeenCalledWith(shortAnswer.prompt, 'my own words');
   });
 
+  it('scopes liveness verification, revisions and recordings to the attempt owner', async () => {
+    const owner = await registerStudent('scoped@example.test');
+    const other = await registerStudent('other@example.test');
+    const seeded = await seedExam();
+    const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: owner.userId });
+    const started = await exam.routes.handle(studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`));
+    const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
+    const integrity = { verifyLiveness: vi.fn(), getRevisions: vi.fn(() => []) };
+    const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity as unknown as IntegrityService);
+    const base = `/exam/attempts/${attemptId}`;
+    expect((await routes.handle(studentRequest(other, 'POST', `${base}/liveness-verify`, { nonce: 'n', layer: 2 }))).status).toBe(404);
+    expect((await routes.handle(studentRequest(other, 'GET', `${base}/revisions?questionId=q`))).status).toBe(404);
+    expect((await routes.handle(studentRequest(other, 'POST', `${base}/recording`, { index: 0, chunk: '' }))).status).toBe(404);
+    expect(integrity.verifyLiveness).not.toHaveBeenCalled();
+    expect(integrity.getRevisions).not.toHaveBeenCalled();
+    expect((await routes.handle(studentRequest(owner, 'GET', `${base}/revisions?questionId=q`))).status).toBe(200);
+  });
+
   it('checks audio ownership before inference and reports inference failures instead of empty success', async () => {
     const owner = await registerStudent('audio@example.test');
     const other = await registerStudent('other@example.test');
