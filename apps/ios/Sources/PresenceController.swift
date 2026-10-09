@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import UIKit
+import os
 
 private final class NoRedirects: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -20,6 +21,9 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
     @Published private(set) var deskCameraWanted = false
     let deskCamera = DeskCameraController()
     private var lastDeskSend: Date?
+    private var lastDeskStatus: DeskCameraStatus?
+    private var attemptId: String?
+    private static let log = Logger(subsystem: "com.djhizon.examcompanion", category: "desk-camera")
     private var gate = ForegroundGate()
     private var task: Task<Void, Never>?
     private var session: URLSession?
@@ -36,12 +40,13 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
 
     func setDeskCamera(_ on: Bool) {
         deskCameraWanted = on
-        lastDeskSend = nil
+        lastDeskSend = nil; lastDeskStatus = nil
         if on && gate.active && paired { startDeskCamera() } else { deskCamera.stop() }
     }
 
     private func startDeskCamera() {
         deskCamera.onStatus = { [weak self] status in self?.sendDesk(status) }
+        deskCamera.onEvidence = { [weak self] trigger, jpeg in self?.sendEvidence(trigger: trigger, jpeg: jpeg) }
         deskCamera.start()
     }
 
@@ -49,15 +54,39 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
     /// the heartbeat loop owns connection status and the desk camera is best-effort.
     private func sendDesk(_ status: DeskCameraStatus) {
         let now = Date()
-        guard DeskCameraPolicy.shouldSend(now: now, lastSent: lastDeskSend),
+        guard DeskCameraPolicy.shouldSend(now: now, lastSent: lastDeskSend, changed: status != lastDeskStatus),
               let session, let origin, let credential, paired, gate.active else { return }
         lastDeskSend = now
+        lastDeskStatus = status
         Task { [weak self] in
             guard let self else { return }
             let _: Acknowledgement? = try? await self.post(session, origin, "desk-camera", [
                 "credential": credential, "people": status.people,
-                "handsVisible": status.handsVisible, "framingOk": status.framingOk
+                "handsVisible": status.handsVisible, "framingOk": status.framingOk,
+                "extraPerson": status.extraPerson, "extraHands": status.extraHands,
+                "handCount": status.handCount, "leftHands": status.leftHands, "rightHands": status.rightHands,
+                "textVisible": status.textVisible, "objectHints": status.objectHints,
+                "cameraObstructed": status.cameraObstructed
             ])
+        }
+    }
+
+    /// One still photo when a debounced flag fires (rate-limited by the camera controller).
+    /// Contract: POST exam/attempts/:attemptId/evidence. Authenticated with the pairing credential,
+    /// like the flag posts. A missing route (404) or any failure is logged and dropped.
+    private func sendEvidence(trigger: String, jpeg: Data) {
+        guard let session, let origin, let credential, let attemptId, paired, gate.active else { return }
+        let body: [String: Any] = [
+            "source": "desk_camera", "trigger": trigger,
+            "capturedAt": ISO8601DateFormatter().string(from: Date()),
+            "imageJpegBase64": jpeg.base64EncodedString(), "credential": credential
+        ]
+        Task {
+            do {
+                let _: Acknowledgement? = try await self.post(session, origin, "exam/attempts/\(attemptId)/evidence", body)
+            } catch {
+                Self.log.info("evidence for \(trigger, privacy: .public) not delivered (\(String(describing: error), privacy: .public)); dropped")
+            }
         }
     }
 
@@ -95,6 +124,7 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
         cancelWork()
         deskCamera.stop(); deskCameraWanted = false
         credential = nil; origin = nil; pending = nil; paired = false; lastAcknowledged = nil
+        attemptId = nil; deskCamera.resetEvidenceBudget()
         UIApplication.shared.isIdleTimerDisabled = false
         status = "Stopped. Laptop answering pauses after its timeout. Re-pair to connect again."
     }
@@ -114,6 +144,9 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
         config.waitsForConnectivity = false
         config.httpShouldSetCookies = false
         config.urlCache = nil
+        #if DEBUG
+        if MockLaptop.enabled { config.protocolClasses = [MockLaptopProtocol.self] }
+        #endif
         let session = URLSession(configuration: config, delegate: NoRedirects(), delegateQueue: nil)
         self.session = session
         busy = true
@@ -194,6 +227,10 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
                 let claim: Claim = try await post(session, origin, "claim", ["code": code])
                 try check(generation)
                 guard claim.credential.range(of: "^[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil else { throw PairingError.rejected }
+                // Optional (older servers omit it): needed only for evidence snapshots. Strictly validated
+                // because it becomes a URL path component.
+                attemptId = claim.attemptId.flatMap { $0.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil ? $0 : nil }
+                deskCamera.resetEvidenceBudget()
                 return claim.credential
             } catch PairingError.rejected {
                 throw PairingError.rejected
@@ -212,7 +249,7 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
         guard gate.permits(generation), !Task.isCancelled else { throw CancellationError() }
     }
     private func post<T: Decodable>(_ session: URLSession, _ origin: URL, _ path: String, _ body: [String: Any]) async throws -> T {
-        var request = URLRequest(url: origin.appendingPathComponent("exam/phone-presence/\(path)"))
+        var request = URLRequest(url: origin.appendingPathComponent(path.hasPrefix("exam/") ? path : "exam/phone-presence/\(path)"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -222,7 +259,7 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
         guard response.statusCode == 200 else { throw PairingError.network }
         return try JSONDecoder().decode(T.self, from: data)
     }
-    private struct Claim: Decodable { let credential: String }
+    private struct Claim: Decodable { let credential: String; let attemptId: String? }
     private struct Challenge: Decodable { let challenge: String; let sequence: Int }
     private struct Acknowledgement: Decodable { let ok: Bool }
 }

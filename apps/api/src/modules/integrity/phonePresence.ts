@@ -13,6 +13,9 @@ export const DESK_CAMERA_STALE_MS = 15000;
 /** The same flag is stored at most once per window so a flickering view cannot spam the report. */
 const DESK_FLAG_COOLDOWN_MS = 30000;
 const MAX_PEOPLE = 20;
+const MAX_HANDS = 8;
+/** Object hints the phone may report (label names only). Anything else is rejected. */
+export const DESK_OBJECT_HINTS = ['cellphone', 'paper', 'book', 'bright_rectangle'] as const;
 /** Desk state and flag cooldowns for an attempt with no report this long are dropped. */
 const DESK_STATE_IDLE_MS = 10 * 60000;
 const token = () => randomBytes(32).toString('base64url');
@@ -44,12 +47,63 @@ export interface DeskCameraState {
   framingOk: boolean;
   people: number;
   handsVisible: boolean;
+  extraPerson: boolean;
+  extraHands: boolean;
+  handCount: number;
+  leftHands: number;
+  rightHands: number;
+  textVisible: boolean;
+  objectHints: string[];
+  cameraObstructed: boolean;
+}
+/** Optional, additive flags from newer phones. Old phones omit all of them. */
+export interface DeskCameraExtras {
+  extraPerson?: unknown;
+  extraHands?: unknown;
+  handCount?: unknown;
+  leftHands?: unknown;
+  rightHands?: unknown;
+  textVisible?: unknown;
+  objectHints?: unknown;
+  cameraObstructed?: unknown;
 }
 interface DeskReport {
   people: number;
   handsVisible: boolean;
   framingOk: boolean;
+  extraPerson: boolean;
+  extraHands: boolean;
+  handCount: number;
+  leftHands: number;
+  rightHands: number;
+  textVisible: boolean;
+  objectHints: string[];
+  cameraObstructed: boolean;
   at: number;
+}
+function optionalBool(value: unknown): boolean | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'boolean')
+    throw new DomainError('validation_failed', 'Desk camera status is invalid.');
+  return value;
+}
+function optionalCount(value: unknown): number {
+  if (value === undefined || value === null) return 0;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > MAX_HANDS) {
+    throw new DomainError('validation_failed', 'Desk camera status is invalid.');
+  }
+  return value;
+}
+function optionalHints(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (
+    !Array.isArray(value) ||
+    value.length > DESK_OBJECT_HINTS.length ||
+    value.some((h) => !(DESK_OBJECT_HINTS as readonly unknown[]).includes(h))
+  ) {
+    throw new DomainError('validation_failed', 'Desk camera status is invalid.');
+  }
+  return [...new Set(value as string[])].sort();
 }
 
 /** Cooperative presence, not iOS attestation. No heartbeat history is retained.
@@ -111,7 +165,13 @@ export class PhonePresenceService {
         'INSERT INTO app_events (id, attempt_id, foreground_app, display_count) VALUES (?, ?, ?, 1)',
       )
       .run(randomUUID(), row.attempt_id, 'flag:iphone_paired');
-    return { credential, heartbeatIntervalMs: PHONE_PING_MS, timeoutMs: PHONE_LEASE_MS };
+    // attemptId lets the phone address evidence snapshots; it is the student's own attempt.
+    return {
+      credential,
+      attemptId: row.attempt_id,
+      heartbeatIntervalMs: PHONE_PING_MS,
+      timeoutMs: PHONE_LEASE_MS,
+    };
   }
 
   challenge(value: unknown) {
@@ -159,7 +219,13 @@ export class PhonePresenceService {
   /** Optional desk-camera flags from the phone. Flags only; never images. Does not touch the lease.
    * These are cooperative signals authenticated only by the pairing credential: whoever holds
    * it can send or withhold them. They are leads for a human reviewer, not verdicts. */
-  deskCamera(value: unknown, people: unknown, handsVisible: unknown, framingOk: unknown) {
+  deskCamera(
+    value: unknown,
+    people: unknown,
+    handsVisible: unknown,
+    framingOk: unknown,
+    extras: DeskCameraExtras = {},
+  ) {
     const row = this.authenticate(value);
     if (
       typeof people !== 'number' ||
@@ -171,16 +237,53 @@ export class PhonePresenceService {
     ) {
       throw new DomainError('validation_failed', 'Desk camera status is invalid.');
     }
+    const extraPersonSent = optionalBool(extras.extraPerson);
+    const extraHands = optionalBool(extras.extraHands) ?? false;
+    const textVisible = optionalBool(extras.textVisible) ?? false;
+    const cameraObstructed = optionalBool(extras.cameraObstructed) ?? false;
+    const handCount = optionalCount(extras.handCount);
+    const leftHands = optionalCount(extras.leftHands);
+    const rightHands = optionalCount(extras.rightHands);
+    const objectHints = optionalHints(extras.objectHints);
+    // Newer phones debounce the second-person decision on-device; older ones only send a count.
+    const extraPerson = extraPersonSent ?? people >= 2;
     const now = this.now();
     this.pruneDesk(now);
     const previous = this.desk.get(row.attempt_id);
     if (previous && now >= previous.at && now - previous.at < DESK_CAMERA_MIN_GAP_MS) {
       throw new DomainError('conflict', 'Desk camera status sent too often.');
     }
-    this.desk.set(row.attempt_id, { people, handsVisible, framingOk, at: now });
+    this.desk.set(row.attempt_id, {
+      people,
+      handsVisible,
+      framingOk,
+      extraPerson,
+      extraHands,
+      handCount,
+      leftHands,
+      rightHands,
+      textVisible,
+      objectHints,
+      cameraObstructed,
+      at: now,
+    });
     const fresh = previous !== undefined && now - previous.at < DESK_CAMERA_STALE_MS;
-    if (people >= 2 && (!fresh || previous.people < 2)) {
+    if (extraPerson && (!fresh || !previous.extraPerson)) {
       this.flag(row.attempt_id, 'desk_camera_extra_person', now);
+    }
+    if (extraHands && (!fresh || !previous.extraHands)) {
+      this.flag(row.attempt_id, 'desk_camera_extra_hands', now);
+    }
+    if (textVisible && (!fresh || !previous.textVisible)) {
+      this.flag(row.attempt_id, 'desk_camera_text_visible', now);
+    }
+    if (cameraObstructed && (!fresh || !previous.cameraObstructed)) {
+      this.flag(row.attempt_id, 'desk_camera_obstructed', now);
+    }
+    for (const hint of objectHints) {
+      if (!fresh || !previous.objectHints.includes(hint)) {
+        this.flag(row.attempt_id, `desk_camera_object_${hint}`, now);
+      }
     }
     if (people === 0 && fresh && previous.people >= 1) {
       this.flag(row.attempt_id, 'desk_camera_left_frame', now);
@@ -244,6 +347,14 @@ export class PhonePresenceService {
         framingOk: on && report.framingOk,
         people: on ? report.people : 0,
         handsVisible: on && report.handsVisible,
+        extraPerson: on && report.extraPerson,
+        extraHands: on && report.extraHands,
+        handCount: on ? report.handCount : 0,
+        leftHands: on ? report.leftHands : 0,
+        rightHands: on ? report.rightHands : 0,
+        textVisible: on && report.textVisible,
+        objectHints: on ? report.objectHints : [],
+        cameraObstructed: on && report.cameraObstructed,
       },
       required: !!row,
       active: remainingMs > 0,

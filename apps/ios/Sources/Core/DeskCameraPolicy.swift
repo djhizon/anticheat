@@ -6,11 +6,29 @@ struct DeskCameraStatus: Equatable {
     let people: Int
     let handsVisible: Bool
     let framingOk: Bool
+    // Additive, debounced flags (see DeskCameraAggregator). Counts and names only.
+    var extraPerson = false
+    var extraHands = false
+    var handCount = 0
+    var leftHands = 0
+    var rightHands = 0
+    var textVisible = false
+    var objectHints: [String] = []
+    var cameraObstructed = false
 }
 
 enum DeskCameraPolicy {
-    /// Vision analysis cadence and the server-bound send cadence.
-    static let analysisInterval: TimeInterval = 2
+    /// Fast tier (people, faces, hands, luminance): 2 fps keeps an iPhone XR cool.
+    static let analysisInterval: TimeInterval = 0.5
+    /// Slow tier (text, rectangles, classification) runs about every 2 s (time based, so a skipped
+    /// fast frame cannot stretch it).
+    static let slowTierInterval: TimeInterval = 2
+    static func slowTierDue(now: TimeInterval, lastSlow: TimeInterval?) -> Bool {
+        guard let lastSlow, now >= lastSlow else { return true }
+        return now - lastSlow >= slowTierInterval - 0.1
+    }
+    /// Server-bound send cadence; the server accepts one report per 2 s.
+    static let changeSendGap: TimeInterval = 2.5
     static let sendInterval: TimeInterval = 5
 
     /// Normalized (0...1, origin bottom-left, as Vision reports) region where a keyboard is expected:
@@ -42,5 +60,13 @@ enum DeskCameraPolicy {
         guard let lastSent else { return true }
         let elapsed = now.timeIntervalSince(lastSent)
         return elapsed < 0 || elapsed >= sendInterval
+    }
+
+    /// Periodic keep-alive, or sooner (but never under the server's 2 s gap) when a flag changed.
+    static func shouldSend(now: Date, lastSent: Date?, changed: Bool) -> Bool {
+        guard let lastSent else { return true }
+        let elapsed = now.timeIntervalSince(lastSent)
+        if elapsed < 0 { return true }
+        return elapsed >= sendInterval || (changed && elapsed >= changeSendGap)
     }
 }

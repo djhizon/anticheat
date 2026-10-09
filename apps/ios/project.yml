@@ -35,7 +35,7 @@ targets:
           ]
         UIRequiresFullScreen: true
         NSLocalNetworkUsageDescription: Connect to your exam laptop on Wi-Fi to send foreground-only presence checks.
-        NSCameraUsageDescription: Optional desk camera. Your phone checks, on the device, how many people are in view and whether hands are near the keyboard. Only simple yes/no and count results are sent; images never leave the phone.
+        NSCameraUsageDescription: Optional desk camera. Your phone analyses the picture on the device to count people and hands, spot text or objects on the desk, and notice a covered lens. Only yes/no flags and counts are sent, plus one still photo to your instructor if something unusual is detected. No video is recorded or sent.
         # ATS: NSAllowsLocalNetworking exempts LAN/.local hosts only; internet hosts stay HTTPS-only.
         # Release builds additionally refuse http:// pairing links in app code (PresenceController.allowsDemoHTTP).
         NSAppTransportSecurity:
@@ -43,6 +43,16 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.djhizon.examcompanion.pairing
             CFBundleURLSchemes: [examcompanion]
+  ExamCompanionTests:
+    type: bundle.unit-test
+    platform: iOS
+    # Pure policy/aggregation tests: the Core sources are compiled straight into the test bundle,
+    # so no host app or camera is needed. `swift test` runs the same files against PresenceCore.
+    sources: [Tests, Sources/Core]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.djhizon.examcompanion.tests
   ExamCompanionUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -62,4 +72,4 @@ schemes:
       config: Debug
     test:
       config: Debug
-      targets: [ExamCompanionUITests]
+      targets: [ExamCompanionTests, ExamCompanionUITests]

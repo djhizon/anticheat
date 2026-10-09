@@ -22,6 +22,9 @@ struct CompanionView: View {
                         .font(.system(size: 58)).foregroundStyle(controller.connected ? .green : .blue)
                     Text("Stay here during your exam").font(.largeTitle.bold())
                     Text(controller.status).font(.headline).accessibilityIdentifier("presence-status")
+                    #if DEBUG
+                    if MockLaptop.enabled { MockLaptopLog() }
+                    #endif
                     Text("Pings are sent only while this app is active. Going Home, locking, or closing it stops pings. Your laptop pauses answering after 8 seconds without a fresh ping. Network interruptions have the same effect; they are not proof of cheating.")
                     if let date = controller.lastAcknowledged {
                         Text("Last acknowledged: \(date.formatted(date: .omitted, time: .standard))").font(.caption)

@@ -47,7 +47,7 @@ manual acceptance of this workflow.
   deployment target is 16.0 and no API newer than iOS 16 is used unguarded
   (`onChange` uses an `#available(iOS 17)` branch with an iOS 16 fallback).
 - Desk camera: capture is limited to 640x480 at 5 fps; Vision runs on a
-  background queue on about one frame every 2 seconds.
+  background queue on about 2 frames per second (heavier checks every 2 seconds).
 
 ## Install options
 
@@ -152,25 +152,47 @@ Setup:
 4. Turn it off in the app at any time. Heartbeat/presence behaviour is
    unchanged whether it is on or off. It stops whenever the app is inactive.
 
-How it works: AVFoundation captures the rear wide camera at about 5 fps; one
-frame every ~2 s is analysed on the phone with Apple Vision.
-`VNDetectHumanRectanglesRequest` counts people and `VNDetectHumanHandPoseRequest`
-checks whether hand landmarks fall in the lower-middle "keyboard" region. Framing
-is "OK" when a person fills a reasonable part of the view. No second-phone check
-exists: Vision has no built-in phone detector (`VNRecognizeAnimalsRequest` only
-finds cats and dogs), so it is skipped. Frames are never stored or transmitted.
-Only `{people, handsVisible, framingOk}` is sent, at most every 5 s.
+How it works: AVFoundation captures the rear wide camera at 640x480 and about 5 fps;
+about 2 frames per second are analysed on a background queue with Apple Vision (no
+third-party models, no downloads):
+
+| Flag (sent)                                          | Vision request                                                                                | Rule                                                                                                                                   |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `extraPerson`                                        | `VNDetectHumanRectanglesRequest` + `VNDetectFaceRectanglesRequest`                            | max(people, faces) >= 2 held for 1.5 s                                                                                                 |
+| `extraHands`, `handCount`, `leftHands`, `rightHands` | `VNDetectHumanHandPoseRequest` (max 4 hands, chirality)                                       | more than 2 hands held for 1 s                                                                                                         |
+| `textVisible`                                        | `VNRecognizeTextRequest` (fast) on the lower desk region                                      | 2+ lines of 4+ characters, or 20+ characters, on two checks 2 s apart. Only the amount of text is used; the text is never kept or sent |
+| `objectHints`                                        | `VNDetectRectanglesRequest` (bright rectangles in the desk area) and `VNClassifyImageRequest` | names only from `cellphone`, `paper`, `book`, `bright_rectangle`; classifier confidence >= 0.3; held 2 s                               |
+| `cameraObstructed`                                   | mean luminance + variance of a 32x32 grid                                                     | very dark or almost featureless for 2 s                                                                                                |
+| `people`, `handsVisible`, `framingOk`                | as before                                                                                     | `people` is the max over the last 3 s                                                                                                  |
+
+The text/object checks (heavier) run about every 2 s, the others at about 2 fps.
+Your own monitor's text is outside the desk region and ignored, but a keyboard with
+printed keys, a book you are allowed to have, or a poster can still trigger leads.
+
+Evidence still: when `extraPerson` (trigger `extra_person`), `cameraObstructed`
+(`left_frame`) or a `cellphone` hint (`phone_detected`) first fires, the phone sends
+ONE JPEG (max 640 px wide, quality about 0.6, normally under 150 KB) to
+`POST /exam/attempts/:attemptId/evidence` with
+`{source: 'desk_camera', trigger, capturedAt, imageJpegBase64, credential}`. At most one
+per trigger per 30 s and 20 per pairing. A missing route (404) or any failure is logged
+on the phone and dropped. There is no video. `extraHands` and `textVisible` have no
+server trigger yet, so they are flags only (no still). Frames are otherwise never
+stored or transmitted. Flags and counts are sent at most every 5 s (or 2.5 s after a flag changes).
 
 API: `POST /exam/phone-presence/desk-camera` with
-`{credential, people, handsVisible, framingOk}`. It uses the same credential and
+`{credential, people, handsVisible, framingOk}` plus the optional fields `extraPerson,
+extraHands, handCount, leftHands, rightHands, textVisible, objectHints, cameraObstructed`
+(old phones omit them; an old phone's `people >= 2` still counts as an extra person; invalid
+values get 400, `objectHints` must come from the allowlist). The `claim` response also returns
+`attemptId` so the phone can address evidence stills. It uses the same credential and
 attempt/expiry checks as the heartbeat but does not extend the presence lease.
 `people` must be an integer 0..20; reports closer than 2 s apart get 409. State
 is memory-only; no report for 15 s means "off". Notable changes are stored as
-`app_events` rows (`flag:desk_camera_extra_person` when 2+ people appear,
-`flag:desk_camera_left_frame` when the person disappears), at most one of each
+`app_events` rows (`flag:desk_camera_extra_person`, `_left_frame`, `_extra_hands`,
+`_text_visible`, `_obstructed`, `_object_<hint>`), at most one of each
 per 30 s, and show in the transparency report as "Flagged behaviour: ...".
 `GET /exam/attempts/:id/phone-presence` additionally returns
-`deskCamera: {on, framingOk, people, handsVisible}`. These are leads for a human
+`deskCamera: {on, framingOk, people, handsVisible, extraPerson, extraHands, handCount, leftHands, rightHands, textVisible, objectHints, cameraObstructed}`. These are leads for a human
 reviewer, not verdicts; lighting and camera angle cause false alarms.
 
 Desk-camera flags are cooperative signals: they are authenticated only by the
@@ -306,3 +328,42 @@ desk-camera reports for one person, two people and nobody, and an evidence
 snapshot when the build has that endpoint), then checks the instructor timeline,
 prints PASS, FAIL or SKIP per check, and exits non-zero on any FAIL. It needs no
 phone and is a quick way to confirm the lab works before testing the real XR.
+
+## How to test the desk camera on a real iPhone (XR checklist)
+
+Setup: pair as above, switch on **Desk camera**, prop the phone to the side of your
+desk with the keyboard in the dashed box. The line under the preview ("Hands: ...
+Extra person: ... Lens blocked: ...") shows the flags live. Wait 2-3 seconds after each
+change; flags are debounced. On the laptop the exam report shows the events.
+
+1. **Baseline**: sit alone, both hands on the keyboard. Expect People 1, Hands 2, all
+   flags "no", framing OK, no events.
+2. **Extra person** (`extraPerson`): have a second person stand or sit beside you, with a face
+   visible, for 2+ seconds. Expect "Extra person: yes", a `flag:desk_camera_extra_person`
+   event and one still in the report. A photo of a face on a screen can also trigger it.
+3. **Extra hands** (`extraHands`): you plus a helper put three hands in view for 1+ second.
+   Expect "Extra hands: yes" and a `flag:desk_camera_extra_hands` event (no still).
+4. **Text on desk** (`textVisible`): lay a printed page or open notebook with readable
+   lines on the desk, in the lower half of the frame, for 4+ seconds. Expect "Text on desk: yes"
+   (no still). Text high in the frame (your monitor) is ignored.
+5. **Phone / paper / book** (`objectHints`): place a second phone, a white sheet or a book on the
+   desk for 4+ seconds. Expect "Objects: ..." (`cellphone`, `paper`, `book`, or
+   `bright_rectangle` for a lit screen or white sheet). A cellphone hint also sends a
+   `phone_detected` still. Classifier labels are guesses; treat them as leads.
+6. **Covered lens** (`cameraObstructed`): cover the back camera with your hand, or switch off the
+   room lights, for 2+ seconds. Expect "Lens blocked: yes", an obstructed event and a
+   `left_frame` still.
+7. **Throttle**: repeating the same trigger within 30 s must not send a second still.
+8. Switch the toggle off; the preview stops and the laptop shows the camera as off within 15 s.
+
+Simulator (no camera): the Debug build has test hooks `-UITestMockLaptop YES` (the app answers
+its own requests in-process) and `-UITestFixtureFrames <one_person|two_people|extra_hands|paper_text|bright_paper|dark|empty_desk>`.
+Frames are drawn in code and go through the real Vision, flag, aggregation and JPEG
+code. Vision cannot detect people/hands in drawings, so the `one_person`, `two_people` and
+`extra_hands` fixtures inject those counts in place of Vision's detections; the text and dark
+fixtures are detected for real.
+
+```sh
+cd apps/ios && xcodegen generate --spec project.yml
+xcodebuild test -project ExamCompanion.xcodeproj -scheme ExamCompanion -destination 'id=<simulator id>' CODE_SIGNING_ALLOWED=NO
+```

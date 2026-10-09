@@ -9,7 +9,7 @@ struct DeskCameraSection: View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle("Desk camera (optional)", isOn: Binding(get: { controller.deskCameraWanted },
                                                             set: { controller.setDeskCamera($0) }))
-            Text("Stand the phone to the side so the back camera sees your keyboard and screen. The phone counts people, checks for hands near the keyboard and checks the framing, all on this device. Only those yes/no and count results are sent to your laptop. No pictures or video are saved or sent.").font(.footnote)
+            Text("Stand the phone to the side so the back camera sees your keyboard and screen. The phone analyses the picture on this device only, to count people and faces, count hands (more than two is flagged), spot a readable page or a phone-like object on the desk, and notice if the lens is covered or dark. Only those yes/no flags and counts are sent to your laptop. No video is ever recorded or sent. If something unusual is detected, one still photo is sent to your instructor and shown in your report (at most one per kind of event every 30 seconds).").font(.footnote)
             if controller.deskCameraWanted {
                 Text(camera.message).font(.caption)
                 if camera.running {
@@ -27,6 +27,8 @@ struct DeskCameraSection: View {
                     .frame(height: 320).clipShape(RoundedRectangle(cornerRadius: 12))
                     if let s = camera.latest {
                         Text("People: \(s.people) · Hands near keyboard: \(s.handsVisible ? "yes" : "no") · Framing: \(s.framingOk ? "OK" : "adjust")").font(.caption)
+                        Text("Hands: \(s.handCount) · Extra person: \(s.extraPerson ? "yes" : "no") · Extra hands: \(s.extraHands ? "yes" : "no") · Text on desk: \(s.textVisible ? "yes" : "no") · Lens blocked: \(s.cameraObstructed ? "yes" : "no")\(s.objectHints.isEmpty ? "" : " · Objects: " + s.objectHints.joined(separator: ", "))")
+                            .font(.caption).accessibilityIdentifier("desk-flags")
                     }
                 }
             }

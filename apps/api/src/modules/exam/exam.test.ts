@@ -1659,7 +1659,20 @@ describe('exam delivery boundary', () => {
     }
     expect((await send(good)).status).toBe(200);
     const status = exam.phonePresence.status(attemptId);
-    expect(status.deskCamera).toEqual({ on: true, framingOk: true, people: 1, handsVisible: true });
+    expect(status.deskCamera).toEqual({
+      on: true,
+      framingOk: true,
+      people: 1,
+      handsVisible: true,
+      extraPerson: false,
+      extraHands: false,
+      handCount: 0,
+      leftHands: 0,
+      rightHands: 0,
+      textVisible: false,
+      objectHints: [],
+      cameraObstructed: false,
+    });
     expect(status.active).toBe(false); // desk-camera reports never extend the lease
     expect((await send(good)).status).toBe(409); // rate limited
     clock.advance(3);
@@ -1690,6 +1703,73 @@ describe('exam delivery boundary', () => {
     expect((await send(good)).status).toBe(401); // expired attempt
     exam.phonePresence.status(attemptId); // observing an ended attempt prunes its desk state
     expect(exam.phonePresence.memorySize()).toBe(0);
+  });
+
+  it('accepts the additive desk-camera flags, validates them, and records each as an event', async () => {
+    const { attemptId } = await phoneFixture();
+    const claimed = exam.phonePresence.claim(exam.phonePresence.enroll(attemptId).code);
+    expect(claimed.attemptId).toBe(attemptId);
+    const { credential } = claimed;
+    const send = (body: Record<string, unknown>) =>
+      exam.routes.handle({
+        method: 'POST',
+        path: '/exam/phone-presence/desk-camera',
+        headers: {},
+        body,
+      });
+    const base = { credential, people: 1, handsVisible: true, framingOk: true };
+    for (const bad of [
+      { extraHands: 'yes' },
+      { handCount: 99 },
+      { leftHands: -1 },
+      { objectHints: ['gun'] },
+      { objectHints: 'paper' },
+      { textVisible: 1 },
+    ]) {
+      expect((await send({ ...base, ...bad })).status).toBe(400);
+    }
+    expect(
+      (
+        await send({
+          ...base,
+          extraPerson: false,
+          extraHands: true,
+          handCount: 3,
+          leftHands: 2,
+          rightHands: 1,
+          textVisible: true,
+          objectHints: ['paper', 'cellphone'],
+          cameraObstructed: true,
+        })
+      ).status,
+    ).toBe(200);
+    expect(exam.phonePresence.status(attemptId).deskCamera).toMatchObject({
+      on: true,
+      extraHands: true,
+      handCount: 3,
+      leftHands: 2,
+      textVisible: true,
+      objectHints: ['cellphone', 'paper'],
+      cameraObstructed: true,
+    });
+    const flags = (
+      auth.database
+        .prepare(
+          "SELECT foreground_app FROM app_events WHERE attempt_id=? AND foreground_app LIKE 'flag:desk_camera%' ORDER BY rowid",
+        )
+        .all(attemptId) as Array<{ foreground_app: string }>
+    ).map((r) => r.foreground_app);
+    expect(flags.sort()).toEqual([
+      'flag:desk_camera_extra_hands',
+      'flag:desk_camera_object_cellphone',
+      'flag:desk_camera_object_paper',
+      'flag:desk_camera_obstructed',
+      'flag:desk_camera_text_visible',
+    ]);
+    // A phone that sends an explicit extraPerson=false is not flagged by the legacy people>=2 rule.
+    clock.advance(3);
+    expect((await send({ ...base, people: 2, extraPerson: false })).status).toBe(200);
+    expect(flags).not.toContain('flag:desk_camera_extra_person');
   });
 
   it('gates real answer writes and preserves acknowledged idempotent replay and finalization', async () => {

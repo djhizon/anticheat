@@ -373,6 +373,7 @@ export class ExamRoutes {
               body.people,
               body.handsVisible,
               body.framingOk,
+              body,
             ),
           );
         }

@@ -1,5 +1,7 @@
 import XCTest
+#if canImport(PresenceCore)
 @testable import PresenceCore
+#endif
 
 final class DeskCameraPolicyTests: XCTestCase {
     func testNoPeopleIsNotFramedOk() {

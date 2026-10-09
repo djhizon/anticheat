@@ -339,6 +339,15 @@ export interface DeskCameraStatus {
   readonly people: number;
   readonly handsVisible: boolean;
   readonly framingOk: boolean;
+  /** Optional, additive (newer phones). Debounced on-device; counts and label names only. */
+  readonly extraPerson?: boolean;
+  readonly extraHands?: boolean;
+  readonly handCount?: number;
+  readonly leftHands?: number;
+  readonly rightHands?: number;
+  readonly textVisible?: boolean;
+  readonly objectHints?: readonly string[];
+  readonly cameraObstructed?: boolean;
 }
 
 /** Liveness challenge kinds. `colour_flash` is the default; the others are opt-in. */
