@@ -7,10 +7,12 @@ import {
 } from '@exam-anti-cheat/contracts';
 
 import type { ApiConfig } from '../../config.js';
-import type {
-  AssignmentId,
-  ExamAnswerSaveRequest,
-  ExamSubmitRequest,
+import {
+  INTEGRITY_TIMELINE_SOURCES,
+  type AssignmentId,
+  type ExamAnswerSaveRequest,
+  type ExamSubmitRequest,
+  type IntegrityTimelineSource,
 } from '@exam-anti-cheat/contracts/exam';
 import { headerValue, type AuthRequest, type AuthRequestBoundary } from '../auth/auth.plugin.js';
 import { isAllowedOrigin } from '../auth/csrf.js';
@@ -27,6 +29,7 @@ import {
 } from '../integrity/graph.js';
 import type { PhonePresenceService } from '../integrity/phonePresence.js';
 import type { VisionResult } from '../integrity/backendVision.js';
+import { timelineToCsv } from '../integrity/timeline.js';
 import { isFlaggableVisionLabel, visionFlagName } from '../integrity/visionLabels.js';
 
 export type ExamResponseHeaderValue = string | readonly string[];
@@ -57,6 +60,8 @@ const transcriptPattern = /^\/exam\/attempts\/([^/]+)\/transcript$/u;
 const transpPattern = /^\/exam\/attempts\/([^/]+)\/transparency$/u;
 const enrollPhonePattern = /^\/exam\/attempts\/([^/]+)\/enroll-phone$/u;
 const phoneStatusPattern = /^\/exam\/attempts\/([^/]+)\/phone-status$/u;
+const timelinePattern = /^\/exam\/attempts\/([^/]+)\/timeline$/u;
+const instructorAttemptsPath = '/exam/instructor/attempts';
 const revisionsPattern = /^\/exam\/attempts\/([^/]+)\/revisions$/u;
 /** Segments are ~10 s; 4M base64 chars (~3 MB) is far above the highest profile and below the server body cap. */
 const MAX_RECORDING_BASE64_CHARS = 4_000_000;
@@ -155,6 +160,8 @@ function isExamPath(path: string): boolean {
     path === '/exam/speedtest' ||
     path === visionStatusPath ||
     path === instructorVersionsPath ||
+    path === instructorAttemptsPath ||
+    timelinePattern.test(path) ||
     similarityPattern.test(path) ||
     instructorAiCheckPattern.test(path) ||
     [
@@ -182,6 +189,18 @@ function isExamPath(path: string): boolean {
     transcriptPattern.test(path) ||
     transpPattern.test(path)
   );
+}
+
+function parseTimelineSources(
+  value: string | null,
+): ReadonlySet<IntegrityTimelineSource> | undefined {
+  if (value === null || value.trim() === '') return undefined;
+  const wanted = value.split(',').map((part) => part.trim());
+  const known = new Set<string>(INTEGRITY_TIMELINE_SOURCES);
+  if (!wanted.every((part) => known.has(part))) {
+    throw new DomainError('validation_failed', 'source must be one of the known log sources.');
+  }
+  return new Set(wanted as IntegrityTimelineSource[]);
 }
 
 function parsePathId<Brand extends string>(value: string, field: string): Opaque<string, Brand> {
@@ -541,6 +560,60 @@ export class ExamRoutes {
         const body = parseObject(request.body, 'Telemetry body required');
         const accepted = this.integrity.recordTelemetry(String(attemptId), body);
         return jsonResponse(request, this.config.allowedOrigins, 202, { accepted });
+      }
+
+      // ── Unified integrity log: student owner or any instructor ───────────
+      const timelineMatch = timelinePattern.exec(path);
+      if (method === 'GET' && timelineMatch !== null && this.integrity !== null) {
+        const principal = this.boundary.requirePrincipal(request);
+        const attemptId = parsePathId<'AttemptId'>(timelineMatch[1] ?? '', 'Attempt ID');
+        if (principal.user.role === 'student') {
+          // Ownership check: another student's attempt answers 404, like the sibling routes.
+          await this.service.getAttemptDelivery(attemptId as AttemptId, principal.user.id);
+        } else {
+          this.boundary.requireRole(principal, 'instructor');
+        }
+        const query = new URLSearchParams(request.path.split('?')[1] ?? '');
+        const format = query.get('format') ?? 'json';
+        if (format !== 'json' && format !== 'csv') {
+          throw new DomainError('validation_failed', 'format must be json or csv.');
+        }
+        const sources = parseTimelineSources(query.get('source'));
+        const entries = this.integrity.getTimeline(String(attemptId), sources);
+        if (entries === null) throw new DomainError('not_found', 'The exam attempt was not found.');
+        const safeId = String(attemptId)
+          .replace(/[^A-Za-z0-9_-]/gu, '_')
+          .slice(0, 64);
+        if (format === 'csv') {
+          return {
+            status: 200,
+            headers: {
+              ...corsHeaders(request, this.config.allowedOrigins),
+              'cache-control': 'no-store',
+              'content-type': 'text/csv; charset=utf-8',
+              'content-disposition': `attachment; filename="integrity-log-${safeId}.csv"`,
+            },
+            body: timelineToCsv(entries),
+          };
+        }
+        const response = jsonResponse(request, this.config.allowedOrigins, 200, { entries });
+        return query.has('format')
+          ? {
+              ...response,
+              headers: {
+                ...response.headers,
+                'content-disposition': `attachment; filename="integrity-log-${safeId}.json"`,
+              },
+            }
+          : response;
+      }
+
+      // ── Instructor: attempt list for integrity review ─────────────────────
+      if (method === 'GET' && path === instructorAttemptsPath && this.integrity !== null) {
+        this.requireInstructor(request);
+        return jsonResponse(request, this.config.allowedOrigins, 200, {
+          attempts: this.integrity.listAttemptsForInstructor(),
+        });
       }
 
       // ── Transparency report: what was recorded about this attempt ────────

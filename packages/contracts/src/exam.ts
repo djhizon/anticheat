@@ -154,6 +154,50 @@ export interface TransparencyReportResponse {
   readonly events: readonly TransparencyEvent[];
 }
 
+/** Where a unified integrity-log entry came from. */
+export const INTEGRITY_TIMELINE_SOURCES = [
+  'camera',
+  'gaze',
+  'audio',
+  'transcript',
+  'keyboard',
+  'browser',
+  'desktop',
+  'phone',
+  'liveness',
+  'answer',
+  'system',
+] as const;
+export type IntegrityTimelineSource = (typeof INTEGRITY_TIMELINE_SOURCES)[number];
+export type IntegrityTimelineSeverity = 'info' | 'notice' | 'flag';
+
+/**
+ * One normalized entry of the per-attempt integrity log. `summary` is plain,
+ * non-accusatory wording: entries are leads for a human, never verdicts.
+ * `data` holds small structured facts only (never images, audio, or answers).
+ */
+export interface IntegrityTimelineEntry {
+  readonly at: string;
+  readonly source: IntegrityTimelineSource;
+  readonly kind: string;
+  readonly severity: IntegrityTimelineSeverity;
+  readonly summary: string;
+  readonly data?: Readonly<Record<string, unknown>>;
+}
+
+export interface IntegrityTimelineResponse {
+  readonly entries: readonly IntegrityTimelineEntry[];
+}
+
+/** One attempt in the instructor's review list. */
+export interface InstructorAttemptSummary {
+  readonly id: string;
+  readonly studentEmail: string;
+  readonly examTitle: string;
+  readonly status: 'in_progress' | 'submitted' | 'expired';
+  readonly startedAt: string;
+}
+
 /** Instructor view of a published exam version and its free-text questions. */
 export interface InstructorExamVersion {
   readonly id: string;

@@ -32,6 +32,63 @@ export interface InstructorVersionRow {
   }>;
 }
 
+export const TIMELINE_ROW_LIMIT = 2000;
+
+export interface TimelineAttemptMeta {
+  readonly id: string;
+  readonly status: string;
+  readonly startedAt: string;
+  readonly submittedAt: string | null;
+  readonly expiredAt: string | null;
+  readonly studentId: string;
+}
+
+export interface TimelineAttemptListRow {
+  readonly id: string;
+  readonly student_email: string;
+  readonly exam_title: string;
+  readonly status: 'in_progress' | 'submitted' | 'expired';
+  readonly started_at: string;
+}
+
+/** Raw, unmerged rows for one attempt; `buildTimeline` normalizes and merges them. */
+export interface TimelineRows {
+  readonly meta: TimelineAttemptMeta;
+  readonly gaze: ReadonlyArray<{
+    off_screen_start: string;
+    duration_ms: number;
+    direction: string;
+    yaw: number | null;
+    pitch: number | null;
+  }>;
+  readonly apps: ReadonlyArray<{
+    created_at: string;
+    foreground_app: string;
+    display_count: number;
+  }>;
+  readonly keystrokes: ReadonlyArray<{
+    created_at: string;
+    question_version_id: string;
+    dwell_ms: number;
+    flight_ms: number;
+  }>;
+  readonly voice: ReadonlyArray<{ detected_at: string; duration_ms: number; peak_db: number }>;
+  readonly liveness: ReadonlyArray<{
+    created_at: string;
+    layer: number;
+    result: string;
+    details_json: string;
+  }>;
+  readonly transcripts: ReadonlyArray<{ captured_at: string; text: string }>;
+  readonly revisions: ReadonlyArray<{
+    created_at: string;
+    question_version_id: string;
+    word_count: number;
+  }>;
+  readonly phones: ReadonlyArray<{ created_at: string; last_seen_at: string | null }>;
+  readonly audits: ReadonlyArray<{ occurred_at: string; action: string }>;
+}
+
 export class IntegrityRepository {
   getTransparencyEvents(attemptId: string) {
     const apps = this.db
@@ -179,13 +236,124 @@ export class IntegrityRepository {
 
   // ── Gaze Events ──────────────────────────────────────────────────────────────
 
-  insertGazeEvent(attemptId: string, offScreenStart: string, durationMs: number): void {
+  insertGazeEvent(
+    attemptId: string,
+    offScreenStart: string,
+    durationMs: number,
+    direction = 'away',
+    yaw: number | null = null,
+    pitch: number | null = null,
+  ): void {
     this.db
       .prepare(
-        `INSERT INTO gaze_events (id, attempt_id, off_screen_start, duration_ms)
-         VALUES (?, ?, ?, ?)`,
+        `INSERT INTO gaze_events (id, attempt_id, off_screen_start, duration_ms, direction, yaw, pitch)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(randomUUID(), attemptId, offScreenStart, durationMs);
+      .run(randomUUID(), attemptId, offScreenStart, durationMs, direction, yaw, pitch);
+  }
+
+  // ── Unified integrity log (read model) ──────────────────────────────────────
+
+  /** Attempt facts for the log, or null when the attempt does not exist. */
+  getAttemptTimelineMeta(attemptId: string): TimelineAttemptMeta | null {
+    const row = this.db
+      .prepare(
+        `SELECT t.id, t.status, t.started_at, t.submitted_at, t.expired_at, a.student_id
+           FROM exam_attempts t JOIN exam_assignments a ON a.id = t.assignment_id
+          WHERE t.id = ?`,
+      )
+      .get(attemptId) as
+      | {
+          id: string;
+          status: string;
+          started_at: string;
+          submitted_at: string | null;
+          expired_at: string | null;
+          student_id: string;
+        }
+      | undefined;
+    return row === undefined
+      ? null
+      : {
+          id: row.id,
+          status: row.status,
+          startedAt: row.started_at,
+          submittedAt: row.submitted_at,
+          expiredAt: row.expired_at,
+          studentId: row.student_id,
+        };
+  }
+
+  /** Every stored signal for one attempt, unmerged. Each list is capped. */
+  getTimelineRows(attemptId: string, meta: TimelineAttemptMeta): TimelineRows {
+    const all = <T>(sql: string, ...params: Array<string | number>): T[] =>
+      this.db.prepare(sql).all(...params) as unknown as T[];
+    const end = meta.submittedAt ?? meta.expiredAt ?? '9999-12-31T23:59:59.999Z';
+    return {
+      meta,
+      gaze: all(
+        `SELECT off_screen_start, duration_ms, direction, yaw, pitch FROM gaze_events
+          WHERE attempt_id = ? ORDER BY off_screen_start LIMIT ${TIMELINE_ROW_LIMIT}`,
+        attemptId,
+      ),
+      apps: all(
+        `SELECT created_at, foreground_app, display_count FROM app_events
+          WHERE attempt_id = ? ORDER BY created_at LIMIT ${TIMELINE_ROW_LIMIT}`,
+        attemptId,
+      ),
+      keystrokes: all(
+        `SELECT created_at, question_version_id, dwell_ms, flight_ms FROM keystroke_events
+          WHERE attempt_id = ? ORDER BY created_at LIMIT ${TIMELINE_ROW_LIMIT * 10}`,
+        attemptId,
+      ),
+      voice: all(
+        `SELECT detected_at, duration_ms, peak_db FROM voice_events
+          WHERE attempt_id = ? ORDER BY detected_at LIMIT ${TIMELINE_ROW_LIMIT}`,
+        attemptId,
+      ),
+      liveness: all(
+        `SELECT created_at, layer, result, details_json FROM liveness_events
+          WHERE attempt_id = ? ORDER BY created_at LIMIT ${TIMELINE_ROW_LIMIT}`,
+        attemptId,
+      ),
+      transcripts: all(
+        `SELECT captured_at, text FROM audio_transcripts
+          WHERE attempt_id = ? ORDER BY captured_at, rowid LIMIT ${TIMELINE_ROW_LIMIT}`,
+        attemptId,
+      ),
+      revisions: all(
+        `SELECT created_at, question_version_id, word_count FROM answer_revisions
+          WHERE attempt_id = ? ORDER BY created_at, rowid LIMIT ${TIMELINE_ROW_LIMIT}`,
+        attemptId,
+      ),
+      phones: all(
+        `SELECT created_at, last_seen_at FROM phone_enrollments
+          WHERE attempt_id = ? ORDER BY created_at LIMIT 20`,
+        attemptId,
+      ),
+      audits: all(
+        `SELECT occurred_at, action FROM audit_events
+          WHERE actor_user_id = ? AND occurred_at >= ? AND occurred_at <= ?
+          ORDER BY occurred_at LIMIT 50`,
+        meta.studentId,
+        meta.startedAt,
+        end,
+      ),
+    };
+  }
+
+  /** Newest attempts across all students for the instructor review list. */
+  listAttemptsForInstructor(limit = 200): TimelineAttemptListRow[] {
+    return this.db
+      .prepare(
+        `SELECT t.id, u.email AS student_email, e.title AS exam_title, t.status, t.started_at
+           FROM exam_attempts t
+           JOIN exam_assignments a ON a.id = t.assignment_id
+           JOIN users u ON u.id = a.student_id
+           JOIN exam_versions e ON e.id = a.exam_version_id
+          ORDER BY t.started_at DESC LIMIT ?`,
+      )
+      .all(limit) as unknown as TimelineAttemptListRow[];
   }
 
   // ── Liveness Events ──────────────────────────────────────────────────────────

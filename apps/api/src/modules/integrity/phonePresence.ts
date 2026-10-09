@@ -105,6 +105,12 @@ export class PhonePresenceService {
       )
       .run(hash(credential), row.attempt_id, pairingHash);
     if (result.changes !== 1) this.reject();
+    // Log the pairing in the unified integrity log (timestamp only, no credential).
+    this.db
+      .prepare(
+        'INSERT INTO app_events (id, attempt_id, foreground_app, display_count) VALUES (?, ?, ?, 1)',
+      )
+      .run(randomUUID(), row.attempt_id, 'flag:iphone_paired');
     return { credential, heartbeatIntervalMs: PHONE_PING_MS, timeoutMs: PHONE_LEASE_MS };
   }
 

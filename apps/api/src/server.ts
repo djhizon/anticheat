@@ -217,7 +217,8 @@ function sendResponse(response: ServerResponse, result: RouteResponse): void {
     return;
   }
 
-  response.end(JSON.stringify(result.body));
+  // Download variants (CSV) carry a ready-made string body; everything else is JSON.
+  response.end(typeof result.body === 'string' ? result.body : JSON.stringify(result.body));
 }
 
 async function handleRequest(

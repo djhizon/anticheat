@@ -1,16 +1,30 @@
 import type {
   AiCheckRunResponse,
+  InstructorAttemptSummary,
   InstructorExamVersion,
+  IntegrityTimelineEntry,
   SimilarityRunResponse,
 } from '@exam-anti-cheat/contracts/exam';
 
 import type { FetchLike } from '../auth/api.js';
 import type { CsrfTokenProvider } from '../exam/api.js';
+import {
+  downloadTimelineFile,
+  parseTimelineEntries,
+  timelineUrl,
+  type IntegrityTimelineApi,
+  type TimelineFormat,
+} from '../integrity/timelineApi.js';
 
 export interface InstructorApi {
   listVersions(): Promise<readonly InstructorExamVersion[]>;
   runSimilarity(versionId: string, questionId: string): Promise<SimilarityRunResponse>;
   runAiCheck(versionId: string, questionId: string): Promise<AiCheckRunResponse>;
+}
+
+/** Attempt list plus the unified integrity log, used by the per-attempt review panel. */
+export interface InstructorTimelineApi extends IntegrityTimelineApi {
+  listAttempts(): Promise<readonly InstructorAttemptSummary[]>;
 }
 
 export class InstructorApiError extends Error {}
@@ -30,7 +44,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function createInstructorApi(
   csrfTokenProvider: CsrfTokenProvider,
   fetchImpl: FetchLike = (input, init) => fetch(input, init),
-): InstructorApi {
+): InstructorApi & InstructorTimelineApi {
   async function request(path: string, method: 'GET' | 'POST'): Promise<unknown> {
     const headers: Record<string, string> = { accept: 'application/json' };
     if (method === 'POST') headers['x-csrf-token'] = await csrfTokenProvider();
@@ -44,6 +58,31 @@ export function createInstructorApi(
   }
 
   return {
+    async listAttempts() {
+      const body = await request('/exam/instructor/attempts', 'GET');
+      if (!isRecord(body) || !Array.isArray(body.attempts))
+        throw new InstructorApiError('Unexpected response.');
+      return body.attempts as InstructorAttemptSummary[];
+    },
+    async getTimeline(attemptId: string): Promise<readonly IntegrityTimelineEntry[]> {
+      const body = await request(timelineUrl('', attemptId), 'GET');
+      try {
+        return parseTimelineEntries(body);
+      } catch {
+        throw new InstructorApiError('Unexpected response.');
+      }
+    },
+    async downloadTimeline(attemptId: string, format: TimelineFormat) {
+      try {
+        await downloadTimelineFile(
+          fetchImpl,
+          timelineUrl('', attemptId, format),
+          `integrity-log-${attemptId}.${format}`,
+        );
+      } catch {
+        throw new InstructorApiError('The log could not be downloaded.');
+      }
+    },
     async listVersions() {
       const body = await request('/exam/instructor/versions', 'GET');
       if (!isRecord(body) || !Array.isArray(body.versions))

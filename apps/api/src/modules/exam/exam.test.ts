@@ -1108,6 +1108,120 @@ describe('exam delivery boundary', () => {
     ]);
   });
 
+  it('serves a unified, sorted integrity log to the owner and instructors only, with CSV and JSON downloads', async () => {
+    const owner = await registerStudent('timeline-owner@example.test');
+    const other = await registerStudent('timeline-other@example.test');
+    const instructor = await registerStudent('timeline-teacher@example.test');
+    auth.database
+      .prepare(`UPDATE users SET role = 'instructor' WHERE id = ?`)
+      .run(instructor.userId);
+    const seeded = await seedExam();
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: owner.userId,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
+    const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
+    const integrity = new IntegrityService(
+      new IntegrityRepository(auth.database),
+      {} as GeminiRotatingClient,
+    );
+    const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity);
+    const base = `/exam/attempts/${attemptId}`;
+    await routes.handle(
+      studentRequest(owner, 'POST', `${base}/telemetry`, {
+        gaze: [
+          { timestamp: '2026-09-15T00:00:30.000Z', durationMs: 6000, direction: 'left', yaw: -34 },
+          { timestamp: '2026-09-15T00:00:10.000Z', durationMs: 4000, direction: 'no_face' },
+          { timestamp: '2026-09-15T00:00:40.000Z', durationMs: 3000, direction: 'sideways' },
+        ],
+      }),
+    );
+    await routes.handle(studentRequest(owner, 'PATCH', `${base}/events`, { event: 'focus_lost' }));
+    integrity.recordTranscript(
+      String(attemptId),
+      '=HYPERLINK("x"), "quoted"',
+      new Date('2026-09-15T00:00:20.000Z'),
+    );
+
+    expect((await routes.handle(studentRequest(other, 'GET', `${base}/timeline`))).status).toBe(
+      404,
+    );
+    expect(
+      (await routes.handle({ method: 'GET', path: `${base}/timeline`, headers: { origin } }))
+        .status,
+    ).toBe(401);
+
+    const asOwner = await routes.handle(studentRequest(owner, 'GET', `${base}/timeline`));
+    expect(asOwner.status).toBe(200);
+    const entries = (
+      asOwner.body as { entries: Array<{ at: string; source: string; kind: string }> }
+    ).entries;
+    const times = entries.map((e) => Date.parse(e.at));
+    expect(times).toEqual([...times].sort((a, b) => a - b));
+    expect(entries.map((e) => e.kind)).toEqual(
+      expect.arrayContaining([
+        'attempt_started',
+        'face_missing',
+        'transcript',
+        'gaze_left',
+        'gaze_away',
+        'focus_lost',
+      ]),
+    );
+    expect(asOwner.headers['content-disposition']).toBeUndefined();
+
+    const asInstructor = await routes.handle(studentRequest(instructor, 'GET', `${base}/timeline`));
+    expect(asInstructor.status).toBe(200);
+    expect((asInstructor.body as { entries: unknown[] }).entries).toHaveLength(entries.length);
+
+    const filtered = await routes.handle(
+      studentRequest(instructor, 'GET', `${base}/timeline?source=gaze,transcript`),
+    );
+    expect(
+      new Set(
+        (filtered.body as { entries: Array<{ source: string }> }).entries.map((e) => e.source),
+      ),
+    ).toEqual(new Set(['gaze', 'transcript']));
+    expect(
+      (await routes.handle(studentRequest(instructor, 'GET', `${base}/timeline?source=bogus`)))
+        .status,
+    ).toBe(400);
+    expect(
+      (await routes.handle(studentRequest(instructor, 'GET', `${base}/timeline?format=xml`)))
+        .status,
+    ).toBe(400);
+    expect(
+      (await routes.handle(studentRequest(instructor, 'GET', '/exam/attempts/missing/timeline')))
+        .status,
+    ).toBe(404);
+
+    const csv = await routes.handle(studentRequest(owner, 'GET', `${base}/timeline?format=csv`));
+    expect(csv.status).toBe(200);
+    expect(csv.headers['content-type']).toBe('text/csv; charset=utf-8');
+    expect(String(csv.headers['content-disposition'])).toMatch(
+      /^attachment; filename="[^"]+\.csv"$/u,
+    );
+    const text = csv.body as string;
+    expect(text.split('\r\n')[0]).toBe('at,source,kind,severity,summary,data');
+    // Embedded quotes are doubled and the cell is quoted.
+    expect(text).toContain('"Heard: ""=HYPERLINK(""x""), ""quoted"""""');
+    const json = await routes.handle(studentRequest(owner, 'GET', `${base}/timeline?format=json`));
+    expect(String(json.headers['content-disposition'])).toMatch(/\.json"$/u);
+
+    const list = await routes.handle(
+      studentRequest(instructor, 'GET', '/exam/instructor/attempts'),
+    );
+    expect((list.body as { attempts: Array<{ id: string }> }).attempts.map((a) => a.id)).toEqual([
+      attemptId,
+    ]);
+    expect(
+      (await routes.handle(studentRequest(owner, 'GET', '/exam/instructor/attempts'))).status,
+    ).toBe(403);
+  });
+
   it('saves non-empty transcripts as structured events and returns them in order to the owner only', async () => {
     const owner = await registerStudent('transcript@example.test');
     const other = await registerStudent('other@example.test');

@@ -24,6 +24,9 @@ import { checkForAiGeneration } from './aiCheck.js';
 import { computeSimilarityReport, SIMILARITY_THRESHOLD } from './similarity.js';
 import { VIRTUAL_CAMERA_LABEL } from '@exam-anti-cheat/contracts/exam';
 import type {
+  InstructorAttemptSummary,
+  IntegrityTimelineEntry,
+  IntegrityTimelineSource,
   AiCheckResult,
   AiCheckRunResponse,
   InstructorExamVersion,
@@ -31,6 +34,17 @@ import type {
   TransparencyEvent,
 } from '@exam-anti-cheat/contracts/exam';
 import { friendlyVisionLabel } from './visionLabels.js';
+import { buildTimeline } from './timeline.js';
+
+const GAZE_DIRECTIONS = new Set([
+  'left',
+  'right',
+  'up',
+  'down',
+  'away',
+  'no_face',
+  'multiple_faces',
+]);
 
 export interface LivenessVerifyResponse {
   readonly passed: boolean;
@@ -431,7 +445,21 @@ export class IntegrityService {
       const at = timestamp(g.timestamp);
       const ms = duration(g.durationMs);
       if (at === null || ms === null || ms === 0) continue;
-      this.repo.insertGazeEvent(attemptId, at, Math.max(1, Math.round(ms)));
+      const direction = GAZE_DIRECTIONS.has(String(g.direction)) ? String(g.direction) : 'away';
+      const degrees = (value: unknown): number | null => {
+        const n = Number(value);
+        return value !== null && value !== undefined && Number.isFinite(n) && Math.abs(n) <= 360
+          ? Math.round(n)
+          : null;
+      };
+      this.repo.insertGazeEvent(
+        attemptId,
+        at,
+        Math.max(1, Math.round(ms)),
+        direction,
+        degrees(g.yaw),
+        degrees(g.pitch),
+      );
       counts.gaze += 1;
     }
     for (const v of list(payload.voice, 100)) {
@@ -468,6 +496,28 @@ export class IntegrityService {
     return this.repo
       .getAudioTranscripts(attemptId)
       .map((row) => ({ capturedAt: row.captured_at, text: row.text }));
+  }
+
+  /** Unified, chronological integrity log for one attempt (null when it does not exist). */
+  getTimeline(
+    attemptId: string,
+    sources?: ReadonlySet<IntegrityTimelineSource>,
+  ): IntegrityTimelineEntry[] | null {
+    const meta = this.repo.getAttemptTimelineMeta(attemptId);
+    if (meta === null) return null;
+    this.sweepExpiredTranscripts();
+    const entries = buildTimeline(this.repo.getTimelineRows(attemptId, meta));
+    return sources === undefined ? entries : entries.filter((e) => sources.has(e.source));
+  }
+
+  listAttemptsForInstructor(): InstructorAttemptSummary[] {
+    return this.repo.listAttemptsForInstructor().map((row) => ({
+      id: row.id,
+      studentEmail: row.student_email,
+      examTitle: row.exam_title,
+      status: row.status,
+      startedAt: row.started_at,
+    }));
   }
 
   recordAppEvent(attemptId: string, foregroundApp: string, displayCount: number): void {

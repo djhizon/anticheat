@@ -1,5 +1,13 @@
 import { createKeystrokeDynamics } from '../integrity/keystrokeDynamics.js';
-import React, { Suspense, useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
+import React, {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from 'react';
 import type {
   ExamAnswerSaveResponse,
   ExamAnswerValue,
@@ -13,6 +21,7 @@ import { LivenessModal } from '../integrity/LivenessModal.js';
 import { embedWatermark } from '../integrity/watermark.js';
 import { shouldKick } from '../integrity/tabGuard.js';
 import { TransparencyReport } from '../integrity/TransparencyReport.js';
+import type { IntegrityTimelineApi } from '../integrity/timelineApi.js';
 import { startCameraGuard } from '../integrity/cameraGuard.js';
 import { activeCameraTrack } from '../integrity/physicalCamera.js';
 import { desktopWatcherBridge, startDesktopWatcher } from '../integrity/desktopWatcher.js';
@@ -123,6 +132,16 @@ export function StudentExamPage({
     [examApi],
   );
 
+  const timelineApi = useMemo<IntegrityTimelineApi | undefined>(() => {
+    const getTimeline = examApi?.getTimeline;
+    const downloadTimeline = examApi?.downloadTimeline;
+    if (!examApi || !getTimeline || !downloadTimeline) return undefined;
+    return {
+      getTimeline: (id) => getTimeline.call(examApi, id),
+      downloadTimeline: (id, format) => downloadTimeline.call(examApi, id, format),
+    };
+  }, [examApi]);
+
   const loadTranscript = useCallback(
     (attemptId: string) => examApi?.getTranscript?.(attemptId) ?? Promise.resolve([]),
     [examApi],
@@ -138,6 +157,7 @@ export function StudentExamPage({
       if (livenessOpenRef.current) return;
       setExamPaused(true);
       focusLostCount += 1;
+      examApi?.patchEvents(currentDelivery.attempt.id, { event: 'focus_lost' }).catch(() => {});
       onViolation?.({
         type: 'focus_lost',
         timestamp: Date.now(),
@@ -148,6 +168,7 @@ export function StudentExamPage({
       if (document.hidden) {
         setExamPaused(true);
         pageHiddenCount += 1;
+        examApi?.patchEvents(currentDelivery.attempt.id, { event: 'page_hidden' }).catch(() => {});
         onViolation?.({
           type: 'page_hidden',
           timestamp: Date.now(),
@@ -173,7 +194,7 @@ export function StudentExamPage({
       document.removeEventListener('visibilitychange', onVisibility);
       stopOverlayDetector?.();
     };
-  }, [currentDelivery?.attempt.status, onViolation]);
+  }, [currentDelivery?.attempt.status, currentDelivery?.attempt.id, examApi, onViolation]);
 
   useEffect(() => {
     setCurrentDelivery(delivery);
@@ -281,8 +302,6 @@ export function StudentExamPage({
       examApi
         .uploadTelemetry(currentDelivery.attempt.id, {
           keystrokes: snap.events,
-          gaze: [], // Currently handled by page hidden/focus lost
-          voice: [],
         })
         .catch(console.error);
 
@@ -324,20 +343,28 @@ export function StudentExamPage({
 
     let stopRecorder: (() => void) | null = null;
     let disposed = false;
+    let started = false;
     import('../integrity/screenRecorder.js')
       .then(({ createScreenRecorder }) => {
         if (disposed) return;
         const recorder = createScreenRecorder(currentDelivery.attempt.id, examApi, (message) => {
           if (!disposed) setRecordingStatus(message);
         });
-        recorder.start().catch((err) => {
-          if (!disposed) {
-            setRecordingStatus(
-              err instanceof Error ? err.message : 'Screen recording failed. Retry.',
-            );
-            setRecordScreen(false);
-          }
-        });
+        const attemptId = currentDelivery.attempt.id;
+        recorder
+          .start()
+          .then(() => {
+            started = true;
+            examApi?.patchEvents(attemptId, { event: 'recording_started' }).catch(() => {});
+          })
+          .catch((err) => {
+            if (!disposed) {
+              setRecordingStatus(
+                err instanceof Error ? err.message : 'Screen recording failed. Retry.',
+              );
+              setRecordScreen(false);
+            }
+          });
         stopRecorder = recorder.stop;
       })
       .catch((err) => {
@@ -352,6 +379,11 @@ export function StudentExamPage({
     return () => {
       disposed = true;
       stopRecorder?.();
+      if (started) {
+        examApi
+          ?.patchEvents(currentDelivery.attempt.id, { event: 'recording_stopped' })
+          .catch(() => {});
+      }
     };
   }, [recordScreen, currentDelivery?.attempt.id, currentDelivery?.attempt.status, examApi]);
 
@@ -487,6 +519,10 @@ export function StudentExamPage({
 
   function handlePaste(e: React.ClipboardEvent) {
     e.preventDefault();
+    const pasteAttempt = currentDeliveryRef.current?.attempt;
+    if (pasteAttempt?.status === 'in_progress') {
+      examApi?.patchEvents(pasteAttempt.id, { event: 'paste_blocked' }).catch(() => {});
+    }
     setPasteToastVisible(true);
     setTimeout(() => setPasteToastVisible(false), 3000);
   }
@@ -1036,6 +1072,7 @@ export function StudentExamPage({
                 attemptId={visibleDelivery.attempt.id}
                 load={loadTransparencyReport}
                 loadTranscript={loadTranscript}
+                timelineApi={timelineApi}
               />
             )}
           </main>

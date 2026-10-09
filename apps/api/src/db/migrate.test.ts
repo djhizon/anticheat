@@ -58,6 +58,7 @@ describe('database migrations', () => {
         { version: 6, name: 'supabase_identity' },
         { version: 7, name: 'liveness_kinds' },
         { version: 8, name: 'audio_transcripts' },
+        { version: 9, name: 'gaze_direction' },
       ]);
     } finally {
       database.close();

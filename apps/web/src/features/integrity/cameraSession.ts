@@ -15,6 +15,8 @@ export interface CameraSnapshot {
   readonly earbuds: boolean | null;
   readonly smartGlasses: boolean | null;
   readonly relative: HeadPose | null;
+  /** Raw camera-relative pose of the latest single-face reading (never an image). */
+  readonly pose: HeadPose | null;
   readonly calibrated: boolean;
 }
 export interface CameraEngine {
@@ -49,6 +51,7 @@ export function emptyCamera(reason = 'Not started'): CameraSnapshot {
     earbuds: null,
     smartGlasses: null,
     relative: null,
+    pose: null,
     calibrated: false,
   };
 }
@@ -194,6 +197,7 @@ export function createCameraSession(
             smartGlasses: null,
             calibrated: false,
             relative: null,
+            pose: null,
           };
         }
         state = { ...state, remainingSeconds: Math.ceil(remaining() / 1000) };
@@ -226,6 +230,13 @@ export function createCameraSession(
             earbuds: observation.earbuds ?? null,
             smartGlasses: observation.smartGlasses ?? null,
             calibrated: baseline !== null,
+            pose:
+              observation.faces === 1 && observation.pose !== null
+                ? {
+                    yaw: Math.round(observation.pose.yaw),
+                    pitch: Math.round(observation.pose.pitch),
+                  }
+                : null,
             relative:
               baseline !== null && observation.pose !== null
                 ? relativePose(observation.pose, baseline)

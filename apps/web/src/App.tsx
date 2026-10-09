@@ -7,6 +7,7 @@ import type {
 
 import { AccountButton } from './features/account/AccountPanel.js';
 import { ConfirmPage } from './features/account/ConfirmPage.js';
+import { AttemptTimelineDashboard } from './features/admin/AttemptTimelineDashboard.js';
 import { AiCheckDashboard } from './features/admin/AiCheckDashboard.js';
 import { createInstructorApi } from './features/admin/api.js';
 import { SimilarityDashboard } from './features/admin/SimilarityDashboard.js';
@@ -126,6 +127,7 @@ function InstructorWorkspace({
       </section>
       <SimilarityDashboard api={instructorApi} />
       <AiCheckDashboard api={instructorApi} />
+      <AttemptTimelineDashboard api={instructorApi} />
     </main>
   );
 }

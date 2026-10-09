@@ -4,6 +4,7 @@ import { createAudioRecorder } from './audioRecorder.js';
 import { acquireBuiltInMicrophone } from './builtInMicrophone.js';
 import { createLevelMeter, METER_BARS, type LevelReading } from './audioLevel.js';
 import { appendLine, formatClock, SKIPPED_TEXT, type LogLine } from './transcriptLog.js';
+import { createVoiceReporter } from './voiceReporter.js';
 import type { ExamApi } from '../exam/api.js';
 
 export const AUTO_START_DELAY_MS = 1000;
@@ -70,12 +71,16 @@ export function AudioPanel({
     if (!active || !enabled) return;
     let cancelled = false;
     let stream: MediaStream | null = null;
+    const voiceReporter =
+      typeof examApi?.uploadTelemetry === 'function'
+        ? createVoiceReporter(attemptId, examApi)
+        : null;
     const monitor = createAudioSession(
       attemptId,
       (value) => {
         if (!cancelled) setSnapshot(value);
       },
-      () => {},
+      (durationMs, peakDb) => voiceReporter?.detected(durationMs, peakDb),
     );
     const recorder = examApi
       ? createAudioRecorder(
@@ -145,6 +150,7 @@ export function AudioPanel({
       setBusy(false);
       recorder?.stop();
       monitor.destroy();
+      voiceReporter?.stop();
       stream?.getAudioTracks().forEach((track) => track.removeEventListener('ended', ended));
       stream?.getTracks().forEach((track) => track.stop());
     };

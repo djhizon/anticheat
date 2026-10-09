@@ -3,6 +3,7 @@ import type { AttemptContext } from './browserIntegrity.js';
 import { createCameraSession, emptyCamera } from './cameraSession.js';
 import { cameraEnvironment } from './cameraEnvironment.js';
 import { faceDirection } from './faceDirection.js';
+import { createGazeReporter } from './gazeReporter.js';
 import type { ExamApi } from '../exam/api.js';
 import {
   captureVisionFrame,
@@ -20,7 +21,10 @@ export function CameraIntegrityPanel({
   /** Start once on mount when consent was given; a failure is never retried. */
   readonly autoStart?: boolean;
   /** Used for the opt-in server (OWL-ViT) second opinion; omitted means browser checks only. */
-  readonly api?: Pick<ExamApi, 'getServerVisionEnabled' | 'postVisionCheck'> | undefined;
+  readonly api?:
+    | (Pick<ExamApi, 'getServerVisionEnabled' | 'postVisionCheck'> &
+        Partial<Pick<ExamApi, 'uploadTelemetry' | 'patchEvents'>>)
+    | undefined;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const current = useRef(attempt);
@@ -54,6 +58,34 @@ export function CameraIntegrityPanel({
       controller.current = null;
     };
   }, [attempt.id, attempt.active, autoStart, objects]);
+
+  // Debounced direction / face-count / phone events go to the unified integrity log.
+  const reporter = useRef<ReturnType<typeof createGazeReporter> | null>(null);
+  useEffect(() => {
+    const upload = api?.uploadTelemetry;
+    const patch = api?.patchEvents;
+    if (!api || !upload || !patch || !attempt.active) return;
+    const created = createGazeReporter(attempt.id, {
+      uploadTelemetry: (id, payload) => upload.call(api, id, payload),
+      patchEvents: (id, body) => patch.call(api, id, body),
+    });
+    reporter.current = created;
+    return () => {
+      created.stop();
+      reporter.current = null;
+    };
+  }, [attempt.id, attempt.active, api]);
+  useEffect(() => {
+    if (!live) {
+      reporter.current?.pause();
+      return;
+    }
+    reporter.current?.sample({
+      faces: snapshot.faces,
+      pose: snapshot.relative ?? snapshot.pose,
+      phone: snapshot.phone,
+    });
+  }, [live, snapshot]);
 
   useEffect(() => {
     if (!api?.getServerVisionEnabled) return;

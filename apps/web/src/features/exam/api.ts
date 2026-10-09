@@ -9,10 +9,17 @@ import type {
   ExamSubmitResponse,
   LivenessChallengeType,
   TransparencyEvent,
+  IntegrityTimelineEntry,
   TranscriptEntry,
 } from '@exam-anti-cheat/contracts/exam';
 
 import type { FetchLike } from '../auth/api.js';
+import {
+  downloadTimelineFile,
+  parseTimelineEntries,
+  timelineUrl,
+  type TimelineFormat,
+} from '../integrity/timelineApi.js';
 
 export interface ExamProblem {
   readonly code:
@@ -287,6 +294,9 @@ export interface ExamApi {
     signal?: AbortSignal,
   ): Promise<readonly { readonly label: string; readonly score: number }[]>;
   getTranscript?(attemptId: string): Promise<readonly TranscriptEntry[]>;
+  /** Unified chronological integrity log (same data the instructor sees). */
+  getTimeline?(attemptId: string): Promise<readonly IntegrityTimelineEntry[]>;
+  downloadTimeline?(attemptId: string, format: TimelineFormat): Promise<void>;
 }
 
 export class BrowserExamApi implements ExamApi {
@@ -682,6 +692,26 @@ export class BrowserExamApi implements ExamApi {
     return body.entries.filter(
       (entry): entry is TranscriptEntry =>
         isRecord(entry) && isString(entry.capturedAt) && isString(entry.text),
+    );
+  }
+
+  async getTimeline(attemptId: string): Promise<readonly IntegrityTimelineEntry[]> {
+    const body = await this.request(
+      `/exam/attempts/${encodeURIComponent(attemptId)}/timeline`,
+      'GET',
+    );
+    try {
+      return parseTimelineEntries(body);
+    } catch {
+      throw new ExamApiError(fallbackProblem);
+    }
+  }
+
+  async downloadTimeline(attemptId: string, format: TimelineFormat): Promise<void> {
+    await downloadTimelineFile(
+      this.fetchImpl,
+      timelineUrl(this.baseUrl, attemptId, format),
+      `integrity-log-${attemptId}.${format}`,
     );
   }
 
