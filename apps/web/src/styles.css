@@ -3032,7 +3032,14 @@ button.timeline-chip[aria-pressed='false'] {
 }
 .triage-student {
   font-weight: 600;
-  overflow-wrap: anywhere;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.triage-row-button .level-chip {
+  align-self: center;
+  justify-self: end;
 }
 .triage-reason,
 .triage-decision {
@@ -3049,6 +3056,9 @@ button.timeline-chip[aria-pressed='false'] {
 .level-chip,
 .confidence-chip {
   display: inline-block;
+  width: max-content;
+  line-height: 1.5;
+  vertical-align: middle;
   padding: 0.05rem 0.5rem;
   border-radius: 999px;
   font-size: 0.75rem;

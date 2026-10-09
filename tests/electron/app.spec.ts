@@ -270,7 +270,15 @@ async function launchElectron(args: string[], env: Record<string, string>): Prom
     timeout: 120_000,
   });
   const child = app.process();
-  const page = await app.firstWindow();
+  let page: Page;
+  try {
+    page = await app.firstWindow();
+  } catch (error) {
+    // No window: do not leave the app running behind the failed test.
+    await app.close().catch(() => undefined);
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+    throw error;
+  }
   return {
     page,
     process: child,
@@ -305,6 +313,17 @@ async function launchOverCdp(args: string[], env: Record<string, string>): Promi
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout?.on('data', (chunk: Buffer) => stderr.push(`[stdout] ${chunk.toString()}`));
+  try {
+    return await connectOverCdp(child, stderr);
+  } catch (error) {
+    // No endpoint / no window: do not leave the app (and its ports) behind; show its output.
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+    const tail = stderr.join('').split('\n').slice(-20).join('\n');
+    throw new Error(`${String(error)}${tail ? `\nstderr tail:\n${tail}` : ''}`);
+  }
+}
+
+async function connectOverCdp(child: ChildProcess, stderr: string[]): Promise<Launched> {
   const wsEndpoint = await new Promise<string>((done, fail) => {
     let buffer = '';
     const timer = setTimeout(() => fail(new Error('no DevTools endpoint within 60 s')), 60_000);
@@ -358,9 +377,24 @@ interface Session {
   pageErrors: string[];
 }
 
-async function launch(target: Target, mode?: 'strict'): Promise<Session> {
+/** Prints the app's log tails from the throwaway user-data dir (after a failure). */
+function printLogTails(target: Target, userData: string): void {
+  for (const name of ['logs/api.log', 'desktop-health.log']) {
+    const file = join(userData, name);
+    if (existsSync(file))
+      console.log(
+        `[${target.name}] ${name} tail:\n${readFileSync(file, 'utf8').split('\n').slice(-30).join('\n')}`,
+      );
+    else console.log(`[${target.name}] ${name}: not written`);
+  }
+}
+
+async function launch(
+  target: Target,
+  mode: 'strict' | undefined,
+  userData: string,
+): Promise<Session> {
   await waitForPortsFree(20 * 60_000);
-  const userData = mkdtempSync(join(tmpdir(), 'eac-electron-test-'));
   if (mode) writeFileSync(join(userData, 'settings.json'), JSON.stringify({ mode }) + '\n');
   const args = [`--user-data-dir=${userData}`, ...fakeMedia];
   const launched =
@@ -406,20 +440,24 @@ async function withSession(
   body: (s: Session) => Promise<void>,
   onFailure?: (s: Session) => Promise<unknown>,
 ): Promise<void> {
-  const s = await launch(target, mode);
+  const userData = mkdtempSync(join(tmpdir(), 'eac-electron-test-'));
+  let s: Session;
+  try {
+    s = await launch(target, mode, userData);
+  } catch (error) {
+    // No window / no CDP endpoint: show why before giving up, and never leave the dir behind.
+    console.log(`[${target.name}] launch failed: ${String(error)}`);
+    printLogTails(target, userData);
+    rmSync(userData, { recursive: true, force: true });
+    throw error;
+  }
   let failure: unknown = null;
   try {
     await body(s);
   } catch (error) {
     failure = error;
     await onFailure?.(s).catch(() => undefined);
-    for (const name of ['logs/api.log', 'desktop-health.log']) {
-      const file = join(s.userData, name);
-      if (existsSync(file))
-        console.log(
-          `[${target.name}] ${name} tail:\n${readFileSync(file, 'utf8').split('\n').slice(-30).join('\n')}`,
-        );
-    }
+    printLogTails(target, s.userData);
     const tail = s.launched.stderrTail();
     if (tail) console.log(`[${target.name}] stderr tail:\n${tail}`);
   }

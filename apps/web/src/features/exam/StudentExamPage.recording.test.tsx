@@ -189,3 +189,81 @@ it('shows only "Submitted" in the top bar after a successful submit', async () =
   expect(examApi.patchEvents).toHaveBeenCalledWith('a', { event: 'recording_stopped' });
   expect(examApi.patchEvents).not.toHaveBeenCalledWith('a', { event: 'screen_recording_stopped' });
 });
+
+it('shows a submit error with Retry when the submit request fails, not the recording overlay', async () => {
+  await startScreenRecording('a');
+  const examApi = api();
+  examApi.submitAttempt.mockRejectedValueOnce(new Error('network down'));
+  await render(examApi);
+  await act(async () => button('Submit Exam')!.click());
+  await act(async () => {});
+  expect(examApi.submitAttempt).toHaveBeenCalledOnce();
+
+  // The recording was finished for submit; that is not a "recording stopped" pause.
+  expect(container.querySelector('[aria-label="Screen recording stopped"]')).toBeNull();
+  expect(button('Resume screen recording')).toBeUndefined();
+  expect(examApi.patchEvents).not.toHaveBeenCalledWith('a', { event: 'screen_recording_stopped' });
+  const dialog = container.querySelector('[aria-label="Submit failed"]')!;
+  expect(dialog).not.toBeNull();
+  expect(dialog.textContent).toContain('Submission could not be completed');
+  expect(button('Retry submit')).toBeDefined();
+
+  // Retry does not re-ask for confirmation and completes the submit.
+  (globalThis.confirm as unknown as ReturnType<typeof vi.fn>).mockClear();
+  await act(async () => button('Retry submit')!.click());
+  await act(async () => {});
+  expect(globalThis.confirm).not.toHaveBeenCalled();
+  expect(examApi.submitAttempt).toHaveBeenCalledTimes(2);
+  expect(container.querySelector('[aria-label="Submit failed"]')).toBeNull();
+  expect(container.querySelector('.exam-topbar')!.textContent).toContain('Submitted');
+});
+
+it('"Keep answering" after a failed submit asks to resume the recording (a genuine stop)', async () => {
+  await startScreenRecording('a');
+  const examApi = api();
+  examApi.submitAttempt.mockRejectedValueOnce(new Error('server error'));
+  await render(examApi);
+  await act(async () => button('Submit Exam')!.click());
+  await act(async () => {});
+  await act(async () => button('Keep answering')!.click());
+  expect(container.querySelector('[aria-label="Submit failed"]')).toBeNull();
+  expect(container.querySelector('[aria-label="Screen recording stopped"]')).not.toBeNull();
+  await act(async () => button('Resume screen recording')!.click());
+  expect(screenRecordingState().phase).toBe('running');
+  expect(answerInput().disabled).toBe(false);
+});
+
+it('shows a Recording status chip next to the other monitoring chips', async () => {
+  const examApi = api();
+  await render(examApi);
+  const statuses = () => container.querySelector('[aria-label="Monitoring status"]')!.textContent!;
+  expect(statuses()).toContain('Recording …');
+  await act(async () => button('Resume screen recording')!.click());
+  expect(statuses()).toContain('Recording ✓');
+});
+
+it('says recordings stay on this computer when the exam does not upload them', async () => {
+  await startScreenRecording('a', undefined, { localOnly: true });
+  const examApi = api();
+  const local = delivery('in_progress') as unknown as { exam: Record<string, unknown> };
+  local.exam.privacy = { recordingUpload: false };
+  await act(async () =>
+    root.render(
+      <StudentExamPage
+        delivery={local as unknown as ExamDeliveryProjection}
+        error={null}
+        loading={false}
+        onBack={() => {}}
+        examApi={examApi}
+        sensorsConsented
+        setup={{ identityVerified: true, phoneUsed: false }}
+      />,
+    ),
+  );
+  const text = container.textContent ?? '';
+  expect(text).toContain('Recordings stay on this computer');
+  expect(text).toContain('Movies › ExamGuard Recordings');
+  expect(text).not.toContain('OneDrive');
+  expect(text).not.toContain('Downloads');
+  expect(text).not.toContain('uploaded 0/0');
+});

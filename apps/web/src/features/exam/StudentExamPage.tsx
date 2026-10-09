@@ -46,6 +46,8 @@ import {
   useScreenRecording,
 } from '../integrity/screenRecordingSession.js';
 import { ScreenRecordingPausedOverlay } from '../integrity/ScreenRecordingPausedOverlay.js';
+import { SubmitFailedOverlay } from './SubmitFailedOverlay.js';
+import { recordingStorageStatement } from './ConsentList.js';
 import {
   PresenceNote,
   usePresenceSpotChecks,
@@ -559,6 +561,8 @@ export function StudentExamPage({
       (recording.phase === 'running' || recording.phase === 'finished') &&
       recording.attemptId === attemptIdForRecording
     );
+  const recordingRunning =
+    recording.phase === 'running' && recording.attemptId === attemptIdForRecording;
   useEffect(() => {
     if (!examApi || !attemptIdForRecording || !attemptActive || !sensorsConsented) return;
     if (recordingPaused && !recordingStopLogged.current) {
@@ -840,7 +844,7 @@ export function StudentExamPage({
     lastKeyUp.current = Date.now();
   }
 
-  async function submit(savedOnly = false): Promise<void> {
+  async function submit(savedOnly = false, confirmed = false): Promise<void> {
     const activeDelivery = currentDeliveryRef.current;
     if (
       examApi === undefined ||
@@ -851,6 +855,7 @@ export function StudentExamPage({
       return;
     }
     if (
+      !confirmed &&
       !globalThis.confirm(
         savedOnly
           ? 'Submit only the last server-saved answers? Any unsaved draft will NOT be included. This ends the exam.'
@@ -895,13 +900,20 @@ export function StudentExamPage({
           : 'The deadline passed before submission could be recorded.',
       );
     } catch {
-      reopenAfterFailedSubmit();
+      // The recording was finished for submit; keep it that way and offer a retry. The
+      // "stopped recording" overlay is only for genuine stops (see continueAfterFailedSubmit).
       setSubmitError(
         'Submission could not be completed. Your last acknowledged save is preserved.',
       );
     } finally {
       setSubmitting(false);
     }
+  }
+
+  /** Student wants to keep answering after a failed submit: the recording must run again. */
+  function continueAfterFailedSubmit(): void {
+    setSubmitError(null);
+    reopenAfterFailedSubmit();
   }
 
   function renderAnswerControl(
@@ -1088,7 +1100,15 @@ export function StudentExamPage({
           onRetry={() => void continuityRef.current?.recheck()}
         />
       )}
-      {isActive && recordingPaused && !cameraPaused && (
+      {isActive && submitError !== null && !cameraPaused && (
+        <SubmitFailedOverlay
+          busy={submitting}
+          message={submitError}
+          onRetry={() => void submit(false, true)}
+          onContinue={continueAfterFailedSubmit}
+        />
+      )}
+      {isActive && submitError === null && recordingPaused && !cameraPaused && (
         <ScreenRecordingPausedOverlay
           busy={recordingBusy || recording.phase === 'starting'}
           reason={recording.error}
@@ -1184,6 +1204,9 @@ export function StudentExamPage({
                 </span>
                 <span className={`topbar-chip ${phonePresence.connected ? 'topbar-chip--ok' : ''}`}>
                   iPhone {phonePresence.connected ? 'Connected ✓' : phoneExpected ? 'Lost ✗' : '—'}
+                </span>
+                <span className={`topbar-chip ${recordingRunning ? 'topbar-chip--ok' : ''}`}>
+                  Recording {recordingRunning ? '✓' : '…'}
                 </span>
                 <span
                   className={`topbar-chip ${setup?.identityVerified === true ? 'topbar-chip--ok' : ''}`}
@@ -1375,12 +1398,11 @@ export function StudentExamPage({
             <section className="sidebar-section">
               <p className="sidebar-label">Screen recording</p>
               <p className="muted">
-                Your entire screen is recorded for the whole exam, with the built-in microphone.
-                Segments upload to the school&apos;s secure OneDrive for exam review; quality adapts
-                to your connection. On a poor connection they are saved on your computer instead.
+                Your entire screen is recorded for the whole exam, with the built-in microphone.{' '}
+                {recordingStorageStatement(visibleDelivery.exam.privacy?.recordingUpload !== false)}
               </p>
               <p role="status">
-                {recording.phase === 'running' && recording.attemptId === attemptIdForRecording
+                {recordingRunning
                   ? recording.status || 'Recording your entire screen.'
                   : isActive
                     ? 'Screen recording is not running.'

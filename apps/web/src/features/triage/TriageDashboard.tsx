@@ -186,7 +186,9 @@ export function TriageDashboard({
                     setSaveError(null);
                   }}
                 >
-                  <span className="triage-student">{row.studentEmail}</span>
+                  <span className="triage-student" title={row.studentEmail}>
+                    {row.studentEmail}
+                  </span>
                   <span className={`level-chip level-chip--${row.level ?? 'unknown'}`}>
                     {row.level === undefined ? 'Not analysed' : REVIEW_LEVEL_LABELS[row.level]}
                   </span>

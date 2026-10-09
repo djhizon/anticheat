@@ -337,7 +337,7 @@ export function createScreenRecorder(
       if (!queue || queue.isDead || queue.waiting === 0) return;
       goLocal(
         queue.drainPending(),
-        'Some segments could not finish uploading, so they were saved on your computer (Downloads).',
+        'Some segments could not finish uploading, so they were saved on your computer (Mac app: Movies › ExamGuard Recordings).',
       );
     }, FLUSH_AFTER_STOP_MS);
   }
@@ -365,8 +365,8 @@ export function createScreenRecorder(
         goLocal(
           pending,
           reason === 'fatal'
-            ? 'Cloud recording is unavailable, so segments are being saved on your computer (Downloads) instead.'
-            : 'Your connection was not steady enough to upload, so segments are being saved on your computer (Downloads) instead. Trying the network again shortly.',
+            ? 'Cloud recording is unavailable, so segments are being saved on your computer (Mac app: Movies › ExamGuard Recordings) instead.'
+            : 'Your connection was not steady enough to upload, so segments are being saved on your computer (Mac app: Movies › ExamGuard Recordings) instead. Trying the network again shortly.',
           reason === 'unstable',
         ),
     });
@@ -504,7 +504,7 @@ export function createScreenRecorder(
         const choice = applyConnectionHint(chooseProfile(kbps), readConnectionHint());
         if (choice === 'local-only') {
           notice =
-            'Could not reach the server to upload, so recording on this computer instead (segments saved to Downloads).';
+            'Could not reach the server to upload, so recording on this computer instead (Mac app: Movies › ExamGuard Recordings).';
           scheduleReprobe();
         } else {
           mode = 'cloud';
