@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { EvidenceSnapshotMeta } from '@exam-anti-cheat/contracts/exam';
+import type { EvidenceSnapshotMeta } from '@examguard/contracts/exam';
 
 export const evidenceTriggerLabel: Readonly<Record<string, string>> = {
   multiple_faces: 'More than one face',

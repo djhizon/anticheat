@@ -1,9 +1,9 @@
-import { plural } from '@exam-anti-cheat/contracts';
+import { plural } from '@examguard/contracts';
 import type {
   IntegrityTimelineEntry,
   IntegrityTimelineSeverity,
   IntegrityTimelineSource,
-} from '@exam-anti-cheat/contracts/exam';
+} from '@examguard/contracts/exam';
 
 import type { TimelineRows } from './integrityRepository.js';
 

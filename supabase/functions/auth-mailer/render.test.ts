@@ -17,7 +17,7 @@ describe('auth-mailer rendering', () => {
   it('builds a reset link to /account/confirm on the app origin with an encoded token hash', () => {
     const [email] = renderEmails(payload('recovery'));
     expect(email?.to).toBe('student@example.test');
-    expect(email?.subject).toBe('Reset your anticheat password');
+    expect(email?.subject).toBe('Reset your ExamGuard password');
     expect(email?.html).toContain(
       'https://exam.example/account/confirm?token_hash=hash%2Fabc&amp;type=recovery',
     );

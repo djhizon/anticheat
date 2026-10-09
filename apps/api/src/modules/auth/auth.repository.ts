@@ -1,13 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 
-import type {
-  AuditEventInput,
-  AuditSink,
-  Opaque,
-  UserId,
-  UserRole,
-} from '@exam-anti-cheat/contracts';
+import type { AuditEventInput, AuditSink, Opaque, UserId, UserRole } from '@examguard/contracts';
 
 import type { SessionId } from './session.js';
 

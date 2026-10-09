@@ -25,7 +25,7 @@ const LOCKDOWN_EVENTS = new Set([
 ]);
 
 // The lockdown shell itself (and the dev-mode Electron binary) is expected focus.
-const OWN_APPS = new Set(['Exam Anti-Cheat', 'Electron']);
+const OWN_APPS = new Set(['ExamGuard', 'Electron']);
 
 export function desktopWatcherBridge(): DesktopWatcherBridge | undefined {
   const bridge = (window as Window & { electronExam?: Partial<DesktopWatcherBridge> }).electronExam;

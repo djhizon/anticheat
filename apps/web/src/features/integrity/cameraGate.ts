@@ -1,4 +1,4 @@
-import { VIRTUAL_CAMERA_LABEL } from '@exam-anti-cheat/contracts/exam';
+import { VIRTUAL_CAMERA_LABEL } from '@examguard/contracts/exam';
 import { acquirePhysicalCamera, classifyCameras, type CameraChoices } from './physicalCamera.js';
 
 /** One luminance sample (64x64 by default) of the live feed. */

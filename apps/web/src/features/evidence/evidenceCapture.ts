@@ -5,7 +5,7 @@ import {
   type EvidenceSource,
   type EvidenceTrigger,
   type EvidenceUploadRequest,
-} from '@exam-anti-cheat/contracts/exam';
+} from '@examguard/contracts/exam';
 
 import type { CameraSnapshot } from '../integrity/cameraSession.js';
 

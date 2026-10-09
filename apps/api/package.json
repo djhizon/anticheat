@@ -1,5 +1,5 @@
 {
-  "name": "@exam-anti-cheat/api",
+  "name": "@examguard/api",
   "version": "0.1.0",
   "private": true,
   "type": "module",

@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import { DomainError, type Clock } from '@exam-anti-cheat/contracts';
+import { DomainError, type Clock } from '@examguard/contracts';
 
 export const PHONE_PING_MS = 2000;
 export const PHONE_LEASE_MS = 8000;

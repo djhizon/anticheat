@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import type { AssignmentId, ExamVersionId } from '@exam-anti-cheat/contracts/exam';
+import type { AssignmentId, ExamVersionId } from '@examguard/contracts/exam';
 
 import { loadConfig, type ApiConfig } from './config.js';
 import { createAuthPlugin, type AuthPlugin } from './modules/auth/auth.plugin.js';

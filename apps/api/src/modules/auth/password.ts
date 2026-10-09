@@ -1,7 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import * as crypto from 'node:crypto';
 
-import { DomainError } from '@exam-anti-cheat/contracts';
+import { DomainError } from '@examguard/contracts';
 import { argon2id as wasmArgon2id } from 'hash-wasm';
 
 export const ARGON2_MEMORY_KIB = 19_456;

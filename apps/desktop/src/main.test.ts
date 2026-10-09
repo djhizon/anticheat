@@ -102,7 +102,7 @@ describe('native window recovery', () => {
     mocks.execSync.mockClear();
     const handler = mocks.handlers.get('kill-app');
     expect(handler).toBeDefined();
-    for (const target of ['Exam Anti-Cheat', 'Electron', 'Terminal', 'Notes', null]) {
+    for (const target of ['ExamGuard', 'Electron', 'Terminal', 'Notes', null]) {
       expect(await handler!({}, target)).toBe(false);
     }
     expect(mocks.execSync).not.toHaveBeenCalled();

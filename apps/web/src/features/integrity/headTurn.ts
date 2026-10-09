@@ -1,4 +1,4 @@
-import type { LivenessTurnDirection, LivenessYawSample } from '@exam-anti-cheat/contracts/exam';
+import type { LivenessTurnDirection, LivenessYawSample } from '@examguard/contracts/exam';
 
 import { acquireUnlessAborted, throwIfAborted } from './livenessCapture.js';
 import { acquirePhysicalCamera } from './physicalCamera.js';

@@ -98,7 +98,7 @@ const outsideRoot = modulesRoot() !== root;
 /** [command, args, options] that run an API entry (seed or server), via vite-node --root in a worktree. */
 function apiEntry(file, npmScript) {
   if (!outsideRoot)
-    return [npm, ['run', npmScript, '--workspace', '@exam-anti-cheat/api'], { cwd: root }];
+    return [npm, ['run', npmScript, '--workspace', '@examguard/api'], { cwd: root }];
   const bin = join(modulesRoot(), 'node_modules', '.bin', 'vite-node');
   return [bin, ['--root', modulesRoot(), file], { cwd: join(root, 'apps/api') }];
 }
@@ -180,7 +180,7 @@ class Client {
     };
     if (body !== undefined) headers['content-type'] = 'application/json';
     if (this.csrf && method !== 'GET') headers['x-csrf-token'] = this.csrf;
-    if (path === '/auth/csrf') headers['x-requested-with'] = 'exam-anti-cheat-browser';
+    if (path === '/auth/csrf') headers['x-requested-with'] = 'examguard-browser';
     const response = await fetch(`${apiBase}${path}`, {
       method,
       headers,

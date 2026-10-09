@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { InputBehaviourEvent, InputBehaviourWindow } from '@exam-anti-cheat/contracts/exam';
+import type { InputBehaviourEvent, InputBehaviourWindow } from '@examguard/contracts/exam';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { createInputBehaviourCollector } from './inputCollector.js';

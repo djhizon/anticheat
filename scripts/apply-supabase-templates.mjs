@@ -5,12 +5,12 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const templates = {
-  confirmation: ['confirm-signup.html', 'Confirm your anticheat email'],
-  recovery: ['reset-password.html', 'Reset your anticheat password'],
-  email_change: ['change-email.html', 'Confirm your new anticheat email'],
-  reauthentication: ['reauthentication.html', 'Your anticheat verification code'],
-  invite: ['invite.html', "You're invited to anticheat"],
-  magic_link: ['magic-link.html', 'Your anticheat sign-in link'],
+  confirmation: ['confirm-signup.html', 'Confirm your ExamGuard email'],
+  recovery: ['reset-password.html', 'Reset your ExamGuard password'],
+  email_change: ['change-email.html', 'Confirm your new ExamGuard email'],
+  reauthentication: ['reauthentication.html', 'Your ExamGuard verification code'],
+  invite: ['invite.html', "You're invited to ExamGuard"],
+  magic_link: ['magic-link.html', 'Your ExamGuard sign-in link'],
 };
 
 export function buildTemplatePatch(read) {

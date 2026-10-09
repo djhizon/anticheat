@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Clock, UserId } from '@exam-anti-cheat/contracts';
+import type { Clock, UserId } from '@examguard/contracts';
 import type {
   ExamAnswerSaveResponse,
   ExamAssignmentListResponse,
   ExamDeliveryResponse,
   ExamGenerationResponse,
   ExamSubmitResponse,
-} from '@exam-anti-cheat/contracts/exam';
+} from '@examguard/contracts/exam';
 
 import { loadConfig, type ApiConfig } from '../../config.js';
 import { createAuthPlugin, type AuthPlugin, type AuthRequest } from '../auth/auth.plugin.js';

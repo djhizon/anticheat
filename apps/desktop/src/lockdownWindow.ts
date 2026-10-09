@@ -231,7 +231,7 @@ export function createLockdown(deps: LockdownDeps): LockdownController {
   function lockedMenu(): MenuItemTemplate[] {
     return [
       {
-        label: 'Exam Anti-Cheat',
+        label: 'ExamGuard',
         // Hidden emergency exit; no Quit, Hide or Minimize items while locked.
         submenu: [
           {

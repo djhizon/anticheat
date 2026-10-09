@@ -1,4 +1,4 @@
-import { VIRTUAL_CAMERA_LABEL as virtualLabel } from '@exam-anti-cheat/contracts/exam';
+import { VIRTUAL_CAMERA_LABEL as virtualLabel } from '@examguard/contracts/exam';
 
 // The native camera the student chose in the camera gate (kept for the exam's own streams).
 let preferredCameraId: string | null = null;

@@ -1,4 +1,4 @@
-import { DomainError, SystemClock, type Clock, type UserRole } from '@exam-anti-cheat/contracts';
+import { DomainError, SystemClock, type Clock, type UserRole } from '@examguard/contracts';
 import type { DatabaseSync } from 'node:sqlite';
 
 import { loadConfig, type ApiConfig } from '../../config.js';

@@ -1,6 +1,6 @@
 # Security
 
-exam-anti-cheat is an advanced exam integrity enforcement platform.
+ExamGuard is an advanced exam integrity enforcement platform.
 
 ## Design
 

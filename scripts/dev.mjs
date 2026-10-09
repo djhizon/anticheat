@@ -23,7 +23,7 @@ const children = [
   spawn(
     npmCommand,
     process.env.EXAM_LAN === '1'
-      ? ['run', 'dev', '--workspace', '@exam-anti-cheat/web', '--', '--host', '0.0.0.0']
+      ? ['run', 'dev', '--workspace', '@examguard/web', '--', '--host', '0.0.0.0']
       : ['run', 'dev:web'],
     { env: process.env, stdio: 'inherit' },
   ),

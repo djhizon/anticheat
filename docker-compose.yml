@@ -5,7 +5,7 @@ services:
     build:
       context: .
       target: runtime
-    image: exam-anti-cheat:local
+    image: examguard:local
     ports:
       - '8080:8080'
     env_file:
@@ -33,7 +33,7 @@ services:
     build:
       context: .
       target: vision
-    image: exam-anti-cheat:vision
+    image: examguard:vision
     ports:
       - '8080:8080'
     env_file:

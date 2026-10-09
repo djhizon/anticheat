@@ -6,12 +6,12 @@ links work even when opened on a different device than the one that asked.
 
 | File                    | Dashboard template (Authentication → Emails) | Subject                          |
 | ----------------------- | -------------------------------------------- | -------------------------------- |
-| `confirm-signup.html`   | Confirm signup                               | Confirm your anticheat email     |
-| `reset-password.html`   | Reset password                               | Reset your anticheat password    |
-| `change-email.html`     | Change email address                         | Confirm your new anticheat email |
-| `reauthentication.html` | Reauthentication                             | Your anticheat verification code |
-| `invite.html`           | Invite user                                  | You're invited to anticheat      |
-| `magic-link.html`       | Magic link                                   | Your anticheat sign-in link      |
+| `confirm-signup.html`   | Confirm signup                               | Confirm your ExamGuard email     |
+| `reset-password.html`   | Reset password                               | Reset your ExamGuard password    |
+| `change-email.html`     | Change email address                         | Confirm your new ExamGuard email |
+| `reauthentication.html` | Reauthentication                             | Your ExamGuard verification code |
+| `invite.html`           | Invite user                                  | You're invited to ExamGuard      |
+| `magic-link.html`       | Magic link                                   | Your ExamGuard sign-in link      |
 
 Apply them all at once (needs a Supabase personal access token with access to
 the project; keep it in your shell, not in the repo):

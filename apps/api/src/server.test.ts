@@ -137,7 +137,7 @@ describe('real HTTP API runtime', () => {
     const sameOriginRefresh = await fetch(`${baseUrl}/auth/csrf`, {
       headers: {
         Cookie: cookieHeader(jar),
-        'X-Requested-With': 'exam-anti-cheat-browser',
+        'X-Requested-With': 'examguard-browser',
       },
     });
     expect(sameOriginRefresh.status).toBe(200);

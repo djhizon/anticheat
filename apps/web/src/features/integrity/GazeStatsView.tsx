@@ -1,4 +1,4 @@
-import { plural } from '@exam-anti-cheat/contracts';
+import { plural } from '@examguard/contracts';
 import { SECTORS } from './gazeEstimator.js';
 import { wedgePath } from './GazeDial.js';
 import type { GazeStatsSnapshot } from './gazeStats.js';

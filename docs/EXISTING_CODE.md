@@ -7,7 +7,7 @@ checklist under **"Existing code and assets"**.
 
 ## Submission checklist text
 
-> Built on our own pre-existing prototype, `exam-anti-cheat` (written
+> Built on our own pre-existing prototype, then named `exam-anti-cheat` (written
 > 15–24 September 2026, before the hackathon). It is imported unchanged as the
 > first commit (`1c94abb`) so judges can diff every hackathon change against it.
 > Its known defects at import are listed in `docs/AUDIT.md`. Everything after

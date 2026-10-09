@@ -3,7 +3,7 @@ import { formatClock } from './transcriptLog.js';
 import { IntegrityTimeline } from './IntegrityTimeline.js';
 import type { IntegrityTimelineApi } from './timelineApi.js';
 import { EvidenceGallery, type EvidenceGalleryProps } from '../evidence/EvidenceGallery.js';
-import type { TranscriptEntry, TransparencyEvent } from '@exam-anti-cheat/contracts/exam';
+import type { TranscriptEntry, TransparencyEvent } from '@examguard/contracts/exam';
 
 const typeIcon: Record<TransparencyEvent['type'], string> = {
   HARDWARE: '🖥️',

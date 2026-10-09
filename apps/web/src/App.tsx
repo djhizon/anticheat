@@ -3,7 +3,7 @@ import type {
   ExamAssignmentListResponse,
   ExamAssignmentProjection,
   ExamDeliveryProjection,
-} from '@exam-anti-cheat/contracts/exam';
+} from '@examguard/contracts/exam';
 
 import { AccountButton } from './features/account/AccountPanel.js';
 import { ConfirmPage } from './features/account/ConfirmPage.js';
@@ -113,7 +113,7 @@ function InstructorWorkspace({
     <main className="workspace">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Exam Anti-Cheat</p>
+          <p className="eyebrow">ExamGuard</p>
           <p className="signed-in">Signed in as {email}</p>
         </div>
         <div className="topbar-actions">
@@ -491,7 +491,7 @@ function StudentWorkspace({
       <main className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Exam Anti-Cheat</p>
+            <p className="eyebrow">ExamGuard</p>
             <p className="signed-in">Signed in as {email}</p>
           </div>
           <div className="topbar-actions">

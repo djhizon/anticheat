@@ -1,6 +1,6 @@
-# 🏆 Hackathon Codebase Audit: Exam Anti-Cheat Platform
+# 🏆 Hackathon Codebase Audit: ExamGuard Platform
 
-> **Project**: `exam-anti-cheat` — A consent-first browser exam-integrity prototype for classroom research
+> **Project**: ExamGuard (baseline name `exam-anti-cheat`) — A consent-first browser exam-integrity prototype for classroom research
 > **Stack**: TypeScript monorepo · React (Vite) · Raw Node.js HTTP server · SQLite · Electron · Gemini AI · Whisper.cpp · TensorFlow.js · MediaPipe
 > **Source**: this repository (baseline commit)
 
@@ -327,7 +327,7 @@ npm run validate
 
 ### What to retheme/rename:
 
-- `exam-anti-cheat` → your project name
+- `exam-anti-cheat` → your project name (done: renamed to ExamGuard)
 - Exam-specific routes → your domain routes
 - Question types → your data model
 

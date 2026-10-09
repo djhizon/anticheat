@@ -11,7 +11,7 @@ import {
   problemFromError,
   type ProblemCode,
   type ProblemDetails,
-} from '@exam-anti-cheat/contracts';
+} from '@examguard/contracts';
 
 import { loadConfig, type ApiConfig } from './config.js';
 import { createAuthPlugin, type AuthPlugin, type AuthRequest } from './modules/auth/auth.plugin.js';

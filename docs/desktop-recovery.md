@@ -42,8 +42,8 @@ developer-tools menu commands remain available for troubleshooting.
 
 ```sh
 npx vitest run --config vitest.config.ts apps/desktop/src/main.test.ts apps/web/src/features/integrity/PreflightCheck.test.tsx apps/web/src/App.test.tsx apps/web/src/features/exam/StudentExamPage.render.test.tsx apps/web/src/features/exam/api.test.ts
-npm run build --workspace @exam-anti-cheat/desktop
-npm run build --workspace @exam-anti-cheat/web
+npm run build --workspace @examguard/desktop
+npm run build --workspace @examguard/web
 ```
 
 The focused tests cover the component and mocked native lifecycle, including

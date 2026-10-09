@@ -14,7 +14,7 @@ import type {
   ExamAnswerSaveResponse,
   ExamAnswerValue,
   ExamDeliveryProjection,
-} from '@exam-anti-cheat/contracts/exam';
+} from '@examguard/contracts/exam';
 
 import type { ExamApi } from './api.js';
 import { NativePhoneModal } from '../integrity/NativePhoneModal.js';

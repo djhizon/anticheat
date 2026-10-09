@@ -5,7 +5,7 @@ import type {
   InstructorCapabilities,
   IntegrityTimelineEntry,
   SimilarityRunResponse,
-} from '@exam-anti-cheat/contracts/exam';
+} from '@examguard/contracts/exam';
 
 import type { FetchLike } from '../auth/api.js';
 import type { CsrfTokenProvider } from '../exam/api.js';

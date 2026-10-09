@@ -6,7 +6,7 @@ filled by the team. Every answer matches [LOCAL_AI.md](LOCAL_AI.md) and
 
 ## Project name
 
-anticheat: consent-first exam integrity with on-device AI
+ExamGuard: consent-first exam integrity with on-device AI
 
 ## Short description
 
@@ -24,7 +24,7 @@ appbuildersph.com/hackathon.
 
 ## Public GitHub repository
 
-https://github.com/djhizon/anticheat
+https://github.com/djhizon/examguard
 
 ## Demo video
 
@@ -100,7 +100,7 @@ public demo link). None are needed for the core on-device features.
 
 ## Existing code and assets
 
-> Built on our own pre-existing prototype, `exam-anti-cheat` (written
+> Built on our own pre-existing prototype, then named `exam-anti-cheat` (written
 > 15–24 September 2026, before the hackathon). It is imported unchanged as the
 > first commit (`1c94abb`) so judges can diff every hackathon change against it.
 > Its known defects at import are listed in `docs/AUDIT.md`. Everything after

@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { ExamDeliveryProjection } from '@exam-anti-cheat/contracts/exam';
+import type { ExamDeliveryProjection } from '@examguard/contracts/exam';
 import type { ExamApi } from './api.js';
 import { StudentExamPage } from './StudentExamPage.js';
 

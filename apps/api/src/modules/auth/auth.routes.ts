@@ -1,4 +1,4 @@
-import { DomainError, problemFromError, type ProblemCode } from '@exam-anti-cheat/contracts';
+import { DomainError, problemFromError, type ProblemCode } from '@examguard/contracts';
 
 import type { ApiConfig } from '../../config.js';
 import { getCookie, isAllowedOrigin, issueCsrfToken } from './csrf.js';
@@ -23,7 +23,7 @@ const corsAllowedMethods = 'GET, POST, OPTIONS';
 const corsAllowedHeaders = 'Content-Type, X-CSRF-Token, X-Requested-With';
 const corsRequestMethods = new Set(['GET', 'POST']);
 const corsRequestHeaders = new Set(['content-type', 'x-csrf-token', 'x-requested-with']);
-const browserRequestSignal = 'exam-anti-cheat-browser';
+const browserRequestSignal = 'examguard-browser';
 const authPaths = new Set([
   '/auth/csrf',
   '/auth/register',

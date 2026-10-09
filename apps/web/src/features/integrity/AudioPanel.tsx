@@ -5,7 +5,7 @@ import { acquireBuiltInMicrophone } from './builtInMicrophone.js';
 import { createLevelMeter, METER_BARS, type LevelReading } from './audioLevel.js';
 import { appendLine, formatClock, type LogLine } from './transcriptLog.js';
 import { registerSubmitFlush } from './submitFlush.js';
-import { plural } from '@exam-anti-cheat/contracts';
+import { plural } from '@examguard/contracts';
 import { createVoiceReporter } from './voiceReporter.js';
 import type { ExamApi } from '../exam/api.js';
 

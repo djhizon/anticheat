@@ -1,5 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react';
-import { EVIDENCE_TRIGGERS, type EvidenceTrigger } from '@exam-anti-cheat/contracts/exam';
+import { EVIDENCE_TRIGGERS, type EvidenceTrigger } from '@examguard/contracts/exam';
 
 import type { CameraSnapshot } from '../integrity/cameraSession.js';
 import {

@@ -24,7 +24,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe('graph recording upload', () => {
   it('names segments <studentId>/<attemptId>/segment-<index>.webm', () => {
     expect(recordingSegmentPath('stu1', 'att1', 7)).toBe(
-      '/ExamAntiCheat/stu1/att1/segment-000007.webm',
+      '/ExamGuard/stu1/att1/segment-000007.webm',
     );
     expect(recordingSegmentPath('../x', 'a/b', 1)).not.toContain('..');
   });
@@ -43,7 +43,7 @@ describe('graph recording upload', () => {
     await uploadRecordingChunk(config, 'stu1', 'att1', 2, Buffer.from('abc'));
     const put = fetchMock.mock.calls.find(([, init]) => (init as RequestInit)?.method === 'PUT');
     expect(String(put?.[0])).toContain(
-      '/drive/root:/ExamAntiCheat/stu1/att1/segment-000002.webm:/content',
+      '/drive/root:/ExamGuard/stu1/att1/segment-000002.webm:/content',
     );
     expect(String(put?.[0])).toContain('@microsoft.graph.conflictBehavior=fail');
   });

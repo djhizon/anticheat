@@ -343,7 +343,7 @@ function buildAppMenu(): void {
   if (lockdown.isActive()) return; // The locked-down menu stays until lockdown ends.
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
-      { label: 'Exam Anti-Cheat', submenu: [{ role: 'quit' }] },
+      { label: 'ExamGuard', submenu: [{ role: 'quit' }] },
       {
         label: 'Mode',
         submenu: [
@@ -405,7 +405,7 @@ export async function createWindow(): Promise<void> {
       sandbox: true,
       webviewTag: false,
     },
-    title: 'Exam Anti-Cheat',
+    title: 'ExamGuard',
   });
 
   mainWindow.maximize();
@@ -680,7 +680,7 @@ async function startLocalServer(): Promise<boolean> {
         cwd: options.cwd,
         env: options.env,
         stdio: 'pipe',
-        serviceName: 'Exam Anti-Cheat server',
+        serviceName: 'ExamGuard server',
       }),
     // The Electron fuses disable ELECTRON_RUN_AS_NODE in packaged builds: utility process only.
     ...(app.isPackaged ? {} : { forkNode: (entry, options) => nodeChildProcess(entry, options) }),
@@ -716,7 +716,7 @@ export function reportStartupFailure(error: unknown): void {
   diagnostic('startup-failed', error instanceof Error ? error.name : 'unknown');
   try {
     dialog.showErrorBox(
-      'Exam Anti-Cheat could not start',
+      'ExamGuard could not start',
       'The application failed to start. Diagnostics were written to the logs folder. The application will now quit.',
     );
   } catch {

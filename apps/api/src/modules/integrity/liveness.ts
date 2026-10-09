@@ -1,4 +1,4 @@
-import { plural } from '@exam-anti-cheat/contracts';
+import { plural } from '@examguard/contracts';
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 
 export const CHALLENGE_TTL_MS = 90_000;

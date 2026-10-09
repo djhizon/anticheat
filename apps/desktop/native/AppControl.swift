@@ -57,7 +57,7 @@ func isTemporaryExempt(_ bundleId: String, demo: Bool) -> Bool {
     return demo && temporaryExemptions.contains(bundleId)
 }
 let protectedIds = baselineExemptions.union([
-    "com.googlecode.iterm2", "com.exam-anti-cheat.desktop"
+    "com.googlecode.iterm2", "com.examguard.desktop"
 ])
 
 func identity(_ app: NSRunningApplication) -> Identity? {

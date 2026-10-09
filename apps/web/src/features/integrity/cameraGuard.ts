@@ -1,4 +1,4 @@
-import { VIRTUAL_CAMERA_LABEL } from '@exam-anti-cheat/contracts/exam';
+import { VIRTUAL_CAMERA_LABEL } from '@examguard/contracts/exam';
 
 const CAPTURE_DEVICE_LABEL = /elgato|avermedia|cam link|capture|blackmagic|magewell|hdmi/i;
 

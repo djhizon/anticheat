@@ -193,7 +193,7 @@ describe('startRuntime', () => {
     });
     expect(await startRuntime(deps)).toBeNull();
     expect(forkUtility).not.toHaveBeenCalled();
-    expect(String(showError.mock.calls[0]?.[0])).toContain('previous Exam Anti-Cheat server');
+    expect(String(showError.mock.calls[0]?.[0])).toContain('previous ExamGuard server');
   });
 
   it('retries with plain Node mode when the utility process exits early', async () => {

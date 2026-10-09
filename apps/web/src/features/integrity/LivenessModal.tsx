@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { LivenessColour, LivenessTurnDirection } from '@exam-anti-cheat/contracts/exam';
+import type { LivenessColour, LivenessTurnDirection } from '@examguard/contracts/exam';
 
 import type { ExamApi, LivenessChallenge } from '../exam/api.js';
 import { captureHeadTurn, withTimeout } from './headTurn.js';

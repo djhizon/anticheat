@@ -1,6 +1,6 @@
-import { plural } from '@exam-anti-cheat/contracts';
+import { plural } from '@examguard/contracts';
 import { useState } from 'react';
-import type { AiCheckRunResponse } from '@exam-anti-cheat/contracts/exam';
+import type { AiCheckRunResponse } from '@examguard/contracts/exam';
 
 import type { InstructorApi } from './api.js';
 import { NEEDS_GEMINI_HINT, QuestionPicker, useInstructorQuestions } from './QuestionPicker.js';

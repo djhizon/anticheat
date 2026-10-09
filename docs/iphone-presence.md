@@ -237,8 +237,8 @@ Automated checks:
 
 ```sh
 npx vitest run --config vitest.config.ts apps/api/src/modules/exam/exam.test.ts apps/api/src/db/migrate.test.ts apps/web/src/features/integrity/nativePhoneUrl.test.ts apps/web/src/features/integrity/usePhonePresence.test.tsx apps/web/src/features/exam/api.test.ts apps/web/src/features/exam/StudentExamPage.render.test.tsx
-npm run typecheck --workspace @exam-anti-cheat/api
-npm run build --workspace @exam-anti-cheat/web
+npm run typecheck --workspace @examguard/api
+npm run build --workspace @examguard/web
 cd apps/ios
 swift test
 xcodegen generate --spec project.yml

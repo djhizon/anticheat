@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Clock } from '@exam-anti-cheat/contracts';
+import type { Clock } from '@examguard/contracts';
 
 import { loadConfig } from '../../config.js';
 import { createAuthPlugin, type AuthPlugin } from './auth.plugin.js';

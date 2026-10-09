@@ -1,15 +1,15 @@
 {
-  "name": "@exam-anti-cheat/desktop",
+  "name": "@examguard/desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Exam Anti-Cheat: a local-first proctored exam app with transparent integrity monitoring.",
+  "description": "ExamGuard: a local-first proctored exam app with transparent integrity monitoring.",
   "author": "Dustin Hizon",
-  "homepage": "https://github.com/djhizon/anticheat",
+  "homepage": "https://github.com/djhizon/examguard",
   "main": "dist/main.js",
   "scripts": {
     "dev": "npm run build && electron dist/main.js --use-dev-servers",
     "start": "npm run build:server && npm run build && electron dist/main.js",
-    "build:server": "cd ../.. && npm run build --workspace @exam-anti-cheat/web && npm run build:bundle --workspace @exam-anti-cheat/api",
+    "build:server": "cd ../.. && npm run build --workspace @examguard/web && npm run build:bundle --workspace @examguard/api",
     "build": "tsc && node scripts/build-native.cjs",
     "pack:builder": "electron-builder --mac --x64",
     "pack:judge": "electron-builder --mac --x64 -c.extraMetadata.examJudgeBuild=true",
@@ -23,11 +23,11 @@
     "typescript": "^5.8.0"
   },
   "build": {
-    "appId": "com.exam-anti-cheat.desktop",
+    "appId": "com.examguard.desktop",
     "npmRebuild": false,
     "electronVersion": "44.4.1",
     "electronDist": "../../node_modules/electron/dist",
-    "productName": "Exam Anti-Cheat",
+    "productName": "ExamGuard",
     "extraResources": [
       {
         "from": "native-bin/app-control",
@@ -93,7 +93,7 @@
     "compression": "maximum",
     "afterPack": "scripts/adhoc-sign.cjs",
     "dmg": {
-      "title": "Install Exam Anti-Cheat",
+      "title": "Install ExamGuard",
       "icon": "assets/icon.icns",
       "iconSize": 112,
       "window": {

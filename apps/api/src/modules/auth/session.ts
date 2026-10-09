@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
-import type { Clock, Opaque, UserId } from '@exam-anti-cheat/contracts';
+import type { Clock, Opaque, UserId } from '@examguard/contracts';
 
 import type { NewSessionRecord, SessionRecord, SqliteAuthRepository } from './auth.repository.js';
 

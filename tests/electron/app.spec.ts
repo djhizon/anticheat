@@ -23,7 +23,7 @@ const fakeMedia = ['--use-fake-ui-for-media-stream', '--use-fake-device-for-medi
 function packagedBinary(): string {
   return (
     process.env.EAC_PACKAGED_APP ??
-    join(root, 'apps/desktop/release/mac/Exam Anti-Cheat.app/Contents/MacOS/Exam Anti-Cheat')
+    join(root, 'apps/desktop/release/mac/ExamGuard.app/Contents/MacOS/ExamGuard')
   );
 }
 
@@ -45,7 +45,7 @@ const targets: Target[] = [
       existsSync(join(root, 'apps/api/dist/api-server.mjs')) &&
       existsSync(join(root, 'apps/web/dist/index.html'))
         ? null
-        : 'run npm run build:server and npm run build --workspace @exam-anti-cheat/desktop',
+        : 'run npm run build:server and npm run build --workspace @examguard/desktop',
     launch: (userData) => ({
       args: [join(root, 'apps/desktop/dist/main.js'), `--user-data-dir=${userData}`, ...fakeMedia],
       // Unpackaged builds are not the judge build; this test-only flag makes it behave like one.

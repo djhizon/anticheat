@@ -26,7 +26,7 @@ COPY packages/contracts/package.json packages/contracts/
 RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run vision:prepare \
- && npm run build --workspace @exam-anti-cheat/web
+ && npm run build --workspace @examguard/web
 
 # ---- runtime ------------------------------------------------------------------
 FROM node:24-bookworm-slim AS runtime
@@ -40,7 +40,7 @@ COPY apps/web/package.json apps/web/
 COPY apps/desktop/package.json apps/desktop/
 COPY packages/contracts/package.json packages/contracts/
 # Only the API (vite-node) and contracts dependencies; no Electron/Playwright.
-RUN npm ci --no-audit --no-fund --workspace @exam-anti-cheat/api --workspace @exam-anti-cheat/contracts \
+RUN npm ci --no-audit --no-fund --workspace @examguard/api --workspace @examguard/contracts \
  && npm cache clean --force
 COPY tsconfig.base.json ./
 COPY apps/api/tsconfig.json apps/api/

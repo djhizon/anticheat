@@ -126,7 +126,7 @@ operation, model accuracy, or real phone reachability.
 ```sh
 npx vitest run --config vitest.config.ts apps/web/src/features/integrity apps/web/src/features/companion apps/web/src/features/exam/api.test.ts apps/api/src/modules/exam apps/api/src/modules/integrity/whisper.test.ts scripts/lan-config.test.ts
 npx tsc -p apps/api/tsconfig.json --pretty false
-npm run build --workspace @exam-anti-cheat/web
+npm run build --workspace @examguard/web
 ```
 
 The full web typecheck still has existing failures in `SimilarityDashboard`,

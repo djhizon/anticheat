@@ -69,12 +69,12 @@ export function recordingSegmentPath(
   segmentIndex: number,
 ): string {
   const padded = segmentIndex.toString().padStart(6, '0');
-  return `/ExamAntiCheat/${safeSegment(studentId)}/${safeSegment(attemptId)}/segment-${padded}.webm`;
+  return `/ExamGuard/${safeSegment(studentId)}/${safeSegment(attemptId)}/segment-${padded}.webm`;
 }
 
 /**
  * Uploads one recording segment to the target user's OneDrive under:
- * /ExamAntiCheat/{studentId}/{attemptId}/segment-{index}.webm
+ * /ExamGuard/{studentId}/{attemptId}/segment-{index}.webm
  */
 export async function uploadRecordingChunk(
   config: ApiConfig,

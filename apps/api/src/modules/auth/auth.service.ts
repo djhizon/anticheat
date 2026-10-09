@@ -4,7 +4,7 @@ import {
   type Clock,
   type UserId,
   type UserRole,
-} from '@exam-anti-cheat/contracts';
+} from '@examguard/contracts';
 
 import { hashPassword, verifyPassword } from './password.js';
 import {

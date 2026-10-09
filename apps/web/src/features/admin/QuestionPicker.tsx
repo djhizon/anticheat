@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { InstructorExamVersion } from '@exam-anti-cheat/contracts/exam';
+import type { InstructorExamVersion } from '@examguard/contracts/exam';
 
 import type { InstructorApi } from './api.js';
 

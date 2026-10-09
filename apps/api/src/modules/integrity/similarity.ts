@@ -3,7 +3,7 @@
  * Run post-exam by instructor. Clusters answers per question and flags close pairs.
  */
 
-import type { SimilarityPair, SimilarityReportResponse } from '@exam-anti-cheat/contracts/exam';
+import type { SimilarityPair, SimilarityReportResponse } from '@examguard/contracts/exam';
 
 import type { GeminiRotatingClient } from './gemini.js';
 

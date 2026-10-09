@@ -59,7 +59,7 @@ Recording follow-up: Electron now provides an explicit, cancel-first screen choo
 for click-initiated requests from the trusted main frame. Concurrent requests and
 navigation during selection are denied. No system audio is granted. The desktop
 must be rebuilt; refreshing Vite cannot update its main process. The separate
-`apps/desktop/out-recording-fix/mac/Exam Anti-Cheat.app` development package is
+`apps/desktop/out-recording-fix/mac/ExamGuard.app` development package is
 unsigned. The integrity/desktop targeted suite passed 63 tests, then the added
 concurrency test passed with all 9 desktop tests. Desktop and web builds passed;
 screen capture and downloaded-file playback still require user validation.
@@ -68,8 +68,8 @@ screen capture and downloaded-file playback still require user validation.
 
 ```sh
 npx vitest run --config vitest.config.ts apps/web/src/features/integrity apps/web/src/features/exam/api.test.ts apps/web/src/features/exam/StudentExamPage.render.test.tsx apps/api/src/modules/exam/exam.test.ts apps/api/src/modules/integrity/whisper.test.ts apps/api/src/modules/integrity/integrityService.test.ts
-npm run typecheck --workspace @exam-anti-cheat/api
-npm run build --workspace @exam-anti-cheat/web
+npm run typecheck --workspace @examguard/api
+npm run build --workspace @examguard/web
 git diff --check
 ```
 

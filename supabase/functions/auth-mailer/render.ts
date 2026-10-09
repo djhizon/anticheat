@@ -20,12 +20,12 @@ export interface OutgoingEmail {
 }
 
 const kinds: Record<string, { template: keyof typeof templates; subject: string }> = {
-  signup: { template: 'confirm-signup', subject: 'Confirm your anticheat email' },
-  recovery: { template: 'reset-password', subject: 'Reset your anticheat password' },
-  invite: { template: 'invite', subject: "You're invited to anticheat" },
-  magiclink: { template: 'magic-link', subject: 'Your anticheat sign-in link' },
-  email_change: { template: 'change-email', subject: 'Confirm your new anticheat email' },
-  reauthentication: { template: 'reauthentication', subject: 'Your anticheat verification code' },
+  signup: { template: 'confirm-signup', subject: 'Confirm your ExamGuard email' },
+  recovery: { template: 'reset-password', subject: 'Reset your ExamGuard password' },
+  invite: { template: 'invite', subject: "You're invited to ExamGuard" },
+  magiclink: { template: 'magic-link', subject: 'Your ExamGuard sign-in link' },
+  email_change: { template: 'change-email', subject: 'Confirm your new ExamGuard email' },
+  reauthentication: { template: 'reauthentication', subject: 'Your ExamGuard verification code' },
 };
 
 function escapeHtml(value: string): string {

@@ -1,7 +1,4 @@
-import {
-  INTEGRITY_TIMELINE_SOURCES,
-  type IntegrityTimelineEntry,
-} from '@exam-anti-cheat/contracts/exam';
+import { INTEGRITY_TIMELINE_SOURCES, type IntegrityTimelineEntry } from '@examguard/contracts/exam';
 
 import type { FetchLike } from '../auth/api.js';
 

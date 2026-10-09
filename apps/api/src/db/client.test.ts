@@ -15,7 +15,7 @@ afterEach(() => {
 
 describe('database client', () => {
   it('creates the configured parent for a nested filesystem database', () => {
-    const temporaryDirectory = mkdtempSync(join(tmpdir(), 'exam-anti-cheat-db-'));
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), 'examguard-db-'));
     temporaryDirectories.push(temporaryDirectory);
     const databasePath = join(temporaryDirectory, 'nested', 'state.sqlite');
 
@@ -32,7 +32,7 @@ describe('database client', () => {
 
   it('preserves in-memory and SQLite URI database behavior', () => {
     const memoryDatabase = openDatabase(':memory:');
-    const uriDatabase = openDatabase('file:exam-anti-cheat-shared?mode=memory&cache=shared');
+    const uriDatabase = openDatabase('file:examguard-shared?mode=memory&cache=shared');
 
     try {
       expect(

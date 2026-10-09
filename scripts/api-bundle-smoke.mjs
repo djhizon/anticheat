@@ -14,7 +14,7 @@ const bundle = resolve(root, 'apps/api/dist/api-server.mjs');
 const runtime = process.env.SMOKE_NODE || process.execPath;
 console.log(`Smoke runtime: ${runtime}`);
 if (!existsSync(bundle)) {
-  console.error('Missing bundle; run `npm run build:bundle --workspace @exam-anti-cheat/api`.');
+  console.error('Missing bundle; run `npm run build:bundle --workspace @examguard/api`.');
   process.exit(1);
 }
 

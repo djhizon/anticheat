@@ -343,13 +343,11 @@ if (typeof __DESKTOP_BUNDLE__ !== 'undefined' && __DESKTOP_BUNDLE__) {
   startDesktopServer({ env: process.env, cwd: process.cwd() }).then(
     (started) => {
       server = started;
-      console.log(
-        `exam-anti-cheat desktop server ready: api ${started.apiPort}, web ${started.webPort}`,
-      );
+      console.log(`ExamGuard desktop server ready: api ${started.apiPort}, web ${started.webPort}`);
     },
     (error: unknown) => {
       console.error(
-        'exam-anti-cheat desktop server failed:',
+        'ExamGuard desktop server failed:',
         error instanceof Error ? error.message : error,
       );
       process.exit(1);

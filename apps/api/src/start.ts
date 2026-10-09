@@ -18,7 +18,7 @@ const shutdown = (): void => {
       process.exitCode = 0;
     },
     () => {
-      console.error('exam-anti-cheat API shutdown failed.');
+      console.error('ExamGuard API shutdown failed.');
       process.exitCode = 1;
     },
   );
@@ -29,13 +29,13 @@ process.once('SIGTERM', shutdown);
 
 void application.start(undefined, process.env.HOST?.trim() || undefined).then(
   (address) => {
-    console.log(`exam-anti-cheat API listening on http://${address.address}:${address.port}`);
+    console.log(`ExamGuard API listening on http://${address.address}:${address.port}`);
   },
   (err) => {
-    console.error('exam-anti-cheat API startup failed.', err);
+    console.error('ExamGuard API startup failed.', err);
     process.exitCode = 1;
     void application.stop().catch(() => {
-      console.error('exam-anti-cheat API cleanup after startup failure failed.');
+      console.error('ExamGuard API cleanup after startup failure failed.');
     });
   },
 );

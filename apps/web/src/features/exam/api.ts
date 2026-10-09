@@ -13,7 +13,7 @@ import type {
   TranscriptEntry,
   EvidenceSnapshotMeta,
   EvidenceUploadRequest,
-} from '@exam-anti-cheat/contracts/exam';
+} from '@examguard/contracts/exam';
 
 import type { FetchLike } from '../auth/api.js';
 import {

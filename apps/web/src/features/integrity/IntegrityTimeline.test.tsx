@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { IntegrityTimelineEntry } from '@exam-anti-cheat/contracts/exam';
+import type { IntegrityTimelineEntry } from '@examguard/contracts/exam';
 
 import { AUTO_REFRESH_MS, IntegrityTimeline, summarizeSource } from './IntegrityTimeline.js';
 import { TransparencyReport } from './TransparencyReport.js';

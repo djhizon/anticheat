@@ -1,4 +1,4 @@
-import type { InputBehaviourEvent, InputBehaviourWindow } from '@exam-anti-cheat/contracts/exam';
+import type { InputBehaviourEvent, InputBehaviourWindow } from '@examguard/contracts/exam';
 
 import {
   INPUT_THRESHOLDS,

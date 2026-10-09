@@ -1,6 +1,6 @@
-# anticheat — consent-first exam integrity
+# ExamGuard — consent-first exam integrity
 
-[![CI](https://github.com/djhizon/anticheat/actions/workflows/ci.yml/badge.svg)](https://github.com/djhizon/anticheat/actions/workflows/ci.yml)
+[![CI](https://github.com/djhizon/examguard/actions/workflows/ci.yml/badge.svg)](https://github.com/djhizon/examguard/actions/workflows/ci.yml)
 
 A browser + desktop exam platform that helps instructors keep online exams
 honest **without treating students as suspects**. Students see exactly what is
@@ -95,7 +95,7 @@ No Node setup? `docker compose up --build`, then open http://localhost:8080 (see
 Requires Node ≥ 24.7 (see `.nvmrc`). From a fresh clone:
 
 ```bash
-git clone https://github.com/djhizon/anticheat.git && cd anticheat
+git clone https://github.com/djhizon/examguard.git && cd examguard
 npm run demo
 ```
 

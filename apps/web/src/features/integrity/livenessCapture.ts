@@ -1,4 +1,4 @@
-import type { LivenessColour, LivenessRgb } from '@exam-anti-cheat/contracts/exam';
+import type { LivenessColour, LivenessRgb } from '@examguard/contracts/exam';
 
 import type { Box } from './gazeEstimator.js';
 import { acquirePhysicalCamera } from './physicalCamera.js';

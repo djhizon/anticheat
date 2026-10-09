@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 
-import { DomainError } from '@exam-anti-cheat/contracts';
+import { DomainError } from '@examguard/contracts';
 import type { GeminiRotatingClient } from './gemini.js';
 import type { InputWindowRow, IntegrityRepository } from './integrityRepository.js';
 import {
@@ -26,7 +26,7 @@ import {
   EVIDENCE_MAX_PER_ATTEMPT,
   EVIDENCE_MIN_GAP_MS,
   VIRTUAL_CAMERA_LABEL,
-} from '@exam-anti-cheat/contracts/exam';
+} from '@examguard/contracts/exam';
 import type {
   InstructorAttemptSummary,
   IntegrityTimelineEntry,
@@ -39,7 +39,7 @@ import type {
   InstructorExamVersion,
   SimilarityRunResponse,
   TransparencyEvent,
-} from '@exam-anti-cheat/contracts/exam';
+} from '@examguard/contracts/exam';
 import { friendlyVisionLabel } from './visionLabels.js';
 import { buildTimeline } from './timeline.js';
 
@@ -427,7 +427,7 @@ export class IntegrityService {
     const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(); // 8h
     this.repo.insertPhoneEnrollment(attemptId, token);
     // QR data encodes a deep-link that the exam mobile companion app would open
-    const qrData = `exam-anti-cheat://enroll?token=${token}&attemptId=${attemptId}`;
+    const qrData = `examguard://enroll?token=${token}&attemptId=${attemptId}`;
     return { token, qrData, expiresAt };
   }
 

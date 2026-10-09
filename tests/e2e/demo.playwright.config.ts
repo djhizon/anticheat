@@ -45,7 +45,7 @@ export default defineConfig({
     },
     {
       command:
-        'npm run vision:prepare && npm run dev --workspace @exam-anti-cheat/web -- --config ../../tests/e2e/vite.e2e.config.ts',
+        'npm run vision:prepare && npm run dev --workspace @examguard/web -- --config ../../tests/e2e/vite.e2e.config.ts',
       cwd: '../..',
       url: `http://127.0.0.1:${webPort}/`,
       reuseExistingServer: false,

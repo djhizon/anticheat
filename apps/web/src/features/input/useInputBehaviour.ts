@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { InputBehaviourEvent, InputBehaviourWindow } from '@exam-anti-cheat/contracts/exam';
+import type { InputBehaviourEvent, InputBehaviourWindow } from '@examguard/contracts/exam';
 
 import { EVIDENCE_TRIGGER_EVENT } from '../evidence/useEvidenceCapture.js';
 import { createInputBehaviourCollector } from './inputCollector.js';

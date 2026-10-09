@@ -4,7 +4,7 @@ import {
   type AttemptId,
   type Opaque,
   type ProblemCode,
-} from '@exam-anti-cheat/contracts';
+} from '@examguard/contracts';
 
 import type { ApiConfig } from '../../config.js';
 import {
@@ -13,7 +13,7 @@ import {
   type ExamAnswerSaveRequest,
   type ExamSubmitRequest,
   type IntegrityTimelineSource,
-} from '@exam-anti-cheat/contracts/exam';
+} from '@examguard/contracts/exam';
 import { headerValue, type AuthRequest, type AuthRequestBoundary } from '../auth/auth.plugin.js';
 import { isAllowedOrigin } from '../auth/csrf.js';
 import { ExamService } from './exam.service.js';
@@ -34,7 +34,7 @@ import {
   EVIDENCE_TRIGGERS,
   type EvidenceSource,
   type EvidenceTrigger,
-} from '@exam-anti-cheat/contracts/exam';
+} from '@examguard/contracts/exam';
 import type { PhonePresenceService } from '../integrity/phonePresence.js';
 import type { VisionResult } from '../integrity/backendVision.js';
 import { timelineToCsv } from '../integrity/timeline.js';

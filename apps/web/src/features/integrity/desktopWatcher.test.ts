@@ -27,15 +27,15 @@ it('forwards only changed, suspicious snapshots for the current attempt', () => 
   const stop = startDesktopWatcher(bridge, 'a1', send);
   expect(bridge.startWatcher).toHaveBeenCalledWith('a1');
 
-  emit({ attemptId: 'a1', foregroundApp: 'Exam Anti-Cheat', displayCount: 1 });
+  emit({ attemptId: 'a1', foregroundApp: 'ExamGuard', displayCount: 1 });
   emit({ attemptId: 'a1', foregroundApp: 'Discord', displayCount: 1 });
   emit({ attemptId: 'a1', foregroundApp: 'Discord', displayCount: 1 });
   emit({ attemptId: 'other', foregroundApp: 'Slack', displayCount: 1 });
-  emit({ attemptId: 'a1', foregroundApp: 'Exam Anti-Cheat', displayCount: 2 });
+  emit({ attemptId: 'a1', foregroundApp: 'ExamGuard', displayCount: 2 });
 
   expect(send.mock.calls).toEqual([
     [{ foregroundApp: 'Discord', displayCount: 1 }],
-    [{ foregroundApp: 'Exam Anti-Cheat', displayCount: 2 }],
+    [{ foregroundApp: 'ExamGuard', displayCount: 2 }],
   ]);
   stop();
   expect(bridge.stopWatcher).toHaveBeenCalled();
@@ -49,7 +49,7 @@ it('reports each capture-like display once', () => {
   startDesktopWatcher(bridge, 'a1', send);
   const snap = {
     attemptId: 'a1',
-    foregroundApp: 'Exam Anti-Cheat',
+    foregroundApp: 'ExamGuard',
     displayCount: 2,
     captureDisplays: ['Elgato HD60'],
   };
@@ -66,7 +66,7 @@ it('flags a Demo-mode attempt once, and never flags Strict', () => {
   const { bridge, emit } = fakeBridge();
   const send = vi.fn(async (_body: Record<string, unknown>) => ({}));
   startDesktopWatcher(bridge, 'a1', send);
-  const snap = { attemptId: 'a1', foregroundApp: 'Exam Anti-Cheat', displayCount: 1 };
+  const snap = { attemptId: 'a1', foregroundApp: 'ExamGuard', displayCount: 1 };
   emit({ ...snap, runMode: 'strict' });
   expect(send).not.toHaveBeenCalled();
   emit({ ...snap, runMode: 'demo' });

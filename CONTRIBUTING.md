@@ -1,4 +1,4 @@
-# Contributing to exam-anti-cheat
+# Contributing to ExamGuard
 
 This repository is an advanced exam integrity enforcement platform.
 

@@ -7,7 +7,7 @@ import {
   type ExamId,
   type Opaque,
   type UserId,
-} from '@exam-anti-cheat/contracts';
+} from '@examguard/contracts';
 import type {
   ExamAnswerSaveRequest,
   ExamAnswerSaveResponse,
@@ -24,7 +24,7 @@ import type {
   ExamAnswerValue,
   ExamGenerationResponse,
   ExamGenerationSource,
-} from '@exam-anti-cheat/contracts/exam';
+} from '@examguard/contracts/exam';
 
 import type { TokenGenerator } from '../auth/session.js';
 import {

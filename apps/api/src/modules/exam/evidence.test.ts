@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { Clock, UserId } from '@exam-anti-cheat/contracts';
+import type { Clock, UserId } from '@examguard/contracts';
 import {
   EVIDENCE_MAX_BYTES,
   EVIDENCE_MAX_PER_ATTEMPT,
   EVIDENCE_TRIGGERS,
   type ExamDeliveryResponse,
-} from '@exam-anti-cheat/contracts/exam';
+} from '@examguard/contracts/exam';
 
 import { loadConfig, type ApiConfig } from '../../config.js';
 import { createAuthPlugin, type AuthPlugin, type AuthRequest } from '../auth/auth.plugin.js';

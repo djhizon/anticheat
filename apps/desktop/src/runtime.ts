@@ -222,16 +222,16 @@ export async function startRuntime(deps: RuntimeDeps): Promise<RuntimeHandle | n
       // The API port (3000) does not carry the marker; the web port does and both belong together.
       const stale = await (deps.isOurServer ?? probeOurServer)(WEB_PORT).catch(() => false);
       if (stale) {
-        deps.log(`Port ${port} is held by a stale Exam Anti-Cheat server.`);
+        deps.log(`Port ${port} is held by a stale ExamGuard server.`);
         await deps.showError(
-          'A previous Exam Anti-Cheat server is still running',
-          `A server from an earlier run of Exam Anti-Cheat (for example after a crash) is still using port ${port} on 127.0.0.1. Quit "Exam Anti-Cheat" in Activity Monitor (or restart your Mac) and open the app again.`,
+          'A previous ExamGuard server is still running',
+          `A server from an earlier run of ExamGuard (for example after a crash) is still using port ${port} on 127.0.0.1. Quit "ExamGuard" in Activity Monitor (or restart your Mac) and open the app again.`,
         );
         return null;
       }
       await deps.showError(
         `Port ${port} is already in use`,
-        `Exam Anti-Cheat needs port ${port} on 127.0.0.1, but another program is using it. Close that program (for example a development server) and open the app again.`,
+        `ExamGuard needs port ${port} on 127.0.0.1, but another program is using it. Close that program (for example a development server) and open the app again.`,
       );
       return null;
     }

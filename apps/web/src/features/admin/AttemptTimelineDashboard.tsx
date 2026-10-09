@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { InstructorAttemptSummary } from '@exam-anti-cheat/contracts/exam';
+import type { InstructorAttemptSummary } from '@examguard/contracts/exam';
 
 import { IntegrityTimeline } from '../integrity/IntegrityTimeline.js';
 import { EvidenceGallery } from '../evidence/EvidenceGallery.js';

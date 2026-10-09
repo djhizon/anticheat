@@ -36,7 +36,7 @@ for (const mode of ['success', 'reject', 'hang', 'malformed', 'blocked'] as cons
                     : [
                         {
                           id: 'fixture',
-                          name: mode === 'blocked' ? 'Notes' : 'Exam Anti-Cheat',
+                          name: mode === 'blocked' ? 'Notes' : 'ExamGuard',
                           exempt: mode !== 'blocked',
                           protected: mode !== 'blocked',
                           reason: '',

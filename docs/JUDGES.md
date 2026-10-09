@@ -1,11 +1,11 @@
 # Judge install guide (macOS)
 
-Exam Anti-Cheat ships as an unsigned macOS disk image. Everything runs locally on your Mac; no
+ExamGuard ships as an unsigned macOS disk image. Everything runs locally on your Mac; no
 account with us and no internet connection is needed to try it.
 
 ## What you'll see
 
-1. Opening the disk image shows a window titled **Install Exam Anti-Cheat** with the app icon (a
+1. Opening the disk image shows a window titled **Install ExamGuard** with the app icon (a
    blue shield with a check mark) next to an **Applications** shortcut. Drag the icon onto it.
 2. The first time you open the app, macOS shows a Gatekeeper warning because the app is not
    notarized. Follow the [First launch](#first-launch-gatekeeper-the-app-is-not-notarized) steps
@@ -22,8 +22,8 @@ account with us and no internet connection is needed to try it.
 
 ## Install
 
-1. Download `Exam Anti-Cheat-0.1.0.dmg` and open it.
-2. Drag **Exam Anti-Cheat** onto the **Applications** folder. Do this before the first launch;
+1. Download `ExamGuard-0.1.0.dmg` and open it.
+2. Drag **ExamGuard** onto the **Applications** folder. Do this before the first launch;
    running it from the disk image or Downloads breaks the Gatekeeper steps below.
 3. Eject the disk image, then open the app from Applications.
 
@@ -33,20 +33,20 @@ The app is ad-hoc signed but has no Apple Developer ID, so macOS blocks the firs
 
 **macOS 13 and 14**
 
-1. In Applications, right-click (or Control-click) **Exam Anti-Cheat** and choose **Open**.
+1. In Applications, right-click (or Control-click) **ExamGuard** and choose **Open**.
 2. In the dialog, click **Open**. You only need to do this once.
 
 **macOS 15 and newer** (the right-click shortcut no longer bypasses the check)
 
 1. Open the app once and dismiss the "cannot be opened" dialog (click **Done**).
 2. Open **System Settings > Privacy & Security**, scroll to the Security section, and click
-   **Open Anyway** next to "Exam Anti-Cheat".
+   **Open Anyway** next to "ExamGuard".
 3. Confirm with your password or Touch ID, then click **Open**.
 
 **Fallback (any version):** remove the quarantine flag in Terminal, then open the app normally.
 
 ```sh
-xattr -dr com.apple.quarantine "/Applications/Exam Anti-Cheat.app"
+xattr -dr com.apple.quarantine "/Applications/ExamGuard.app"
 ```
 
 ## Permissions macOS will ask for
@@ -94,4 +94,4 @@ These are the defaults from `apps/api/src/demoSeed.ts`.
 ## Troubleshooting
 
 - "Port 3000/5173 is already in use": quit whatever is using it and reopen the app.
-- Server log: `~/Library/Application Support/@exam-anti-cheat/desktop/logs/api.log`.
+- Server log: `~/Library/Application Support/@examguard/desktop/logs/api.log`.

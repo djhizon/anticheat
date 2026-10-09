@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-import { SystemClock, type Clock } from '@exam-anti-cheat/contracts';
+import { SystemClock, type Clock } from '@examguard/contracts';
 
 import type { ApiConfig } from '../../config.js';
 import type { AuthRequestBoundary } from '../auth/auth.plugin.js';

@@ -1,4 +1,4 @@
-import type { EvidenceSnapshotMeta, EvidenceUploadRequest } from '@exam-anti-cheat/contracts/exam';
+import type { EvidenceSnapshotMeta, EvidenceUploadRequest } from '@examguard/contracts/exam';
 
 import type { FetchLike } from '../auth/api.js';
 

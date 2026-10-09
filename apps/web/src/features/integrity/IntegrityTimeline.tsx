@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { plural } from '@exam-anti-cheat/contracts';
+import { plural } from '@examguard/contracts';
 import {
   INTEGRITY_TIMELINE_SOURCES,
   type IntegrityTimelineEntry,
   type IntegrityTimelineSource,
-} from '@exam-anti-cheat/contracts/exam';
+} from '@examguard/contracts/exam';
 
 import type { IntegrityTimelineApi, TimelineFormat } from './timelineApi.js';
 

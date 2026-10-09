@@ -112,7 +112,7 @@ export class AuthApiError extends Error {
 
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-const browserRequestSignal = 'exam-anti-cheat-browser';
+const browserRequestSignal = 'examguard-browser';
 
 export interface AuthApi {
   getCsrf(): Promise<CsrfResponse>;

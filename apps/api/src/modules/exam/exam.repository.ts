@@ -8,8 +8,8 @@ import type {
   QuestionOption,
   QuestionType,
   QuestionVersionId,
-} from '@exam-anti-cheat/contracts/exam';
-import type { AttemptId, ExamId, Opaque, UserId, UserRole } from '@exam-anti-cheat/contracts';
+} from '@examguard/contracts/exam';
+import type { AttemptId, ExamId, Opaque, UserId, UserRole } from '@examguard/contracts';
 
 export type ExamVersionStatus = 'draft' | 'published';
 
