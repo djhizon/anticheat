@@ -23,6 +23,7 @@ import {
 } from '../integrity/graph.js';
 import type { PhonePresenceService } from '../integrity/phonePresence.js';
 import type { VisionResult } from '../integrity/backendVision.js';
+import { isFlaggableVisionLabel, visionFlagName } from '../integrity/visionLabels.js';
 
 export type ExamResponseHeaderValue = string | readonly string[];
 
@@ -45,6 +46,7 @@ const audioPattern = /^\/exam\/attempts\/([^/]+)\/audio$/u;
 const livChallengePattern = /^\/exam\/attempts\/([^/]+)\/liveness-challenge$/u;
 const livVerifyPattern = /^\/exam\/attempts\/([^/]+)\/liveness-verify$/u;
 const eventsPattern = /^\/exam\/attempts\/([^/]+)\/events$/u;
+const visionStatusPath = '/exam/vision-status';
 const visionPattern = /^\/exam\/attempts\/([^/]+)\/vision-check$/u;
 const telemetryPattern = /^\/exam\/attempts\/([^/]+)\/telemetry$/u;
 const transpPattern = /^\/exam\/attempts\/([^/]+)\/transparency$/u;
@@ -59,6 +61,11 @@ const MAX_RECORDING_TOTAL_BYTES = 1_500_000_000;
 /** Recording route: one segment per 2 s sustained, bursts of 5, per student. */
 const RECORDING_REFILL_MS = 2000;
 const RECORDING_BURST = 5;
+/** Vision check: OWL-ViT costs ~8 s per frame, so 1 per 10 s sustained, burst of 2, per student. */
+const VISION_REFILL_MS = 10_000;
+const VISION_BURST = 2;
+/** A 640 px JPEG is well under 200 KB; 1M base64 chars (~750 KB) is a generous cap. */
+const MAX_VISION_BASE64_CHARS = 1_000_000;
 /** Speed probe: 6 per minute per student, body capped at ~1.5 MB. */
 const SPEEDTEST_MAX_PER_WINDOW = 6;
 const SPEEDTEST_WINDOW_MS = 60_000;
@@ -141,6 +148,7 @@ function isExamPath(path: string): boolean {
     path === '/exam/assignments' ||
     path === '/exam/phone-heartbeat' ||
     path === '/exam/speedtest' ||
+    path === visionStatusPath ||
     path === instructorVersionsPath ||
     similarityPattern.test(path) ||
     instructorAiCheckPattern.test(path) ||
@@ -247,6 +255,7 @@ export class ExamRoutes {
   /** Accepted (or in-flight) segment indexes and bytes per attempt, in memory. */
   private readonly recordingState = new Map<string, { indexes: Set<number>; bytes: number }>();
   private readonly recordingBuckets = new Map<string, { tokens: number; at: number }>();
+  private readonly visionBuckets = new Map<string, { tokens: number; at: number }>();
   private readonly speedtestHits = new Map<string, number[]>();
 
   constructor(
@@ -544,11 +553,26 @@ export class ExamRoutes {
         return jsonResponse(request, this.config.allowedOrigins, 200, result);
       }
 
+      // ── Backend vision availability, so the browser only sends frames when on ─
+      if (method === 'GET' && path === visionStatusPath) {
+        this.requireStudent(request);
+        return jsonResponse(request, this.config.allowedOrigins, 200, {
+          enabled: this.visionDetector !== null,
+        });
+      }
+
       // ── Backend vision: second-opinion object detection on a camera frame ─
       const visionMatch = visionPattern.exec(path);
       if (method === 'POST' && visionMatch !== null && this.visionDetector !== null) {
         const principal = this.requireStudent(request);
         this.boundary.validateUnsafe(request, principal);
+        if (!this.takeVisionToken(principal.user.id)) {
+          const limited = this.tooManyRequests(
+            request,
+            'Vision checks are limited; try again shortly.',
+          );
+          return { ...limited, headers: { ...limited.headers, 'retry-after': '10' } };
+        }
         const attemptId = parsePathId<'AttemptId'>(visionMatch[1] ?? '', 'Attempt ID');
         const delivery = await this.service.getAttemptDelivery(
           attemptId as AttemptId,
@@ -565,20 +589,24 @@ export class ExamRoutes {
           typeof body.imageBase64 === 'string'
             ? body.imageBase64.replace(/^data:image\/\w+;base64,/u, '')
             : '';
-        if (image === '' || image.length > 2_000_000 || !/^[A-Za-z0-9+/=]+$/u.test(image)) {
+        if (
+          image === '' ||
+          image.length > MAX_VISION_BASE64_CHARS ||
+          !/^[A-Za-z0-9+/=]+$/u.test(image)
+        ) {
           throw new DomainError(
             'validation_failed',
-            'A base64 camera frame under 1.5 MB is required.',
+            'A base64 camera frame under 750 KB is required.',
           );
         }
         const result = await this.visionDetector(image);
-        const threats = (result.detections ?? []).filter(
-          (detection) => detection.label !== 'person',
+        const threats = (result.detections ?? []).filter((detection) =>
+          isFlaggableVisionLabel(detection.label),
         );
         for (const threat of threats) {
           this.integrity?.recordAppEvent(
             String(attemptId),
-            `flag:vision_${threat.label.replaceAll(' ', '_')}`,
+            `flag:${visionFlagName(threat.label)}`,
             1,
           );
         }
@@ -797,6 +825,17 @@ export class ExamRoutes {
       message,
     });
     return { ...response, headers: { ...response.headers, 'retry-after': '2' } };
+  }
+
+  private takeVisionToken(studentId: string): boolean {
+    const nowMs = Date.now();
+    const bucket = this.visionBuckets.get(studentId) ?? { tokens: VISION_BURST, at: nowMs };
+    bucket.tokens = Math.min(VISION_BURST, bucket.tokens + (nowMs - bucket.at) / VISION_REFILL_MS);
+    bucket.at = nowMs;
+    const allowed = bucket.tokens >= 1;
+    if (allowed) bucket.tokens -= 1;
+    this.visionBuckets.set(studentId, bucket);
+    return allowed;
   }
 
   private takeRecordingToken(studentId: string): boolean {

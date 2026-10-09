@@ -14,6 +14,29 @@ except ImportError:
     print("Transformers not installed. Run: pip install transformers Pillow torch", file=sys.stderr)
     sys.exit(1)
 
+CANDIDATE_LABELS = [
+    "cell phone",
+    "earbuds",
+    "headphones",
+    "headset",
+    "smart glasses",
+    "smart watch",
+    "person",
+]
+
+# Default minimum score, with optional per-label overrides. Small items at webcam
+# resolution score low, so tune e.g. {"earbuds": 0.25} here after testing on real frames.
+DEFAULT_THRESHOLD = 0.4
+LABEL_THRESHOLDS = {
+    # "earbuds": 0.4,
+    # "smart watch": 0.4,
+}
+
+
+def keep(prediction):
+    return prediction["score"] > LABEL_THRESHOLDS.get(prediction["label"], DEFAULT_THRESHOLD)
+
+
 # Listen for base64 images on stdin
 for line in sys.stdin:
     line = line.strip()
@@ -28,11 +51,11 @@ for line in sys.stdin:
         # Query the massive model for our specific threat vectors
         predictions = detector(
             image,
-            candidate_labels=["cell phone", "earbuds", "headphones", "smart glasses", "person"],
+            candidate_labels=CANDIDATE_LABELS,
         )
         
         # Filter high confidence threats
-        threats = [p for p in predictions if p["score"] > 0.4]
+        threats = [p for p in predictions if keep(p)]
         
         print(json.dumps({"status": "ok", "detections": threats}))
         sys.stdout.flush()

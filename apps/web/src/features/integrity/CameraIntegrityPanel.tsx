@@ -3,14 +3,24 @@ import type { AttemptContext } from './browserIntegrity.js';
 import { createCameraSession, emptyCamera } from './cameraSession.js';
 import { cameraEnvironment } from './cameraEnvironment.js';
 import { faceDirection } from './faceDirection.js';
+import type { ExamApi } from '../exam/api.js';
+import {
+  captureVisionFrame,
+  serverVisionText,
+  startServerVision,
+  type ServerVisionStatus,
+} from './serverVision.js';
 
 export function CameraIntegrityPanel({
   attempt,
   autoStart = false,
+  api,
 }: {
   readonly attempt: AttemptContext;
   /** Start once on mount when consent was given; a failure is never retried. */
   readonly autoStart?: boolean;
+  /** Used for the opt-in server (OWL-ViT) second opinion; omitted means browser checks only. */
+  readonly api?: Pick<ExamApi, 'getServerVisionEnabled' | 'postVisionCheck'> | undefined;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const current = useRef(attempt);
@@ -20,6 +30,8 @@ export function CameraIntegrityPanel({
   const [cameraLabel, setCameraLabel] = useState('');
   const objects = true;
   const [lowLight, setLowLight] = useState(false);
+  const [serverVision, setServerVision] = useState(false);
+  const [serverStatus, setServerStatus] = useState<ServerVisionStatus>({ state: 'not_checked' });
   const live = snapshot.phase === 'live';
   const running = snapshot.phase !== 'off';
   const readings = live && snapshot.faces !== null;
@@ -42,6 +54,28 @@ export function CameraIntegrityPanel({
       controller.current = null;
     };
   }, [attempt.id, attempt.active, autoStart, objects]);
+
+  useEffect(() => {
+    if (!api?.getServerVisionEnabled) return;
+    const abort = new AbortController();
+    api
+      .getServerVisionEnabled(abort.signal)
+      .then((enabled) => !abort.signal.aborted && setServerVision(enabled))
+      .catch(() => {});
+    return () => abort.abort();
+  }, [api]);
+
+  useEffect(() => {
+    setServerStatus({ state: 'not_checked' });
+    const postVisionCheck = api?.postVisionCheck;
+    if (!serverVision || !live || !attempt.active || !postVisionCheck) return;
+    const scheduler = startServerVision({
+      capture: () => captureVisionFrame(video.current),
+      send: async (image, signal) => postVisionCheck.call(api, current.current.id, image, signal),
+      onStatus: setServerStatus,
+    });
+    return () => scheduler.stop();
+  }, [serverVision, live, attempt.active, attempt.id, api]);
 
   useEffect(() => {
     if (!live) {
@@ -105,6 +139,7 @@ export function CameraIntegrityPanel({
         {live && <span className="cam-badge cam-badge--live">Camera active</span>}
       </div>
       {live && <p>{cameraLabel}</p>}
+      {live && serverVision && <p className="muted">{serverVisionText(serverStatus)}</p>}
       {lowLight && (
         <p role="alert">
           Low light: brighten the room for a usable face estimate. Setup controls remain available.
@@ -146,7 +181,7 @@ export function CameraIntegrityPanel({
               <p>
                 Earbuds:{' '}
                 {snapshot.earbuds === null
-                  ? 'Unavailable — detector model not loaded'
+                  ? 'Not checked — browser model not installed'
                   : snapshot.earbuds
                     ? 'Detected'
                     : 'Not observed'}
@@ -154,12 +189,12 @@ export function CameraIntegrityPanel({
               <p>
                 Smart glasses:{' '}
                 {snapshot.smartGlasses === null
-                  ? 'Unavailable — detector model not loaded'
+                  ? 'Not checked — browser model not installed'
                   : snapshot.smartGlasses
                     ? 'Detected'
                     : 'Not observed'}
               </p>
-              <p>Wired earphones / headphones: unavailable — no compatible detector installed</p>
+              <p>Wired earphones / headphones: not checked — no browser model installed</p>
             </>
           )}
         </div>

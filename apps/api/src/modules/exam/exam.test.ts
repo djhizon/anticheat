@@ -926,6 +926,77 @@ describe('exam delivery boundary', () => {
     expect(response.status).toBe(429);
   });
 
+  it('reports vision availability to students and rate-limits and maps vision checks', async () => {
+    const owner = await registerStudent('vision-limit@example.test');
+    const seeded = await seedExam();
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: owner.userId,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(owner, 'POST', `/exam/assignments/${assignmentId}/start`),
+    );
+    const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
+    const recordAppEvent = vi.fn();
+    const detector = vi.fn(async () => ({
+      status: 'ok' as const,
+      detections: [
+        { label: 'smart watch', score: 0.5 },
+        { label: 'person', score: 0.9 },
+        { label: 'unexpected thing', score: 0.9 },
+      ],
+    }));
+    const routes = new ExamRoutes(
+      exam.service,
+      auth.boundary,
+      config,
+      { recordAppEvent } as unknown as IntegrityService,
+      null,
+      detector,
+    );
+    const disabled = new ExamRoutes(exam.service, auth.boundary, config);
+    const status = (target: ExamRoutes) =>
+      target.handle(studentRequest(owner, 'GET', '/exam/vision-status'));
+    expect((await status(routes)).body).toEqual({ enabled: true });
+    expect((await status(disabled)).body).toEqual({ enabled: false });
+    const anonymous = await routes.handle({
+      method: 'GET',
+      path: '/exam/vision-status',
+      headers: { origin },
+    });
+    expect(anonymous.status).toBeGreaterThanOrEqual(401);
+
+    const path = `/exam/attempts/${attemptId}/vision-check`;
+    const send = () => routes.handle(studentRequest(owner, 'POST', path, { imageBase64: 'QUJD' }));
+    vi.useFakeTimers();
+    try {
+      const t0 = Date.now();
+      vi.setSystemTime(t0);
+      const first = await send();
+      expect(first.status).toBe(200);
+      expect(first.body).toEqual({
+        status: 'ok',
+        detections: [{ label: 'smart watch', score: 0.5 }],
+      });
+      expect(recordAppEvent).toHaveBeenCalledTimes(1);
+      expect(recordAppEvent).toHaveBeenCalledWith(attemptId, 'flag:vision_smart_watch', 1);
+      expect((await send()).status).toBe(200);
+      const limited = await send();
+      expect(limited.status).toBe(429);
+      expect(detector).toHaveBeenCalledTimes(2);
+      vi.setSystemTime(t0 + 10_000);
+      expect((await send()).status).toBe(200);
+      expect(detector).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+    const tooLarge = new ExamRoutes(exam.service, auth.boundary, config, null, null, detector);
+    const oversized = await tooLarge.handle(
+      studentRequest(owner, 'POST', path, { imageBase64: 'A'.repeat(1_000_001) }),
+    );
+    expect(oversized.status).toBe(400);
+  });
+
   it('answers CORS preflight for every browser-called exam route', async () => {
     const paths = [
       '/exam/speedtest',

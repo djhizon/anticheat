@@ -921,7 +921,11 @@ export function StudentExamPage({
             <div className="sidebar-section">
               <p className="sidebar-label">📷 Camera &amp; Detection</p>
               <Suspense fallback={<p className="sidebar-loading">Loading…</p>}>
-                <CameraIntegrityPanel attempt={attemptProps} autoStart={sensorsConsented} />
+                <CameraIntegrityPanel
+                  attempt={attemptProps}
+                  autoStart={sensorsConsented}
+                  api={examApi}
+                />
               </Suspense>
             </div>
           </aside>

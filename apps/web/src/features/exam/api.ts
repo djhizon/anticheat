@@ -277,6 +277,13 @@ export interface ExamApi {
   speedtest(dummyData: string): Promise<void>;
   uploadRecordingChunk(attemptId: string, index: number, chunkBase64: string): Promise<void>;
   getTransparencyReport?(attemptId: string): Promise<readonly TransparencyEvent[]>;
+  /** Whether the opt-in server vision (OWL-ViT) second opinion is enabled. */
+  getServerVisionEnabled?(signal?: AbortSignal): Promise<boolean>;
+  postVisionCheck?(
+    attemptId: string,
+    imageBase64: string,
+    signal?: AbortSignal,
+  ): Promise<readonly { readonly label: string; readonly score: number }[]>;
 }
 
 export class BrowserExamApi implements ExamApi {
@@ -615,6 +622,32 @@ export class BrowserExamApi implements ExamApi {
       'POST',
       { index, chunk: chunkBase64 },
       true,
+    );
+  }
+
+  async getServerVisionEnabled(signal?: AbortSignal): Promise<boolean> {
+    const body = await this.request('/exam/vision-status', 'GET', undefined, false, signal);
+    return isRecord(body) && body.enabled === true;
+  }
+
+  async postVisionCheck(
+    attemptId: string,
+    imageBase64: string,
+    signal?: AbortSignal,
+  ): Promise<readonly { readonly label: string; readonly score: number }[]> {
+    const body = await this.request(
+      `/exam/attempts/${encodeURIComponent(attemptId)}/vision-check`,
+      'POST',
+      { imageBase64 },
+      true,
+      signal,
+    );
+    if (!isRecord(body) || body.status !== 'ok' || !Array.isArray(body.detections)) {
+      throw new ExamApiError(fallbackProblem);
+    }
+    return body.detections.filter(
+      (item): item is { label: string; score: number } =>
+        isRecord(item) && isString(item.label) && typeof item.score === 'number',
     );
   }
 

@@ -30,6 +30,7 @@ import type {
   SimilarityRunResponse,
   TransparencyEvent,
 } from '@exam-anti-cheat/contracts/exam';
+import { friendlyVisionLabel } from './visionLabels.js';
 
 export interface LivenessVerifyResponse {
   readonly passed: boolean;
@@ -81,8 +82,9 @@ export class IntegrityService {
         events.push({
           timestamp: app.created_at,
           type: 'VISION',
-          severity: 'high',
-          description: `Server vision detected: ${app.foreground_app.slice(12).replaceAll('_', ' ')}`,
+          // Zero-shot detection of small wearables misses and misreads often: a lead, not proof.
+          severity: 'medium',
+          description: `Server vision (OWL-ViT) possibly saw: ${friendlyVisionLabel(app.foreground_app.slice(12))}`,
         });
       } else if (app.foreground_app.startsWith('flag:')) {
         events.push({
