@@ -124,6 +124,41 @@ overlaps the face. Logic: `phoneEvidence.ts`; gaze maths: `gazeEstimator.ts`; st
 - **Honesty note:** a snapshot is a lead for a human, not proof. A screen
   snapshot may show whatever was on the screen at that moment.
 
+## Input-behaviour signals (pointer and typing rhythm)
+
+- **What is kept:** counts and timings aggregated into 20 s windows
+  (`input_behaviour_windows`) plus a few named events. Never which keys were
+  pressed, never typed text, never a stream of pointer coordinates. The only
+  position-derived field is the nearest viewport edge when the pointer left.
+- **Disclosure:** the consent list says "Typing rhythm and mouse movement
+  patterns (not what you type)".
+- **Events and thresholds** (constants in `apps/web/src/features/input/inputDetectors.ts`):
+
+  | Event                           | Rule                                                                                                                                                                                                                                                                                     |
+  | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `pointer_outside_long`          | pointer outside the window more than 5 s while the window still has focus                                                                                                                                                                                                                |
+  | `synthetic_input`               | per 20 s window: 3 or more `isTrusted === false` events, or 3 or more teleports (over 400 px within one 34 ms frame), or 2 or more perfectly straight constant-velocity segments (straightness at least 0.9995, velocity variation under 5 %, 15 or more samples)                        |
+  | `text_injected`                 | 30 or more characters inserted within 300 ms with fewer keydowns than characters (IME composition, autocorrect and paste/drop are ignored); also saves one webcam snapshot (`text_injected`)                                                                                             |
+  | `uniform_typing`                | keydown interval coefficient of variation under 0.08 over 40 keys, or more than 150 wpm for 2 consecutive windows (40 or more characters each)                                                                                                                                           |
+  | `burst_after_idle`              | over 60 s with no keys or pointer while the window kept focus, then 120 or more characters within 10 s                                                                                                                                                                                   |
+  | `typing_drift`                  | mean key hold and interval both at least 4 standard errors and 30 % away from the baseline for 2 consecutive windows of 30 or more keys. The baseline is the typing from pre-exam setup if the setup screen calls `startSetupTypingCapture()`, otherwise the first 2 minutes of the exam |
+  | `drop_blocked`, `copy_question` | a drop is blocked like paste; copying page text outside the answer box is logged                                                                                                                                                                                                         |
+
+  Each event is reported at most once every 30 s. Context-menu counts, text
+  selections, pointer path straightness and correction ratio are window
+  aggregates only and never raise an event on their own. An injection with a
+  still pointer (more than 10 s) gets its own log line.
+
+- **False positives to expect:** screen readers, switch devices, voice control
+  and dictation insert text without keydowns; password managers, text expanders
+  and browser autofill do the same; remote-support or accessibility tools send
+  untrusted events; trackpads, drawing tablets and touchscreens move
+  differently from a mouse; a second monitor used for something permitted makes
+  the pointer leave the window; fast typists and people who think for a minute
+  then type a prepared outline can look like a burst; fatigue, a new keyboard
+  or an injured hand shift typing rhythm. These are leads for a human reviewer,
+  never verdicts, and the log wording says so.
+
 ## Offline demo
 
 Do this once with a network: `npm install`, `npm run vision:prepare`,

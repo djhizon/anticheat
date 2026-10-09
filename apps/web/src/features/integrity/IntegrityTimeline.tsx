@@ -13,6 +13,7 @@ const sourceMeta: Record<IntegrityTimelineSource, { icon: string; label: string;
   audio: { icon: '🎙️', label: 'Voice activity', noun: 'times' },
   transcript: { icon: '💬', label: 'Transcript', noun: 'lines' },
   keyboard: { icon: '⌨️', label: 'Keyboard', noun: 'notes' },
+  pointer: { icon: '🖱️', label: 'Pointer', noun: 'notes' },
   browser: { icon: '🌐', label: 'Browser', noun: 'times' },
   desktop: { icon: '🖥️', label: 'Desktop', noun: 'notes' },
   phone: { icon: '📱', label: 'iPhone', noun: 'notes' },

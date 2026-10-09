@@ -45,9 +45,11 @@ export function useEvidenceCapture(options: {
       }
     };
     const onTrigger = (event: Event) => {
-      const trigger = (event as CustomEvent<{ trigger?: string }>).detail?.trigger;
+      const detail = (event as CustomEvent<{ trigger?: string; immediate?: boolean }>).detail;
+      const trigger = detail?.trigger;
       if (trigger !== undefined && (EVIDENCE_TRIGGERS as readonly string[]).includes(trigger)) {
-        instance.observeEvent(trigger as EvidenceTrigger);
+        if (detail?.immediate === true) instance.captureNow(trigger as EvidenceTrigger);
+        else instance.observeEvent(trigger as EvidenceTrigger);
       }
     };
     window.addEventListener('camera-violation', onViolation);

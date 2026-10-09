@@ -52,6 +52,35 @@ export interface TimelineAttemptListRow {
 }
 
 /** Raw, unmerged rows for one attempt; `buildTimeline` normalizes and merges them. */
+/** One stored input-behaviour window (aggregates only). */
+export interface InputWindowRow {
+  readonly window_start: string;
+  readonly window_ms: number;
+  readonly pointer_events: number;
+  readonly pointer_leaves: number;
+  readonly pointer_outside_ms: number;
+  readonly longest_outside_ms: number;
+  readonly outside_edge: string | null;
+  readonly untrusted_events: number;
+  readonly teleports: number;
+  readonly robotic_segments: number;
+  readonly path_straightness: number | null;
+  readonly velocity_cv: number | null;
+  readonly context_menus: number;
+  readonly selections: number;
+  readonly keys: number;
+  readonly chars: number;
+  readonly corrections: number;
+  readonly mean_dwell_ms: number | null;
+  readonly mean_interval_ms: number | null;
+  readonly interval_cv: number | null;
+  readonly wpm: number | null;
+  readonly injections: number;
+  readonly idle_pointer_injections: number;
+  readonly drift_z_dwell: number | null;
+  readonly drift_z_interval: number | null;
+}
+
 export interface TimelineRows {
   readonly meta: TimelineAttemptMeta;
   readonly gaze: ReadonlyArray<{
@@ -72,6 +101,7 @@ export interface TimelineRows {
     dwell_ms: number;
     flight_ms: number;
   }>;
+  readonly input: ReadonlyArray<InputWindowRow>;
   readonly voice: ReadonlyArray<{ detected_at: string; duration_ms: number; peak_db: number }>;
   readonly liveness: ReadonlyArray<{
     created_at: string;
@@ -316,6 +346,46 @@ export class IntegrityRepository {
       .run(randomUUID(), attemptId, questionVersionId, dwellMs, flightMs);
   }
 
+  // ── Input behaviour windows ──────────────────────────────────────────────────
+
+  insertInputWindow(attemptId: string, row: InputWindowRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO input_behaviour_windows (
+           id, attempt_id, window_start, window_ms, pointer_events, pointer_leaves, pointer_outside_ms, longest_outside_ms, outside_edge, untrusted_events, teleports, robotic_segments, path_straightness, velocity_cv, context_menus, selections, keys, chars, corrections, mean_dwell_ms, mean_interval_ms, interval_cv, wpm, injections, idle_pointer_injections, drift_z_dwell, drift_z_interval)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        randomUUID(),
+        attemptId,
+        row.window_start,
+        row.window_ms,
+        row.pointer_events,
+        row.pointer_leaves,
+        row.pointer_outside_ms,
+        row.longest_outside_ms,
+        row.outside_edge,
+        row.untrusted_events,
+        row.teleports,
+        row.robotic_segments,
+        row.path_straightness,
+        row.velocity_cv,
+        row.context_menus,
+        row.selections,
+        row.keys,
+        row.chars,
+        row.corrections,
+        row.mean_dwell_ms,
+        row.mean_interval_ms,
+        row.interval_cv,
+        row.wpm,
+        row.injections,
+        row.idle_pointer_injections,
+        row.drift_z_dwell,
+        row.drift_z_interval,
+      );
+  }
+
   // ── Gaze Events ──────────────────────────────────────────────────────────────
 
   insertGazeEvent(
@@ -386,6 +456,12 @@ export class IntegrityRepository {
       keystrokes: all(
         `SELECT created_at, question_version_id, dwell_ms, flight_ms FROM keystroke_events
           WHERE attempt_id = ? ORDER BY created_at LIMIT ${TIMELINE_ROW_LIMIT * 10}`,
+        attemptId,
+      ),
+      input: all(
+        `SELECT window_start, window_ms, pointer_events, pointer_leaves, pointer_outside_ms, longest_outside_ms, outside_edge, untrusted_events, teleports, robotic_segments, path_straightness, velocity_cv, context_menus, selections, keys, chars, corrections, mean_dwell_ms, mean_interval_ms, interval_cv, wpm, injections, idle_pointer_injections, drift_z_dwell, drift_z_interval
+           FROM input_behaviour_windows
+          WHERE attempt_id = ? ORDER BY window_start, rowid LIMIT ${TIMELINE_ROW_LIMIT}`,
         attemptId,
       ),
       voice: all(

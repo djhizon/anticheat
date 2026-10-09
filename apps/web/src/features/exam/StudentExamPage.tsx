@@ -1,4 +1,5 @@
 import { createKeystrokeDynamics } from '../integrity/keystrokeDynamics.js';
+import { useInputBehaviour } from '../input/useInputBehaviour.js';
 import React, {
   Suspense,
   useCallback,
@@ -298,6 +299,10 @@ export function StudentExamPage({
 
   // --- TELEMETRY UPLOAD ENGINE ---
   const keystrokeTracker = useRef(createKeystrokeDynamics('global'));
+  useInputBehaviour(
+    currentDelivery?.attempt.status === 'in_progress' ? currentDelivery.attempt.id : null,
+    examApi,
+  );
 
   useEffect(() => {
     const tracker = keystrokeTracker.current;

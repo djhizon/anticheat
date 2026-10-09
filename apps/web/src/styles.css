@@ -2550,6 +2550,9 @@ button.timeline-chip[aria-pressed='false'] {
 .timeline-chip--keyboard {
   --chip: #14b8a6;
 }
+.timeline-chip--pointer {
+  --chip: #f97316;
+}
 .timeline-chip--browser {
   --chip: #0ea5e9;
 }

@@ -155,6 +155,7 @@ export const EVIDENCE_TRIGGERS = [
   'extra_person',
   'left_frame',
   'hands_not_visible',
+  'text_injected',
 ] as const;
 export type EvidenceTrigger = (typeof EVIDENCE_TRIGGERS)[number];
 
@@ -201,6 +202,7 @@ export const INTEGRITY_TIMELINE_SOURCES = [
   'audio',
   'transcript',
   'keyboard',
+  'pointer',
   'browser',
   'desktop',
   'phone',
@@ -209,6 +211,51 @@ export const INTEGRITY_TIMELINE_SOURCES = [
   'system',
 ] as const;
 export type IntegrityTimelineSource = (typeof INTEGRITY_TIMELINE_SOURCES)[number];
+
+/**
+ * One aggregated input-behaviour window (15-30 s) uploaded in the telemetry batch.
+ * Numbers only: never which keys were pressed and never raw pointer coordinates.
+ */
+export interface InputBehaviourWindow {
+  readonly windowStart: number;
+  readonly windowMs: number;
+  readonly pointerEvents: number;
+  readonly pointerLeaves: number;
+  readonly pointerOutsideMs: number;
+  readonly longestOutsideMs: number;
+  readonly outsideEdge: 'left' | 'right' | 'top' | 'bottom' | null;
+  readonly untrustedEvents: number;
+  readonly teleports: number;
+  readonly roboticSegments: number;
+  readonly pathStraightness: number | null;
+  readonly velocityCv: number | null;
+  readonly contextMenus: number;
+  readonly selections: number;
+  readonly keys: number;
+  readonly chars: number;
+  readonly corrections: number;
+  readonly meanDwellMs: number | null;
+  readonly meanIntervalMs: number | null;
+  readonly intervalCv: number | null;
+  readonly wpm: number | null;
+  readonly injections: number;
+  readonly idlePointerInjections: number;
+  readonly driftZDwell: number | null;
+  readonly driftZInterval: number | null;
+}
+
+/** Notable-pattern events the browser reports through the events endpoint. */
+export const INPUT_BEHAVIOUR_EVENTS = [
+  'pointer_outside_long',
+  'synthetic_input',
+  'drop_blocked',
+  'copy_question',
+  'text_injected',
+  'uniform_typing',
+  'burst_after_idle',
+  'typing_drift',
+] as const;
+export type InputBehaviourEvent = (typeof INPUT_BEHAVIOUR_EVENTS)[number];
 export type IntegrityTimelineSeverity = 'info' | 'notice' | 'flag';
 
 /**

@@ -125,6 +125,7 @@ describe('authentication boundary', () => {
       'exam_versions',
       'exams',
       'gaze_events',
+      'input_behaviour_windows',
       'keystroke_events',
       'liveness_challenges',
       'liveness_events',

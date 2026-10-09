@@ -60,6 +60,7 @@ describe('database migrations', () => {
         { version: 8, name: 'audio_transcripts' },
         { version: 9, name: 'gaze_direction' },
         { version: 10, name: 'evidence_snapshots' },
+        { version: 11, name: 'input_behaviour' },
       ]);
     } finally {
       database.close();

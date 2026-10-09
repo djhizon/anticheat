@@ -131,6 +131,25 @@ describe('createEvidenceCapture', () => {
     return { draw, toDataURL };
   }
 
+  it('captureNow takes one snapshot immediately for an instantaneous event, rate-limited', async () => {
+    stubCanvas();
+    const post = vi.fn(async (_id: string, _request: unknown) => undefined);
+    let now = 1_000_000;
+    const capture = createEvidenceCapture({
+      attemptId: 'a1',
+      getVideo: () => video(),
+      post,
+      now: () => now,
+    });
+    capture.captureNow('text_injected');
+    await new Promise((r) => setTimeout(r, 0));
+    now += 5000;
+    capture.captureNow('text_injected');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post.mock.calls[0]![1]).toMatchObject({ source: 'webcam', trigger: 'text_injected' });
+  });
+
   it('captures one downscaled webcam still when a trigger holds and mirrors the server cap', async () => {
     const { draw, toDataURL } = stubCanvas();
     const post = vi.fn(async () => undefined);

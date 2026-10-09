@@ -11,6 +11,7 @@ export const evidenceTriggerLabel: Readonly<Record<string, string>> = {
   extra_person: 'Extra person (desk camera)',
   left_frame: 'Left the frame (desk camera)',
   hands_not_visible: 'Hands not visible (desk camera)',
+  text_injected: 'Long answer appeared at once',
 };
 
 const sourceLabel: Readonly<Record<string, string>> = {

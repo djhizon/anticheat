@@ -21,6 +21,7 @@ function rows(overrides: Partial<TimelineRows> = {}): TimelineRows {
     gaze: [],
     apps: [],
     keystrokes: [],
+    input: [],
     voice: [],
     liveness: [],
     transcripts: [],
@@ -314,7 +315,7 @@ describe('IntegrityService.getTimeline over a real database', () => {
           { timestamp: '2026-09-15T00:02:00.000Z', durationMs: 3000, direction: 'ceiling' },
         ],
       }),
-    ).toEqual({ keystrokes: 0, gaze: 2, voice: 0 });
+    ).toEqual({ keystrokes: 0, gaze: 2, voice: 0, input: 0 });
     const rows = db
       .prepare('SELECT direction, yaw, pitch FROM gaze_events ORDER BY off_screen_start')
       .all();
@@ -354,5 +355,173 @@ describe('IntegrityService.getTimeline over a real database', () => {
         data: { evidenceId: id, trigger: 'no_face', source: 'webcam' },
       },
     ]);
+  });
+});
+
+const inputWindow = {
+  window_start: '2026-09-15T00:02:00.000Z',
+  window_ms: 20_000,
+  pointer_events: 40,
+  pointer_leaves: 2,
+  pointer_outside_ms: 12_000,
+  longest_outside_ms: 9_000,
+  outside_edge: 'right',
+  untrusted_events: 0,
+  teleports: 0,
+  robotic_segments: 0,
+  path_straightness: 0.6,
+  velocity_cv: 0.8,
+  context_menus: 0,
+  selections: 0,
+  keys: 0,
+  chars: 0,
+  corrections: 0,
+  mean_dwell_ms: null,
+  mean_interval_ms: null,
+  interval_cv: null,
+  wpm: null,
+  injections: 0,
+  idle_pointer_injections: 0,
+  drift_z_dwell: null,
+  drift_z_interval: null,
+};
+
+describe('input behaviour in the timeline', () => {
+  it('lists pointer excursions and an injection with a still pointer, but not quiet windows', () => {
+    const entries = buildTimeline(
+      rows({
+        input: [
+          inputWindow,
+          { ...inputWindow, window_start: '2026-09-15T00:03:00.000Z', pointer_outside_ms: 500 },
+          {
+            ...inputWindow,
+            window_start: '2026-09-15T00:04:00.000Z',
+            pointer_outside_ms: 0,
+            injections: 1,
+            idle_pointer_injections: 1,
+          },
+        ],
+      }),
+    ).filter((e) => e.source === 'pointer' || e.kind === 'injection_idle_pointer');
+    expect(entries.map((e) => [e.kind, e.source, e.severity])).toEqual([
+      ['pointer_outside', 'pointer', 'info'],
+      ['injection_idle_pointer', 'keyboard', 'flag'],
+    ]);
+    expect(entries[0]!.summary).toBe('Pointer outside the exam window for 12 s (2 times)');
+    expect(entries[0]!.data).toEqual({
+      leaves: 2,
+      outsideMs: 12_000,
+      longestMs: 9_000,
+      edge: 'right',
+    });
+  });
+
+  it('maps input events from the events path to pointer and keyboard entries', () => {
+    const app = (name: string) => ({
+      created_at: '2026-09-15T00:05:00.000Z',
+      foreground_app: `flag:${name}`,
+      display_count: 1,
+    });
+    const entries = buildTimeline(
+      rows({
+        apps: [
+          app('pointer_outside_long'),
+          app('synthetic_input'),
+          app('text_injected'),
+          app('uniform_typing'),
+          app('burst_after_idle'),
+          app('typing_drift'),
+          app('drop_blocked'),
+          app('copy_question'),
+        ],
+      }),
+    ).filter((e) => e.kind !== 'attempt_started' && e.kind !== 'attempt_submitted');
+    expect(entries.map((e) => `${e.source}:${e.kind}`)).toEqual([
+      'pointer:pointer_outside_long',
+      'pointer:synthetic_input',
+      'keyboard:text_injected',
+      'keyboard:uniform_typing',
+      'keyboard:burst_after_idle',
+      'keyboard:typing_drift',
+      'browser:drop_blocked',
+      'browser:copy_question',
+    ]);
+    expect(entries[2]!.summary).toBe('Long answer appeared at once (possible paste tool)');
+  });
+});
+
+describe('input behaviour persistence', () => {
+  let db!: DatabaseSync;
+  let service!: IntegrityService;
+
+  beforeEach(() => {
+    db = openDatabase(':memory:');
+    db.exec('PRAGMA foreign_keys = OFF;');
+    db.exec('DROP TRIGGER published_assignment_only;');
+    db.exec(`
+      INSERT INTO users (id, email, password_hash, role, created_at)
+        VALUES ('u1', 's@example.test', 'x', 'student', '2026-09-01T00:00:00.000Z');
+      INSERT INTO exam_assignments (id, exam_version_id, student_id, assigned_at)
+        VALUES ('as1', 'v1', 'u1', '2026-09-15T00:00:00.000Z');
+      INSERT INTO exam_attempts (id, assignment_id, status, attempt_seed, started_at, base_deadline, effective_deadline)
+        VALUES ('a1', 'as1', 'in_progress', 's', '2026-09-15T00:00:00.000Z', '2026-09-15T01:00:00.000Z', '2026-09-15T01:00:00.000Z');
+    `);
+    service = new IntegrityService(new IntegrityRepository(db), null);
+  });
+  afterEach(() => db.close());
+
+  it('stores validated windows, drops unusable ones and clamps wild numbers', () => {
+    const counts = service.recordTelemetry('a1', {
+      input: [
+        {
+          windowStart: Date.parse('2026-09-15T00:02:00.000Z'),
+          windowMs: 20_000,
+          pointerEvents: 12,
+          pointerLeaves: 1,
+          pointerOutsideMs: 99_999_999,
+          longestOutsideMs: 6_000,
+          outsideEdge: 'diagonal',
+          pathStraightness: 5,
+          wpm: 80.4,
+          injections: 1,
+          idlePointerInjections: 1,
+        },
+        { windowStart: 'not a time', windowMs: 20_000 },
+        { windowStart: Date.now(), windowMs: 0 },
+        'junk',
+      ],
+    });
+    expect(counts.input).toBe(1);
+    const row = db.prepare('SELECT * FROM input_behaviour_windows').get() as Record<
+      string,
+      unknown
+    >;
+    expect(row).toMatchObject({
+      attempt_id: 'a1',
+      window_start: '2026-09-15T00:02:00.000Z',
+      window_ms: 20_000,
+      pointer_outside_ms: 20_000,
+      outside_edge: null,
+      path_straightness: null,
+      wpm: 80.4,
+      injections: 1,
+    });
+  });
+
+  it('surfaces stored windows in the log under the pointer source', () => {
+    service.recordTelemetry('a1', {
+      input: [
+        {
+          windowStart: Date.parse('2026-09-15T00:02:00.000Z'),
+          windowMs: 20_000,
+          pointerLeaves: 1,
+          pointerOutsideMs: 12_000,
+          longestOutsideMs: 12_000,
+          outsideEdge: 'left',
+        },
+      ],
+    });
+    const log = service.getTimeline('a1', new Set(['pointer']));
+    expect(log?.map((e) => e.summary)).toEqual(['Pointer outside the exam window for 12 s']);
   });
 });

@@ -135,6 +135,56 @@ const FLAG_MAP: Record<string, AppMapping> = {
     severity: 'notice',
     summary: 'A long answer appeared faster than typical typing speed',
   },
+  drop_blocked: {
+    source: 'browser',
+    kind: 'drop_blocked',
+    severity: 'notice',
+    summary: 'Dragging text into the exam was attempted and blocked',
+  },
+  copy_question: {
+    source: 'browser',
+    kind: 'copy_question',
+    severity: 'notice',
+    summary: 'Text on the exam page (outside the answer box) was copied',
+  },
+  pointer_outside_long: {
+    source: 'pointer',
+    kind: 'pointer_outside_long',
+    severity: 'notice',
+    summary:
+      'Pointer stayed outside the exam window for more than 5 s while the exam window kept focus',
+  },
+  synthetic_input: {
+    source: 'pointer',
+    kind: 'synthetic_input',
+    severity: 'notice',
+    summary:
+      'Pointer or keyboard input looked automated (scripted or remote-controlled), a lead only',
+  },
+  text_injected: {
+    source: 'keyboard',
+    kind: 'text_injected',
+    severity: 'notice',
+    summary: 'Long answer appeared at once (possible paste tool)',
+  },
+  uniform_typing: {
+    source: 'keyboard',
+    kind: 'uniform_typing',
+    severity: 'notice',
+    summary: 'Typing rhythm was unusually regular or fast for a sustained stretch',
+  },
+  burst_after_idle: {
+    source: 'keyboard',
+    kind: 'burst_after_idle',
+    severity: 'notice',
+    summary: 'A long answer was typed quickly after a long pause with no activity',
+  },
+  typing_drift: {
+    source: 'keyboard',
+    kind: 'typing_drift',
+    severity: 'notice',
+    summary: 'Typing rhythm differs strongly from earlier in the exam (a lead only)',
+  },
   phone_detected: {
     source: 'camera',
     kind: 'phone_in_view',
@@ -328,6 +378,52 @@ function keystrokeEntries(rows: TimelineRows['keystrokes']): Entry[] {
   );
 }
 
+/**
+ * Input-behaviour windows are aggregates; only the notable ones become entries. Pointer
+ * excursions of 2 s or more are listed as plain facts, and an injected answer with a
+ * still pointer is called out because the combination is the stronger lead.
+ */
+const OUTSIDE_LISTED_MS = 2_000;
+
+function inputEntries(rows: TimelineRows['input']): Entry[] {
+  const out: Entry[] = [];
+  for (const row of rows) {
+    const at = iso(row.window_start);
+    if (at === null) continue;
+    if (row.pointer_outside_ms >= OUTSIDE_LISTED_MS) {
+      const times = row.pointer_leaves > 1 ? ` (${row.pointer_leaves} times)` : '';
+      out.push(
+        entry(
+          at,
+          'pointer',
+          'pointer_outside',
+          row.longest_outside_ms >= 10_000 ? 'notice' : 'info',
+          `Pointer outside the exam window for ${seconds(row.pointer_outside_ms)}${times}`,
+          {
+            leaves: row.pointer_leaves,
+            outsideMs: row.pointer_outside_ms,
+            longestMs: row.longest_outside_ms,
+            ...(row.outside_edge === null ? {} : { edge: row.outside_edge }),
+          },
+        ),
+      );
+    }
+    if (row.idle_pointer_injections > 0) {
+      out.push(
+        entry(
+          at,
+          'keyboard',
+          'injection_idle_pointer',
+          'flag',
+          'Long answer appeared at once while the mouse was still (possible paste tool)',
+          { injections: row.injections, idlePointerInjections: row.idle_pointer_injections },
+        ),
+      );
+    }
+  }
+  return out;
+}
+
 const LARGE_ADDITION_WORDS = 40;
 
 function revisionEntries(rows: TimelineRows['revisions']): Entry[] {
@@ -367,6 +463,7 @@ const EVIDENCE_TEXT: Record<string, string> = {
   extra_person: 'another person in view of the desk camera',
   left_frame: 'nobody in view of the desk camera',
   hands_not_visible: 'hands not visible to the desk camera',
+  text_injected: 'a long answer appeared at once',
 };
 
 const EVIDENCE_SOURCE: Record<string, IntegrityTimelineSource> = {
@@ -437,6 +534,7 @@ export function buildTimeline(rows: TimelineRows): IntegrityTimelineEntry[] {
   for (const row of rows.apps) push(appEntry(row));
   for (const row of rows.liveness) push(livenessEntry(row));
   out.push(...keystrokeEntries(rows.keystrokes));
+  out.push(...inputEntries(rows.input));
   out.push(...revisionEntries(rows.revisions));
 
   for (const row of rows.voice) {

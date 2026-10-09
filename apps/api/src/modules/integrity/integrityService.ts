@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 
 import { DomainError } from '@exam-anti-cheat/contracts';
 import type { GeminiRotatingClient } from './gemini.js';
-import type { IntegrityRepository } from './integrityRepository.js';
+import type { InputWindowRow, IntegrityRepository } from './integrityRepository.js';
 import {
   CHALLENGE_TYPES,
   generateChallenge,
@@ -96,6 +96,7 @@ export const AI_CHECK_MAX_ANSWERS = 30;
 
 export interface TelemetryCounts {
   readonly keystrokes: number;
+  readonly input: number;
   readonly gaze: number;
   readonly voice: number;
 }
@@ -445,7 +446,7 @@ export class IntegrityService {
       return Number.isNaN(date.getTime()) ? null : date.toISOString();
     };
 
-    const counts = { keystrokes: 0, gaze: 0, voice: 0 };
+    const counts = { keystrokes: 0, gaze: 0, voice: 0, input: 0 };
     for (const k of list(payload.keystrokes, 500)) {
       const dwell = duration(k.dwellMs);
       const flight = duration(k.flightMs);
@@ -456,6 +457,12 @@ export class IntegrityService {
           : 'unknown';
       this.repo.insertKeystrokeEvent(attemptId, questionId, dwell, flight);
       counts.keystrokes += 1;
+    }
+    for (const w of list(payload.input, 20)) {
+      const row = parseInputWindow(w);
+      if (row === null) continue;
+      this.repo.insertInputWindow(attemptId, row);
+      counts.input += 1;
     }
     for (const g of list(payload.gaze, 100)) {
       const at = timestamp(g.timestamp);
@@ -618,4 +625,54 @@ export class IntegrityService {
   ): ReadonlyArray<{ value_text: string; created_at: string; word_count: number }> {
     return this.repo.getAnswerRevisions(attemptId, questionVersionId);
   }
+}
+
+const EDGES = new Set(['left', 'right', 'top', 'bottom']);
+
+/**
+ * Validate one aggregated input window from the browser. Counts are clamped to
+ * sane ranges; a window with an unusable start or length is dropped.
+ */
+function parseInputWindow(w: Record<string, unknown>): InputWindowRow | null {
+  const start = new Date(typeof w.windowStart === 'number' ? w.windowStart : NaN);
+  const length = Number(w.windowMs);
+  if (Number.isNaN(start.getTime()) || !Number.isFinite(length) || length <= 0) return null;
+  const count = (value: unknown, max = 100_000): number => {
+    const n = Number(value);
+    return Number.isFinite(n) && n >= 0 ? Math.min(Math.round(n), max) : 0;
+  };
+  const real = (value: unknown, max: number): number | null => {
+    if (value === null || value === undefined) return null;
+    const n = Number(value);
+    return Number.isFinite(n) && n >= -max && n <= max ? Math.round(n * 1000) / 1000 : null;
+  };
+  const windowMs = Math.min(Math.round(length), 10 * 60_000);
+  return {
+    window_start: start.toISOString(),
+    window_ms: Math.max(1, windowMs),
+    pointer_events: count(w.pointerEvents),
+    pointer_leaves: count(w.pointerLeaves, 10_000),
+    pointer_outside_ms: Math.min(count(w.pointerOutsideMs, 3_600_000), windowMs),
+    longest_outside_ms: Math.min(count(w.longestOutsideMs, 3_600_000), windowMs),
+    outside_edge:
+      typeof w.outsideEdge === 'string' && EDGES.has(w.outsideEdge) ? w.outsideEdge : null,
+    untrusted_events: count(w.untrustedEvents),
+    teleports: count(w.teleports),
+    robotic_segments: count(w.roboticSegments),
+    path_straightness: real(w.pathStraightness, 1),
+    velocity_cv: real(w.velocityCv, 1000),
+    context_menus: count(w.contextMenus),
+    selections: count(w.selections),
+    keys: count(w.keys),
+    chars: count(w.chars),
+    corrections: count(w.corrections),
+    mean_dwell_ms: real(w.meanDwellMs, 60_000),
+    mean_interval_ms: real(w.meanIntervalMs, 60_000),
+    interval_cv: real(w.intervalCv, 1000),
+    wpm: real(w.wpm, 5000),
+    injections: count(w.injections, 10_000),
+    idle_pointer_injections: count(w.idlePointerInjections, 10_000),
+    drift_z_dwell: real(w.driftZDwell, 100_000),
+    drift_z_interval: real(w.driftZInterval, 100_000),
+  };
 }

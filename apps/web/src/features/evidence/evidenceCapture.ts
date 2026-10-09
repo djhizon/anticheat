@@ -216,6 +216,10 @@ export function createEvidenceCapture(options: EvidenceCaptureOptions) {
         void fire(trigger);
       }
     },
+    /** One-shot capture for an instantaneous event (no hold time); still rate-limited by `submit`. */
+    captureNow(trigger: EvidenceTrigger): void {
+      if (!stopped) void fire(trigger);
+    },
     stop(): void {
       stopped = true;
       tracker.reset();

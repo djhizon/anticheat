@@ -399,6 +399,13 @@ function StudentWorkspace({
                 </div>
               </li>
               <li>
+                <span className="consent-icon">🖱️</span>
+                <div>
+                  <strong>Typing and Mouse Patterns</strong>
+                  <p>Typing rhythm and mouse movement patterns (not what you type).</p>
+                </div>
+              </li>
+              <li>
                 <span className="consent-icon">✍️</span>
                 <div>
                   <strong>No Paste Allowed</strong>

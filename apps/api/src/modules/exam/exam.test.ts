@@ -1050,21 +1050,28 @@ describe('exam delivery boundary', () => {
         { timestamp: 'never', durationMs: 10 },
       ],
       voice: [{ timestamp: Date.parse('2026-09-15T00:00:02.000Z'), durationMs: 900, peakDb: -20 }],
+      input: [
+        { windowStart: Date.parse('2026-09-15T00:00:00.000Z'), windowMs: 20_000, pointerEvents: 5 },
+        { windowStart: 'never', windowMs: 20_000 },
+      ],
     };
 
     expect((await routes.handle(studentRequest(other, 'POST', path, body))).status).toBe(404);
     const stored = await routes.handle(studentRequest(owner, 'POST', path, body));
     expect(stored.status).toBe(202);
-    expect(stored.body).toEqual({ accepted: { keystrokes: 1, gaze: 1, voice: 1 } });
+    expect(stored.body).toEqual({ accepted: { keystrokes: 1, gaze: 1, voice: 1, input: 1 } });
     const count = (table: string) =>
       (
         auth.database
           .prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE attempt_id = ?`)
           .get(attemptId) as { n: number }
       ).n;
-    expect([count('keystroke_events'), count('gaze_events'), count('voice_events')]).toEqual([
-      1, 1, 1,
-    ]);
+    expect([
+      count('keystroke_events'),
+      count('gaze_events'),
+      count('voice_events'),
+      count('input_behaviour_windows'),
+    ]).toEqual([1, 1, 1, 1]);
   });
 
   it('shows the attempt owner a transparency report of recorded events', async () => {
