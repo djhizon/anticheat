@@ -21,6 +21,7 @@
     "demo:seed": "npm run demo:seed --workspace @exam-anti-cheat/api",
     "setup:whisper": "bash scripts/setup-whisper.sh",
     "setup:vision": "bash scripts/setup-vision.sh",
+    "setup:desktop": "node node_modules/electron/install.js && npm run build --workspace @exam-anti-cheat/desktop",
     "vision:prepare": "node scripts/prepare-vision-assets.mjs",
     "vision:verify": "node scripts/prepare-vision-assets.mjs --verify",
     "vision:smoke": "node scripts/vision-smoke.mjs",

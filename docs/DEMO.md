@@ -89,3 +89,5 @@ optional.
 - Vision is slow on the first call: it downloads the ~600 MB model (about 90s
   cold, about 8s warm).
 - Camera or microphone blocked: allow access in the browser, then retry.
+- Desktop shell won't start (`Electron failed to install correctly`): newer npm
+  versions skip install scripts, so run `npm run setup:desktop` once.
