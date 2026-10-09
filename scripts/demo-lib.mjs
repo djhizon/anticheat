@@ -180,3 +180,58 @@ export function openCommand(platform) {
   if (platform === 'linux') return 'xdg-open';
   return null;
 }
+
+/** Parse xcodebuild -version output to extract version string. */
+export function parseXcodeVersion(output) {
+  const text = String(output ?? '');
+  const match = /^Xcode\s+(\d+(?:\.\d+)*(?:\.\d+)*)/m.exec(text);
+  return match ? match[1] : null;
+}
+
+/** Parse xcodegen --version output to extract version string. */
+export function parseXcodegenVersion(output) {
+  const text = String(output ?? '');
+  const match = /(\d+(?:\.\d+)*(?:\.\d+)*)/u.exec(text);
+  return match ? match[1] : null;
+}
+
+/** Parse xcrun devicectl list devices output to find connected iPhone name + model + state. */
+export function parseDevicectlDevices(output) {
+  const text = String(output ?? '').trim();
+  if (!text || text.includes('No devices found') || !text.includes('Name')) return null;
+
+  const lines = text.split(/\r?\n/u);
+  const separatorIndex = lines.findIndex((line) => line.startsWith('---'));
+  if (separatorIndex === -1) return null;
+
+  const separator = lines[separatorIndex];
+  const columns = [];
+  let start = 0;
+  for (let i = 0; i < separator.length; i += 1) {
+    if (separator[i] === '-' && (i === 0 || separator[i - 1] === ' ')) {
+      start = i;
+    }
+    if (separator[i] === '-' && (i === separator.length - 1 || separator[i + 1] === ' ')) {
+      columns.push([start, i + 1]);
+    }
+  }
+  if (columns.length < 5) return null;
+
+  const [nameCol, , , stateCol, modelCol] = columns;
+  const devices = [];
+  for (let i = separatorIndex + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+    const name = line.slice(nameCol[0], nameCol[1]).trim();
+    const state = line.slice(stateCol[0], stateCol[1]).trim();
+    const model = line.slice(modelCol[0]).trim();
+    if (name && model) devices.push({ name, model, state });
+  }
+
+  const iphones = devices.filter((d) => d.model.toLowerCase().startsWith('iphone'));
+  if (iphones.length === 0) return null;
+
+  const readyStates = ['connected', 'available (paired)'];
+  const readyDevice = iphones.find((d) => readyStates.includes(d.state.toLowerCase()));
+  return readyDevice || iphones[0];
+}

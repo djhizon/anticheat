@@ -9,8 +9,11 @@ import {
   minimumFromRange,
   needsInstall,
   parseArgs,
+  parseDevicectlDevices,
   parseVersion,
   parseYesNo,
+  parseXcodeVersion,
+  parseXcodegenVersion,
   planSteps,
   seedDefaults,
   shouldOpenBrowser,
@@ -137,5 +140,67 @@ describe('env and accounts', () => {
     ]);
     expect(table.split('\n')[0]).toContain('✅ Node       ok');
     expect(table).toContain('❌ Port 3000  busy');
+  });
+});
+
+describe('iPhone companion checks', () => {
+  it('parses xcodebuild -version output', () => {
+    expect(parseXcodeVersion('Xcode 16.2\nBuild version 16C5032a')).toBe('16.2');
+    expect(parseXcodeVersion('Xcode 15.4')).toBe('15.4');
+    expect(parseXcodeVersion('')).toBeNull();
+    expect(parseXcodeVersion('no xcode here')).toBeNull();
+  });
+  it('parses xcodegen --version output', () => {
+    expect(parseXcodegenVersion('xcodegen version 2.38.0')).toBe('2.38.0');
+    expect(parseXcodegenVersion('2.37.0')).toBe('2.37.0');
+    expect(parseXcodegenVersion('')).toBeNull();
+    expect(parseXcodegenVersion('no version')).toBeNull();
+  });
+  it('parses xcrun devicectl list devices output', () => {
+    const connected = `Devices:
+Name       Hostname                    Identifier                             State       Model
+--------   -------------------------   ------------------------------------   ---------   ----------------------
+Kwassant   Kwassant.coredevice.local   814203EE-0740-4604-8057-E8886278443F   connected   iPhone XR (iPhone11,8)`;
+    expect(parseDevicectlDevices(connected)).toEqual({
+      name: 'Kwassant',
+      model: 'iPhone XR (iPhone11,8)',
+      state: 'connected',
+    });
+
+    const multiple = `Devices:
+Name       Hostname                    Identifier                             State                  Model
+--------   -------------------------   ------------------------------------   --------------------   ----------------------
+iPad       iPad.local                  11111111-1111-1111-1111-111111111111   connected              iPad Pro (iPad13,18)
+iPhone     iPhone.local                22222222-2222-2222-2222-222222222222   unavailable            iPhone 15 Pro (iPhone16,1)`;
+    expect(parseDevicectlDevices(multiple)).toEqual({
+      name: 'iPhone',
+      model: 'iPhone 15 Pro (iPhone16,1)',
+      state: 'unavailable',
+    });
+
+    const spaces = `Devices:
+Name          Hostname                    Identifier                             State       Model
+-----------   -------------------------   ------------------------------------   ---------   ----------------------
+DJ's iPhone   DJ-Phone.local              33333333-3333-3333-3333-333333333333   connected   iPhone 14 (iPhone13,3)`;
+    expect(parseDevicectlDevices(spaces)).toEqual({
+      name: "DJ's iPhone",
+      model: 'iPhone 14 (iPhone13,3)',
+      state: 'connected',
+    });
+
+    const unavailable = `Devices:
+Name       Hostname                    Identifier                             State        Model
+--------   -------------------------   ------------------------------------   -----------   ----------------------
+iPhone     iPhone.local                44444444-4444-4444-4444-444444444444   unavailable   iPhone 15 (iPhone16,2)`;
+    expect(parseDevicectlDevices(unavailable)).toEqual({
+      name: 'iPhone',
+      model: 'iPhone 15 (iPhone16,2)',
+      state: 'unavailable',
+    });
+
+    expect(parseDevicectlDevices('')).toBeNull();
+    expect(parseDevicectlDevices('No devices found')).toBeNull();
+    expect(parseDevicectlDevices('garbage output')).toBeNull();
+    expect(parseDevicectlDevices('Name   State\n------  ------')).toBeNull();
   });
 });

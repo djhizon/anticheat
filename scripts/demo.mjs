@@ -14,7 +14,10 @@ import {
   minimumFromRange,
   openCommand,
   parseArgs,
+  parseDevicectlDevices,
   parseYesNo,
+  parseXcodeVersion,
+  parseXcodegenVersion,
   planSteps,
   seedDefaults,
   shouldOpenBrowser,
@@ -146,6 +149,61 @@ async function doctor() {
   });
   log('\nEnvironment check\n');
   log(formatTable(rows));
+
+  if (process.platform === 'darwin') {
+    const iphoneRows = [];
+    const xcodeResult = spawnSync('xcodebuild', ['-version'], { encoding: 'utf8' });
+    const xcodeVersion = parseXcodeVersion(xcodeResult.stdout);
+    if (xcodeVersion) {
+      iphoneRows.push({
+        status: 'ready',
+        name: 'Xcode',
+        detail: xcodeVersion,
+      });
+    } else {
+      iphoneRows.push({
+        status: 'optional',
+        name: 'Xcode',
+        detail: 'not found (needed only for `npm run ios:device`)',
+      });
+    }
+    const xcodegenResult = spawnSync('xcodegen', ['--version'], { encoding: 'utf8' });
+    const xcodegenVersion = parseXcodegenVersion(xcodegenResult.stdout);
+    if (xcodegenVersion) {
+      iphoneRows.push({
+        status: 'ready',
+        name: 'xcodegen',
+        detail: xcodegenVersion,
+      });
+    } else {
+      iphoneRows.push({
+        status: 'optional',
+        name: 'xcodegen',
+        detail: 'not found. Fix: brew install xcodegen',
+      });
+    }
+    const devicectlResult = spawnSync('xcrun', ['devicectl', 'list', 'devices'], {
+      encoding: 'utf8',
+    });
+    const device = parseDevicectlDevices(devicectlResult.stdout);
+    const readyStates = ['connected', 'available (paired)'];
+    if (device && readyStates.includes(device.state.toLowerCase())) {
+      iphoneRows.push({
+        status: 'ready',
+        name: 'iPhone connected',
+        detail: `${device.name} (${device.model})`,
+      });
+    } else {
+      iphoneRows.push({
+        status: 'optional',
+        name: 'iPhone connected',
+        detail: 'No iPhone connected (needed only for `npm run ios:device`)',
+      });
+    }
+    log('\niPhone app (optional)\n');
+    log(formatTable(iphoneRows));
+  }
+
   return rows.every((row) => row.status !== 'required');
 }
 
