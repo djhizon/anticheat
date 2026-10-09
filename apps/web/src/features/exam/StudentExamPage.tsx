@@ -13,6 +13,8 @@ import { LivenessModal } from '../integrity/LivenessModal.js';
 import { embedWatermark } from '../integrity/watermark.js';
 import { shouldKick } from '../integrity/tabGuard.js';
 import { TransparencyReport } from '../integrity/TransparencyReport.js';
+import { startCameraGuard } from '../integrity/cameraGuard.js';
+import { activeCameraTrack } from '../integrity/physicalCamera.js';
 import { desktopWatcherBridge, startDesktopWatcher } from '../integrity/desktopWatcher.js';
 
 /** Optional per-question time limit (focused mode); not every question has one. */
@@ -285,6 +287,20 @@ export function StudentExamPage({
       return;
     const attemptId = currentDelivery.attempt.id;
     return startDesktopWatcher(bridge, attemptId, (event) => examApi.patchEvents(attemptId, event));
+  }, [currentDelivery?.attempt.id, currentDelivery?.attempt.status, examApi]);
+
+  // Mid-exam camera swap / capture-device guard (event-driven, flags server-side).
+  useEffect(() => {
+    if (!examApi || !currentDelivery || currentDelivery.attempt.status !== 'in_progress') return;
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.addEventListener) return;
+    const attemptId = currentDelivery.attempt.id;
+    return startCameraGuard({
+      media: navigator.mediaDevices,
+      getActiveTrack: activeCameraTrack,
+      report: (event) => {
+        examApi.patchEvents(attemptId, { event }).catch(() => {});
+      },
+    });
   }, [currentDelivery?.attempt.id, currentDelivery?.attempt.status, examApi]);
 
   // Explicit, local-only recording; never start expensive capture with the exam.

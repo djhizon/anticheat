@@ -1,7 +1,7 @@
 import type { CameraEngine, CameraEnvironment } from './cameraSession.js';
 import type { VisionReply } from './visionSignals.js';
 import { VISION_WORKER_CSP } from './visionPolicy.js';
-import { acquirePhysicalCamera } from './physicalCamera.js';
+import { acquirePhysicalCamera, setActiveCameraStream } from './physicalCamera.js';
 
 export function cameraEnvironment(
   video: HTMLVideoElement,
@@ -85,10 +85,12 @@ export function cameraEnvironment(
       }
     },
     async attach(stream) {
+      setActiveCameraStream(stream);
       video.srcObject = stream;
       await video.play();
     },
     detach() {
+      setActiveCameraStream(null);
       video.pause();
       video.srcObject = null;
     },

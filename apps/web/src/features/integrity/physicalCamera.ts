@@ -44,3 +44,16 @@ export async function acquirePhysicalCamera(
   }
   return stream;
 }
+
+// The exam's long-lived camera-panel stream, watched by the mid-exam camera
+// guard. Short-lived streams (e.g. liveness captures) are deliberately not
+// registered, so closing them is never mistaken for an unplugged camera.
+let activeTrack: MediaStreamTrack | null = null;
+
+export function setActiveCameraStream(stream: MediaStream | null): void {
+  activeTrack = stream?.getVideoTracks()[0] ?? null;
+}
+
+export function activeCameraTrack(): MediaStreamTrack | null {
+  return activeTrack;
+}
