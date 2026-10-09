@@ -9,7 +9,7 @@ import type { GeminiRotatingClient } from './gemini.js';
 
 export type SimilarityReport = SimilarityReportResponse;
 
-const SIMILARITY_THRESHOLD = 0.92;
+export const SIMILARITY_THRESHOLD = 0.92;
 
 function cosineSimilarity(a: readonly number[], b: readonly number[]): number {
   if (a.length !== b.length || a.length === 0) return 0;

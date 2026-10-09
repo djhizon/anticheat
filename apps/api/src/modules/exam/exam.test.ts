@@ -654,6 +654,48 @@ describe('exam delivery boundary', () => {
     expect((await exam.routes.handle(studentRequest(owner, 'GET', `/exam/attempts/${attemptId}/transparency`))).status).toBe(200);
   });
 
+  it('lets instructors run cross-student similarity on saved answers', async () => {
+    const seeded = await seedExam();
+    const instructor = await registerStudent('teacher@example.test');
+    auth.database.prepare(`UPDATE users SET role = 'instructor' WHERE id = ?`).run(instructor.userId);
+    const texts = ['the same copied answer', 'the same copied answer!', 'an original thought'];
+    let shortAnswerId = '';
+    for (const [index, text] of texts.entries()) {
+      const student = await registerStudent(`student${index}@example.test`);
+      const assignmentId = await exam.service.assignExam({ examVersionId: seeded.examVersionId, studentId: student.userId });
+      const start = await exam.service.startAttempt(assignmentId, student.userId);
+      shortAnswerId = start.delivery.questions.find((question) => question.type === 'short_answer')!.id;
+      await exam.service.saveAnswers(start.delivery.attempt.id, student.userId, {
+        revision: 0,
+        idempotencyKey: `similarity-save-${index}-key`,
+        answers: Object.fromEntries(start.delivery.questions.map((q) => [q.id, q.id === shortAnswerId ? text : null])),
+      });
+    }
+    const gemini = { embedText: vi.fn(async (text: string) => (text.includes('same') ? [1, 0] : [0, 1])) };
+    const integrity = new IntegrityService(new IntegrityRepository(auth.database), gemini as unknown as GeminiRotatingClient);
+    const routes = new ExamRoutes(exam.service, auth.boundary, config, integrity);
+
+    const listed = await routes.handle(studentRequest(instructor, 'GET', '/exam/instructor/versions'));
+    expect(listed.status).toBe(200);
+    expect((listed.body as { versions: Array<{ id: string; questions: Array<{ id: string }> }> }).versions[0]).toMatchObject({
+      id: seeded.examVersionId,
+      questions: expect.arrayContaining([expect.objectContaining({ id: shortAnswerId })]),
+    });
+
+    const path = `/exam/instructor/versions/${seeded.examVersionId}/questions/${shortAnswerId}/similarity`;
+    const student = await registerStudent('curious@example.test');
+    expect((await routes.handle(studentRequest(student, 'POST', path))).status).toBe(403);
+    const run = await routes.handle(studentRequest(instructor, 'POST', path));
+    expect(run.status).toBe(200);
+    const body = run.body as { report: { pairs: Array<{ flagged: boolean; studentAId: string; studentBId: string }> }; students: Record<string, string> };
+    const flagged = body.report.pairs.filter((pair) => pair.flagged);
+    expect(flagged).toHaveLength(1);
+    expect([body.students[flagged[0]!.studentAId], body.students[flagged[0]!.studentBId]].sort()).toEqual([
+      'student0@example.test',
+      'student1@example.test',
+    ]);
+  });
+
   it('checks audio ownership before inference and reports inference failures instead of empty success', async () => {
     const owner = await registerStudent('audio@example.test');
     const other = await registerStudent('other@example.test');

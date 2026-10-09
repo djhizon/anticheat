@@ -51,6 +51,8 @@ const revisionsPattern = /^\/exam\/attempts\/([^/]+)\/revisions$/u;
 const recordingPattern = /^\/exam\/attempts\/([^/]+)\/recording$/u;
 const speedtestPattern = /^\/exam\/speedtest$/u;
 const phonePresencePattern = /^\/exam\/attempts\/([^/]+)\/phone-presence$/u;
+const instructorVersionsPath = '/exam/instructor/versions';
+const similarityPattern = /^\/exam\/instructor\/versions\/([^/]+)\/questions\/([^/]+)\/similarity$/u;
 
 const problemStatus: Record<ProblemCode, number> = {
   unauthorized: 401,
@@ -118,6 +120,8 @@ function isExamPath(path: string): boolean {
     path === '/exam/assignments' ||
     path === '/exam/phone-heartbeat' ||
     path === '/exam/speedtest' ||
+    path === instructorVersionsPath ||
+    similarityPattern.test(path) ||
     ['/exam/phone-presence/claim', '/exam/phone-presence/challenge', '/exam/phone-presence/heartbeat'].includes(path) ||
     phonePresencePattern.test(path) ||
     path === '/exam/generate' ||
@@ -441,6 +445,23 @@ export class ExamRoutes {
         return jsonResponse(request, this.config.allowedOrigins, 200, { events });
       }
 
+      // ── Instructor: cross-student similarity review ───────────────────────
+      if (method === 'GET' && path === instructorVersionsPath && this.integrity !== null) {
+        this.requireInstructor(request);
+        const versions = this.integrity.listInstructorVersions();
+        return jsonResponse(request, this.config.allowedOrigins, 200, { versions });
+      }
+      const similarityMatch = similarityPattern.exec(path);
+      if (method === 'POST' && similarityMatch !== null && this.integrity !== null) {
+        const principal = this.requireInstructor(request);
+        this.boundary.validateUnsafe(request, principal);
+        const result = await this.integrity.runSimilarity(
+          parsePathId<'ExamVersionId'>(similarityMatch[1] ?? '', 'Exam version ID'),
+          parsePathId<'QuestionVersionId'>(similarityMatch[2] ?? '', 'Question ID'),
+        );
+        return jsonResponse(request, this.config.allowedOrigins, 200, result);
+      }
+
       // ── Pack 8: Phone enrollment ──────────────────────────────────────────
       const enrollMatch = enrollPhonePattern.exec(path);
       if (method === 'POST' && enrollMatch !== null && this.integrity !== null) {
@@ -557,6 +578,12 @@ export class ExamRoutes {
     } catch (error) {
       return problemResponse(request, this.config.allowedOrigins, error);
     }
+  }
+
+  private requireInstructor(request: AuthRequest) {
+    const principal = this.boundary.requirePrincipal(request);
+    this.boundary.requireRole(principal, 'instructor');
+    return principal;
   }
 
   private requireStudent(request: AuthRequest) {

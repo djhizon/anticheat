@@ -13,7 +13,12 @@ import {
   type GeneratedChallenge,
 } from './liveness.js';
 import { checkForAiGeneration, type AiCheckReport } from './aiCheck.js';
-import type { TransparencyEvent } from '@exam-anti-cheat/contracts/exam';
+import { computeSimilarityReport, SIMILARITY_THRESHOLD } from './similarity.js';
+import type {
+  InstructorExamVersion,
+  SimilarityRunResponse,
+  TransparencyEvent,
+} from '@exam-anti-cheat/contracts/exam';
 
 export interface LivenessVerifyResponse {
   readonly passed: boolean;
@@ -154,6 +159,26 @@ export class IntegrityService {
 
   async runAiCheck(question: string, answer: string): Promise<AiCheckReport> {
     return checkForAiGeneration(this.requireGemini(), question, answer);
+  }
+
+  // ── Instructor: cross-student similarity ─────────────────────────────────────
+
+  listInstructorVersions(): InstructorExamVersion[] {
+    return this.repo.listVersionsWithTextQuestions();
+  }
+
+  async runSimilarity(examVersionId: string, questionId: string): Promise<SimilarityRunResponse> {
+    const version = this.repo.listVersionsWithTextQuestions().find((candidate) => candidate.id === examVersionId);
+    if (version === undefined || !version.questions.some((question) => question.id === questionId)) {
+      throw new DomainError('not_found', 'The exam question was not found.');
+    }
+    const answers = this.repo.listTextAnswers(examVersionId, questionId);
+    // Fewer than two answers needs no embeddings, so it works without Gemini keys too.
+    const report =
+      answers.length < 2
+        ? { questionId, pairs: [], threshold: SIMILARITY_THRESHOLD, generatedAt: new Date().toISOString() }
+        : await computeSimilarityReport(this.requireGemini(), questionId, answers);
+    return { report, students: Object.fromEntries(answers.map((answer) => [answer.studentId, answer.email])) };
   }
 
   // ── Phone Enrollment ─────────────────────────────────────────────────────────

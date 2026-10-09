@@ -21,6 +21,13 @@ export interface PhoneEnrollmentRow {
   readonly created_at: string;
 }
 
+export interface InstructorVersionRow {
+  readonly id: string;
+  readonly title: string;
+  readonly versionNumber: number;
+  readonly questions: Array<{ readonly id: string; readonly prompt: string; readonly type: string }>;
+}
+
 export class IntegrityRepository {
   getTransparencyEvents(attemptId: string) {
     const apps = this.db.prepare(`SELECT created_at, foreground_app, display_count FROM app_events WHERE attempt_id = ? AND (display_count > 1 OR foreground_app != '')`).all(attemptId) as any[];
@@ -168,6 +175,63 @@ export class IntegrityRepository {
     this.db
       .prepare(`UPDATE liveness_challenges SET used = 1 WHERE nonce = ?`)
       .run(nonce);
+  }
+
+  // ── Instructor: similarity review ────────────────────────────────────────────
+
+  /** Published exam versions with their free-text questions (the ones worth comparing). */
+  listVersionsWithTextQuestions(): InstructorVersionRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT v.id AS version_id, v.title, v.version_number, q.id AS question_id, q.prompt, q.question_type
+           FROM exam_versions v
+           JOIN exam_version_questions evq ON evq.exam_version_id = v.id
+           JOIN question_versions q ON q.id = evq.question_version_id
+          WHERE v.status = 'published' AND q.question_type IN ('identification', 'short_answer')
+          ORDER BY v.published_at DESC, v.id, evq.position`,
+      )
+      .all() as Array<{
+        version_id: string;
+        title: string;
+        version_number: number;
+        question_id: string;
+        prompt: string;
+        question_type: string;
+      }>;
+    const versions = new Map<string, InstructorVersionRow>();
+    for (const row of rows) {
+      let version = versions.get(row.version_id);
+      if (version === undefined) {
+        version = { id: row.version_id, title: row.title, versionNumber: row.version_number, questions: [] };
+        versions.set(row.version_id, version);
+      }
+      version.questions.push({ id: row.question_id, prompt: row.prompt, type: row.question_type });
+    }
+    return [...versions.values()];
+  }
+
+  /** Every non-empty text answer to one question of one exam version, with the student's email. */
+  listTextAnswers(
+    examVersionId: string,
+    questionVersionId: string,
+  ): Array<{ studentId: string; email: string; text: string }> {
+    const rows = this.db
+      .prepare(
+        `SELECT u.id AS student_id, u.email, a.answer_json
+           FROM attempt_answers a
+           JOIN exam_attempts t ON t.id = a.attempt_id
+           JOIN exam_assignments s ON s.id = t.assignment_id
+           JOIN users u ON u.id = s.student_id
+          WHERE s.exam_version_id = ? AND a.question_version_id = ?
+          ORDER BY u.email`,
+      )
+      .all(examVersionId, questionVersionId) as Array<{ student_id: string; email: string; answer_json: string }>;
+    return rows.flatMap((row) => {
+      const value: unknown = JSON.parse(row.answer_json);
+      return typeof value === 'string' && value.trim() !== ''
+        ? [{ studentId: row.student_id, email: row.email, text: value }]
+        : [];
+    });
   }
 
   // ── Phone Enrollment ─────────────────────────────────────────────────────────

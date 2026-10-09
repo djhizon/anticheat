@@ -144,3 +144,21 @@ export interface TransparencyEvent {
 export interface TransparencyReportResponse {
   readonly events: readonly TransparencyEvent[];
 }
+
+/** Instructor view of a published exam version and its free-text questions. */
+export interface InstructorExamVersion {
+  readonly id: string;
+  readonly title: string;
+  readonly versionNumber: number;
+  readonly questions: readonly { readonly id: string; readonly prompt: string; readonly type: string }[];
+}
+
+export interface InstructorExamVersionsResponse {
+  readonly versions: readonly InstructorExamVersion[];
+}
+
+export interface SimilarityRunResponse {
+  readonly report: SimilarityReportResponse;
+  /** Student id → email, so instructors can recognise who wrote each answer. */
+  readonly students: Readonly<Record<string, string>>;
+}
