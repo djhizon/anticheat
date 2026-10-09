@@ -11,6 +11,7 @@ import { NativePhoneModal } from '../integrity/NativePhoneModal.js';
 import { usePhonePresence } from '../integrity/usePhonePresence.js';
 import { LivenessModal } from '../integrity/LivenessModal.js';
 import { embedWatermark } from '../integrity/watermark.js';
+import { shouldKick } from '../integrity/tabGuard.js';
 
 const AudioPanel = React.lazy(() => import('../integrity/AudioPanel.js').then((m) => ({ default: m.AudioPanel })));
 const CameraIntegrityPanel = React.lazy(() => import('../integrity/CameraIntegrityPanel.js').then((m) => ({ default: m.CameraIntegrityPanel })));
@@ -79,22 +80,7 @@ export function StudentExamPage({
   const firstKeystrokeAtRef = useRef<Record<string, number>>({});
 
   // ── Violation / kick tracking (tab guard is in App.tsx) ───────────────
-  // Check incoming violations for kick threshold
-  const { shouldKick } = { shouldKick: (vs: typeof violations) => {
-    const counts: Record<string, number> = {};
-    for (const v of vs) counts[v.type] = (counts[v.type] ?? 0) + 1;
-    const thresholds: Record<string, number> = {
-      duplicate_tab: 1, focus_lost: 5, page_hidden: 3,
-      fullscreen_exit: 3, paste_detected: 10,
-    };
-    for (const [type, count] of Object.entries(counts)) {
-      if (count >= (thresholds[type] ?? Infinity)) {
-        return [...vs].reverse().find((v: typeof vs[number]) => v.type === type) ?? null;
-      }
-    }
-    return null;
-  }};
-
+  // Kick thresholds live in tabGuard so the exam page and the app shell agree.
   const kickViolation = shouldKick(violations);
 
   // ── Focus-loss and page-hide — fire violations ────────────────────────
