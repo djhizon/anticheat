@@ -20,9 +20,36 @@ body {
   background: radial-gradient(circle at 8% 8%, rgb(143 182 255 / 20%), transparent 28rem), #f4f7fb;
   margin: 0;
   min-width: 320px;
+  /* Room for the fixed demo-mode notices (set by the notice components; 0 outside demo mode). */
+  padding-top: var(--demo-top-offset, 0px);
+  padding-bottom: var(--demo-bottom-offset, 0px);
 }
 #root {
-  min-height: 100vh;
+  min-height: calc(100vh - var(--demo-top-offset, 0px) - var(--demo-bottom-offset, 0px));
+}
+.demo-mode-banner,
+.demo-exemptions-strip {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 100001;
+  box-sizing: border-box;
+  text-align: center;
+}
+.demo-mode-banner {
+  top: 0;
+  padding: 2px 10px;
+  background: #d1ecf1;
+  color: #0c5460;
+  font-size: 12px;
+  pointer-events: none;
+}
+.demo-exemptions-strip {
+  bottom: 0;
+  padding: 8px 16px;
+  background: #fff3cd;
+  color: #493800;
+  font-size: 14px;
 }
 button,
 input {
@@ -1071,7 +1098,7 @@ dd {
 .exam-shell {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: calc(100vh - var(--demo-top-offset, 0px) - var(--demo-bottom-offset, 0px));
   overflow: hidden;
   background: #f5f6fa;
 }
@@ -2013,7 +2040,7 @@ dd {
 .brightness-banner {
   position: fixed;
   /* Bottom edge, so it never covers the exam top bar (Verify I'm here, Require iPhone). */
-  bottom: 16px;
+  bottom: calc(var(--demo-bottom-offset, 0px) + 16px);
   left: 50%;
   transform: translateX(-50%);
   background: #fef08a;

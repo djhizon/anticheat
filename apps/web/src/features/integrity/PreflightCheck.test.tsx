@@ -142,6 +142,12 @@ describe('desktop preflight recovery', () => {
     await act(async () => root.render(<DevelopmentExemptions />));
     expect(container.textContent).toContain('Demo mode: Terminal and ChatGPT are exempt');
     expect(container.querySelector('button')).toBeNull();
+    expect(container.querySelector('aside.demo-exemptions-strip')).not.toBeNull();
+    expect(container.querySelector('aside')?.getAttribute('style')).toBeNull();
+    expect(document.documentElement.style.getPropertyValue('--demo-bottom-offset')).toMatch(/px$/);
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    expect(document.documentElement.style.getPropertyValue('--demo-bottom-offset')).toBe('');
   });
   it('shows the exemptions banner only in demo mode', async () => {
     await render(async () => [target('Exam', true)], undefined, {
@@ -154,6 +160,8 @@ describe('desktop preflight recovery', () => {
     await render(async () => [target('Exam', true)], undefined, { getRunMode: async () => 'demo' });
     await act(async () => root.render(<DemoModeBanner />));
     expect(container.textContent).toContain('Demo mode — nothing is closed or blocked');
+    expect(container.querySelector('aside.demo-mode-banner')).not.toBeNull();
+    expect(document.documentElement.style.getPropertyValue('--demo-top-offset')).toMatch(/px$/);
     await act(async () => root.unmount());
     root = createRoot(container);
     await render(async () => [target('Exam', true)], undefined, {
