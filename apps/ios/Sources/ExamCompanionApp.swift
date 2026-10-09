@@ -152,8 +152,13 @@ struct PairedScreen: View {
     var body: some View {
         VStack(spacing: 20) {
             Spacer()
-            Image(systemName: symbol.name).font(.system(size: 88)).foregroundStyle(symbol.colour)
-                .accessibilityHidden(true)
+            ZStack {
+                PingPulse(colour: symbol.colour, active: controller.link == .connected,
+                          beat: controller.lastAcknowledged)
+                Image(systemName: symbol.name).font(.system(size: 88)).foregroundStyle(symbol.colour)
+            }
+            .frame(width: 220, height: 220)
+            .accessibilityHidden(true)
             Text("Paired with your laptop").font(.largeTitle.bold()).multilineTextAlignment(.center)
             Text("Keep this app open and put the phone face-down on the desk.")
                 .font(.title3).multilineTextAlignment(.center)
@@ -167,7 +172,7 @@ struct PairedScreen: View {
             if MockLaptop.enabled { MockLaptopLog() }
             #endif
             Spacer()
-            Text("Leaving this app or locking the phone pauses answering on your laptop until you come back.")
+            Text("Leaving this app or locking the phone is noted for your instructor. Keep it open until you submit.")
                 .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
             Button("Unpair", role: .destructive) { confirmUnpair = true }.font(.footnote)
                 .confirmationDialog("Unpair from your laptop?", isPresented: $confirmUnpair, titleVisibility: .visible) {
@@ -177,5 +182,46 @@ struct PairedScreen: View {
                 }
         }
         .padding(28)
+    }
+}
+
+/// Radar-style rings that ripple out while the phone is pinging the laptop, with a brighter burst
+/// on every acknowledged ping. Static under Reduce Motion.
+struct PingPulse: View {
+    let colour: Color
+    let active: Bool
+    let beat: Date?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var ripple = false
+    @State private var burst = false
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<3, id: \.self) { ring in
+                Circle()
+                    .stroke(colour.opacity(0.5), lineWidth: 3)
+                    .scaleEffect(ripple ? 2.2 : 0.6)
+                    .opacity(ripple ? 0 : 0.9)
+                    .animation(
+                        reduceMotion || !active
+                            ? nil
+                            : .easeOut(duration: 2.4).repeatForever(autoreverses: false)
+                                .delay(Double(ring) * 0.8),
+                        value: ripple)
+            }
+            Circle()
+                .fill(colour.opacity(burst ? 0.35 : 0.12))
+                .scaleEffect(burst ? 1.25 : 1.0)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.45), value: burst)
+        }
+        .frame(width: 120, height: 120)
+        .opacity(active ? 1 : 0.35)
+        .onAppear { ripple = active && !reduceMotion }
+        .onChange(of: active) { now in ripple = now && !reduceMotion }
+        .onChange(of: beat) { _ in
+            guard !reduceMotion else { return }
+            burst = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { burst = false }
+        }
     }
 }
