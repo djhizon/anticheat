@@ -98,13 +98,13 @@ network. A successful laptop localhost page alone does not prove LAN access.
 
 Defaults are `ffmpeg` on PATH and, under `apps/api`, the existing
 `vendor/whisper.cpp/build/bin/whisper-cli` and
-`vendor/whisper.cpp/models/ggml-base.bin`. Overrides are `FFMPEG_BIN`,
-`WHISPER_BIN`, and `WHISPER_MODEL_PATH`. GPU use is opt-in with `WHISPER_USE_GPU=1`.
-Install the base model with the vendored `models/download-ggml-model.sh base` script.
-The default model's upstream SHA-1 is `465707469ff3a37a2b9b8d8f89f2f99de7299dac`.
+`vendor/whisper.cpp/models/ggml-small.en-q5_1.bin`. Overrides are `FFMPEG_BIN`,
+`WHISPER_BIN`, `WHISPER_MODEL` (named model) and `WHISPER_MODEL_PATH`. GPU use is opt-in with
+`WHISPER_USE_GPU=1`. `npm run setup:whisper` downloads the model and checks its SHA-256
+against `scripts/whisper-models.sh`.
 
 The API checks audio attempt ownership, admits one transcription at a time,
-limits input to 1 MiB, and bounds FFmpeg/Whisper execution to 15/30 seconds.
+limits input to 1 MiB, and bounds FFmpeg/Whisper execution to 15/60 seconds (`WHISPER_TIMEOUT_MS`).
 Inference failures return HTTP 503 instead of a successful empty transcript.
 The client displays failure and stops submitting clips until restarted.
 

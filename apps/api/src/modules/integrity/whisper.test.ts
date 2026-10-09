@@ -10,7 +10,15 @@ vi.mock('node:util', () => ({ promisify: () => mocks.execute }));
 vi.mock('node:fs/promises', () => ({
   default: { access: mocks.access, mkdtemp: mocks.mkdir, writeFile: mocks.write, rm: mocks.remove },
 }));
-import { isWhisperReadyWav, transcribeAudio } from './whisper.js';
+import {
+  isNonSpeechTranscript,
+  isWhisperReadyWav,
+  resolveWhisperModelPath,
+  transcribeAudio,
+  whisperArgs,
+  whisperLanguage,
+  whisperPrompt,
+} from './whisper.js';
 
 function wavFile(
   options: {
@@ -71,9 +79,12 @@ describe('bounded local transcription', () => {
     expect(await transcribeAudio(Buffer.from('fixture'))).toBe('Test speech');
     expect(mocks.execute.mock.calls[0]?.[1]).toContain('16000');
     expect(mocks.execute.mock.calls[1]?.[0]).toContain('/apps/api/vendor/whisper.cpp/');
-    expect(mocks.execute.mock.calls[1]?.[2]).toMatchObject({ timeout: 30000 });
+    expect(mocks.execute.mock.calls[1]?.[2]).toMatchObject({ timeout: 60000 });
     expect(mocks.execute.mock.calls[1]?.[1]).toContain('-ng');
-    expect(mocks.execute.mock.calls[1]?.[1].join(' ')).toContain('ggml-base.bin');
+    expect(mocks.execute.mock.calls[1]?.[1].join(' ')).toContain(
+      'vendor/whisper.cpp/models/ggml-small.en-q5_1.bin',
+    );
+    expect(mocks.execute.mock.calls[1]?.[1].join(' ')).toContain('-l en -sns -nth 0.6');
     expect(mocks.remove).toHaveBeenCalledWith('/tmp/exam-audio-fixture', {
       recursive: true,
       force: true,
@@ -102,9 +113,19 @@ describe('bounded local transcription', () => {
     await expect(transcribeAudio(Buffer.alloc(0))).rejects.toThrow('size');
     expect(mocks.execute).not.toHaveBeenCalled();
   });
+  it('returns empty text for non-speech output so it stays out of the timeline', async () => {
+    mocks.execute.mockResolvedValueOnce({ stdout: '' }).mockResolvedValueOnce({
+      stdout: ' [BLANK_AUDIO]\n',
+    });
+    expect(await transcribeAudio(Buffer.from('fixture'))).toBe('');
+    mocks.execute.mockResolvedValueOnce({ stdout: ' you\n' });
+    expect(await transcribeAudio(wavFile())).toBe('');
+  });
   it('reports a missing model without exposing paths or recording audio', async () => {
     mocks.access.mockRejectedValueOnce(new Error('/private/model/path'));
-    await expect(transcribeAudio(Buffer.from('fixture'))).rejects.toThrow('base model is missing');
+    await expect(transcribeAudio(Buffer.from('fixture'))).rejects.toThrow(
+      'speech model is missing',
+    );
     expect(mocks.execute).not.toHaveBeenCalled();
   });
   it('reports timeouts and releases its worker slot for a retry', async () => {
@@ -132,6 +153,85 @@ describe('bounded local transcription', () => {
     await expect(first).resolves.toBe('queued');
     await expect(second).resolves.toBe('queued');
     vi.unstubAllEnvs();
+  });
+});
+
+describe('whisper configuration', () => {
+  it('pins English, suppresses non-speech tokens and biases with a short prompt by default', () => {
+    const args = whisperArgs('/m.bin', '/c.wav', {});
+    expect(args.join(' ')).toContain('-l en');
+    expect(args).not.toContain('auto');
+    expect(args).toContain('-sns');
+    expect(args.slice(args.indexOf('-nth'), args.indexOf('-nth') + 2)).toEqual(['-nth', '0.6']);
+    expect(args.slice(args.indexOf('--prompt'), args.indexOf('--prompt') + 2)).toEqual([
+      '--prompt',
+      'Exam room. English speech.',
+    ]);
+    expect(args).toContain('-ng');
+  });
+  it('honours WHISPER_LANGUAGE (including auto) and rejects malformed values', () => {
+    expect(whisperArgs('/m', '/c', { WHISPER_LANGUAGE: 'auto' }).join(' ')).toContain('-l auto');
+    expect(whisperArgs('/m', '/c', { WHISPER_LANGUAGE: 'TL' }).join(' ')).toContain('-l tl');
+    expect(whisperLanguage({ WHISPER_LANGUAGE: '--translate' })).toBe('en');
+    expect(whisperLanguage({ WHISPER_LANGUAGE: '' })).toBe('en');
+  });
+  it('lets WHISPER_PROMPT replace or disable the prompt', () => {
+    expect(whisperArgs('/m', '/c', { WHISPER_PROMPT: '' })).not.toContain('--prompt');
+    expect(whisperPrompt({ WHISPER_PROMPT: 'Physics\nexam.' })).toBe('Physics exam.');
+  });
+  it('resolves the model from WHISPER_MODEL_PATH, then WHISPER_MODEL, then the default', () => {
+    expect(resolveWhisperModelPath({ WHISPER_MODEL_PATH: '/x/model.bin' })).toBe('/x/model.bin');
+    expect(resolveWhisperModelPath({ WHISPER_MODEL: 'large-v3-turbo' })).toMatch(
+      /vendor\/whisper\.cpp\/models\/ggml-large-v3-turbo-q5_0\.bin$/,
+    );
+    expect(resolveWhisperModelPath({ WHISPER_MODEL: 'large-v3' })).toMatch(
+      /ggml-large-v3-q5_0\.bin$/,
+    );
+    expect(resolveWhisperModelPath({ WHISPER_MODEL: 'base' })).toMatch(/ggml-base-q5_1\.bin$/);
+    expect(resolveWhisperModelPath({ WHISPER_MODEL: '../../etc/passwd' })).toMatch(
+      /ggml-small\.en-q5_1\.bin$/,
+    );
+    expect(resolveWhisperModelPath({})).toMatch(/ggml-small\.en-q5_1\.bin$/);
+  });
+  it('shrinks the encoder window only when WHISPER_AUDIO_CTX is a valid size', () => {
+    expect(whisperArgs('/m', '/c', {})).not.toContain('-ac');
+    const args = whisperArgs('/m', '/c', { WHISPER_AUDIO_CTX: '512' });
+    expect(args.slice(args.indexOf('-ac'), args.indexOf('-ac') + 2)).toEqual(['-ac', '512']);
+    expect(whisperArgs('/m', '/c', { WHISPER_AUDIO_CTX: '100' })).not.toContain('-ac');
+    expect(whisperArgs('/m', '/c', { WHISPER_AUDIO_CTX: '9999' })).not.toContain('-ac');
+    expect(whisperArgs('/m', '/c', { WHISPER_AUDIO_CTX: '0' })).not.toContain('-ac');
+  });
+});
+
+describe('non-speech filter', () => {
+  it.each([
+    '',
+    '[MUSIC]',
+    ' [BLANK_AUDIO] ',
+    '(upbeat music)',
+    '[Music] (applause) ♪',
+    '*sigh*',
+    'you',
+    ' Thank you.',
+    'Thanks for watching!',
+    'English speech.',
+    'Exam room. English speech.',
+    'the the the the',
+    'Ah, ah, ah.',
+  ])('drops %j', (text) => {
+    expect(isNonSpeechTranscript(text, 'Exam room. English speech.')).toBe(true);
+  });
+  it.each([
+    'And so my fellow Americans, ask not what your country',
+    'What is the answer to question three?',
+    'Thank you, can you read me number two?',
+    '[MUSIC] open the notes',
+    'no no',
+  ])('keeps %j', (text) => {
+    expect(isNonSpeechTranscript(text, 'Exam room. English speech.')).toBe(false);
+  });
+  it('does not treat a prompt echo as non-speech when the prompt is disabled', () => {
+    expect(isNonSpeechTranscript('English speech.', '')).toBe(false);
   });
 });
 

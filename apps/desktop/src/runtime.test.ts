@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildServerEnv,
+  bundledWhisperModel,
   CappedLog,
   resolveRuntimePaths,
   startRuntime,
@@ -74,7 +75,7 @@ describe('runtime paths and environment', () => {
       entry: '/res/api/api-server.mjs',
       webRoot: '/res/web',
       whisperBin: '/res/whisper/whisper-cli',
-      whisperModel: '/res/whisper/ggml-base-q5_1.bin',
+      whisperModel: '/res/whisper/ggml-small.en-q5_1.bin',
       ffmpegBin: undefined,
     });
     expect(
@@ -82,8 +83,27 @@ describe('runtime paths and environment', () => {
     ).toMatchObject({
       entry: '/repo/apps/api/dist/api-server.mjs',
       webRoot: '/repo/apps/web/dist',
+      whisperModel: undefined,
       ffmpegBin: undefined,
     });
+  });
+
+  it('finds the single bundled whisper model and leaves the dev model to the API', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'whisper-bundle-'));
+    try {
+      expect(bundledWhisperModel(dir)).toBe(join(dir, 'ggml-small.en-q5_1.bin'));
+      writeFileSync(join(dir, 'ggml-large-v3-turbo-q5_0.bin'), '');
+      writeFileSync(join(dir, 'whisper-cli'), '');
+      expect(bundledWhisperModel(dir)).toBe(join(dir, 'ggml-large-v3-turbo-q5_0.bin'));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    const dev = buildServerEnv(
+      { isPackaged: false, resourcesPath: '/res', repoRoot: '/repo', userDataPath: '/ud' },
+      { WHISPER_MODEL: 'small.en' },
+    );
+    expect(dev.WHISPER_MODEL).toBe('small.en');
+    expect(dev.WHISPER_MODEL_PATH).toBeUndefined();
   });
 
   it('builds the server environment without NODE_ENV', () => {
@@ -98,7 +118,7 @@ describe('runtime paths and environment', () => {
       DATABASE_PATH: '/ud/data/exam-anti-cheat.sqlite',
       SERVE_WEB_DIST: '/res/web',
       WHISPER_BIN: '/res/whisper/whisper-cli',
-      WHISPER_MODEL_PATH: '/res/whisper/ggml-base-q5_1.bin',
+      WHISPER_MODEL_PATH: '/res/whisper/ggml-small.en-q5_1.bin',
     });
     expect(env.FFMPEG_BIN).toBeUndefined();
     expect(env.NODE_ENV).toBeUndefined();

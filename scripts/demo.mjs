@@ -72,7 +72,21 @@ function dbPath() {
 }
 
 const whisperBinary = resolve('apps/api/vendor/whisper.cpp/build/bin/whisper-cli');
-const whisperModel = resolve('apps/api/vendor/whisper.cpp/models/ggml-base.bin');
+// Same resolution as the API (apps/api/src/modules/integrity/whisper.ts WHISPER_MODELS).
+const whisperModelFiles = {
+  'large-v3-turbo': 'ggml-large-v3-turbo-q5_0.bin',
+  'small.en': 'ggml-small.en-q5_1.bin',
+  'large-v3': 'ggml-large-v3-q5_0.bin',
+  base: 'ggml-base-q5_1.bin',
+};
+const whisperModelName = process.env.WHISPER_MODEL || envLocalValue('WHISPER_MODEL');
+const whisperModelPath = process.env.WHISPER_MODEL_PATH || envLocalValue('WHISPER_MODEL_PATH');
+const whisperModel = whisperModelPath
+  ? resolve('apps/api', whisperModelPath) // the API runs from apps/api
+  : resolve(
+      'apps/api/vendor/whisper.cpp/models',
+      whisperModelFiles[whisperModelName] ?? whisperModelFiles['small.en'],
+    );
 
 async function doctor() {
   const rows = [];
@@ -357,7 +371,7 @@ async function main() {
   run(npm, ['run', plan.visionAction === 'verify' ? 'vision:verify' : 'vision:prepare']);
   if (plan.askWhisper) {
     const build = await ask(
-      'Speech transcription needs whisper.cpp. Build it now (about 2-5 minutes)? [y/N] ',
+      'Speech transcription needs whisper.cpp. Build it now (2-5 minutes plus a ~190 MB model download)? [y/N] ',
     );
     if (build) run(npm, ['run', 'setup:whisper']);
     else log('Skipping Whisper: transcription stays disabled. Enable later: npm run setup:whisper');

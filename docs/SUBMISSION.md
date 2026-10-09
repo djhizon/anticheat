@@ -39,7 +39,7 @@ https://github.com/djhizon/examguard
 - **Camera checks in the browser:** MediaPipe Face Landmarker (face presence,
   multiple faces, head pose) and EfficientDet-Lite0 (phone detection), in a Web
   Worker. No frame leaves the device.
-- **Speech-to-text:** whisper.cpp with the `ggml-base` model, run by the local
+- **Speech-to-text:** whisper.cpp with the English `ggml-small.en-q5_1` model, run by the local
   API as a child process.
 - **Liveness checks:** random colour flash (camera reads the face's colour
   response), head-turn fallback (MediaPipe head pose) and spoken-words option
@@ -76,7 +76,7 @@ https://github.com/djhizon/examguard
 - MediaPipe Face Landmarker (`face_landmarker.task`, float16, a few MB)
 - MediaPipe Object Detector, EfficientDet-Lite0 (`efficientdet_lite0.tflite`,
   int8, a few MB; COCO's 80 classes)
-- OpenAI Whisper `base` via whisper.cpp (`ggml-base.bin`, about 148 MB)
+- OpenAI Whisper `small.en` via whisper.cpp (`ggml-small.en-q5_1.bin`, about 190 MB)
 - Google OWL-ViT `google/owlvit-base-patch32` via Hugging Face Transformers
   (optional, about 600 MB)
 - Apple Vision built-in requests on iOS (`VNDetectHumanRectanglesRequest`,

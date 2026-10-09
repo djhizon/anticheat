@@ -15,6 +15,127 @@ const MAX_CLIP_BYTES = 1024 * 1024;
 const MAX_CLIP_MS = 6000;
 
 /**
+ * Named models (WHISPER_MODEL) and their ggml files. Keep in sync with
+ * scripts/whisper-models.sh, which downloads and checksums them.
+ */
+export const WHISPER_MODELS = {
+  'large-v3-turbo': 'ggml-large-v3-turbo-q5_0.bin',
+  'small.en': 'ggml-small.en-q5_1.bin',
+  'large-v3': 'ggml-large-v3-q5_0.bin',
+  base: 'ggml-base-q5_1.bin',
+} as const;
+export type WhisperModelName = keyof typeof WHISPER_MODELS;
+export const DEFAULT_WHISPER_MODEL: WhisperModelName = 'small.en';
+const DEFAULT_PROMPT = 'Exam room. English speech.';
+
+function isModelName(value: string): value is WhisperModelName {
+  return Object.prototype.hasOwnProperty.call(WHISPER_MODELS, value);
+}
+
+/** WHISPER_MODEL_PATH wins; otherwise the named model (unknown names fall back to the default). */
+export function resolveWhisperModelPath(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.WHISPER_MODEL_PATH) return env.WHISPER_MODEL_PATH;
+  const requested = (env.WHISPER_MODEL ?? '').trim();
+  const name = isModelName(requested) ? requested : DEFAULT_WHISPER_MODEL;
+  return path.join(apiRoot, 'vendor/whisper.cpp/models', WHISPER_MODELS[name]);
+}
+
+/** Spoken language: English unless WHISPER_LANGUAGE names another code or `auto`. */
+export function whisperLanguage(env: NodeJS.ProcessEnv = process.env): string {
+  const value = (env.WHISPER_LANGUAGE ?? '').trim().toLowerCase();
+  return /^(auto|[a-z]{2,3})$/.test(value) ? value : 'en';
+}
+
+/** Decoding prompt; WHISPER_PROMPT overrides it and an empty value turns it off. */
+export function whisperPrompt(env: NodeJS.ProcessEnv = process.env): string {
+  const value = env.WHISPER_PROMPT ?? DEFAULT_PROMPT;
+  return value
+    .replace(/[\r\n]+/g, ' ')
+    .trim()
+    .slice(0, 200);
+}
+
+/** whisper-cli arguments for one clip (exported for tests). */
+export function whisperArgs(
+  modelPath: string,
+  wav: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  // Greedy decoding keeps CPU time bounded. The language is pinned (auto-detect
+  // misread short or quiet clips as other languages), non-speech tokens such as
+  // "[MUSIC]" are suppressed, and segments whisper itself rates as probably
+  // silent are dropped (--no-speech-thold).
+  const args = [
+    '-m',
+    modelPath,
+    '-f',
+    wav,
+    '-d',
+    String(MAX_CLIP_MS),
+    '-nt',
+    '-bo',
+    '1',
+    '-bs',
+    '1',
+    '-l',
+    whisperLanguage(env),
+    '-sns',
+    '-nth',
+    '0.6',
+  ];
+  const prompt = whisperPrompt(env);
+  if (prompt) args.push('--prompt', prompt);
+  // Opt-in speed-up: encode only the first N of 1500 frames (20 ms each) instead
+  // of a 30 s window. 512 covers a 6 s clip and cuts encoder time two- to three-fold,
+  // at some accuracy risk, so it is off by default. Must cover the clip (>= 320).
+  const audioCtx = Number(env.WHISPER_AUDIO_CTX);
+  if (Number.isInteger(audioCtx) && audioCtx >= 320 && audioCtx < 1500)
+    args.push('-ac', String(audioCtx));
+  if (!useWhisperGpu(env)) args.push('-ng');
+  return args;
+}
+
+// Whole-clip outputs Whisper is known to invent for silence, room noise or music.
+const HALLUCINATED_PHRASES = new Set([
+  'you',
+  'you know',
+  'thank you',
+  'thank you very much',
+  'thanks for watching',
+  'thank you for watching',
+  'please subscribe',
+  'bye',
+  'the',
+]);
+
+function normalise(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}' ]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * True when a transcript carries no speech: only bracketed tags ("[MUSIC]",
+ * "(upbeat music)", "[BLANK_AUDIO]", "*sigh*", music notes), a known silence
+ * hallucination ("you", "Thank you."), an echo of the decoding prompt, or one
+ * token repeated ("the the the"). Such clips stay out of the timeline.
+ */
+export function isNonSpeechTranscript(text: string, prompt = whisperPrompt()): boolean {
+  const spoken = text.replace(/\[[^\]]*\]|\([^)]*\)|\*[^*]*\*|[♪♫]+/g, ' ').trim();
+  const words = normalise(spoken);
+  if (!words) return true;
+  if (HALLUCINATED_PHRASES.has(words)) return true;
+  if (prompt) {
+    const echoes = [prompt, ...prompt.split(/[.!?]+/)].map(normalise).filter(Boolean);
+    if (echoes.includes(words)) return true;
+  }
+  const tokens = words.split(' ');
+  return tokens.length >= 3 && new Set(tokens).size === 1;
+}
+
+/**
  * Strictly recognises a 16 kHz mono 16-bit PCM WAV that whisper-cli can read directly.
  * Anything else (including malformed headers) returns false and takes the ffmpeg path.
  */
@@ -80,7 +201,7 @@ function failed(stage: string, error: unknown): TranscriptionError {
   const detail = error as { code?: string; killed?: boolean; signal?: string };
   if (detail?.killed || detail?.signal === 'SIGTERM')
     return new TranscriptionError(
-      `${stage} timed out. Use the smaller Whisper base model and retry.`,
+      `${stage} timed out. On a slower computer set WHISPER_MODEL=small.en and retry.`,
     );
   if (detail?.code === 'ENOENT')
     return new TranscriptionError(
@@ -99,14 +220,12 @@ export async function transcribeAudio(audioBuffer: Buffer): Promise<string> {
   try {
     const whisperBin =
       process.env.WHISPER_BIN ?? path.join(apiRoot, 'vendor/whisper.cpp/build/bin/whisper-cli');
-    const modelPath =
-      process.env.WHISPER_MODEL_PATH ??
-      path.join(apiRoot, 'vendor/whisper.cpp/models/ggml-base.bin');
+    const modelPath = resolveWhisperModelPath();
     try {
       await Promise.all([fs.access(whisperBin), fs.access(modelPath)]);
     } catch {
       throw new TranscriptionError(
-        'Whisper executable or base model is missing. Install the local model before retrying audio.',
+        'Whisper executable or speech model is missing. Run npm run setup:whisper before retrying audio.',
       );
     }
     directory = await fs.mkdtemp(path.join(tmpdir(), 'exam-audio-'));
@@ -139,31 +258,16 @@ export async function transcribeAudio(audioBuffer: Buffer): Promise<string> {
         throw failed('Audio conversion', error);
       });
     }
-    // A small CPU model keeps the demo responsive and avoids unavailable Metal
-    // devices. Never send audio to a remote fallback.
-    const args = [
-      '-m',
-      modelPath,
-      '-f',
-      wav,
-      '-d',
-      String(MAX_CLIP_MS),
-      '-nt',
-      '-bo',
-      '1',
-      '-bs',
-      '1',
-      '-l',
-      'auto',
-    ];
-    if (!useWhisperGpu()) args.push('-ng');
-    const { stdout } = await execute(whisperBin, args, {
-      timeout: 30000,
+    // Never send audio to a remote fallback.
+    const { stdout } = await execute(whisperBin, whisperArgs(modelPath, wav), {
+      timeout: limit('WHISPER_TIMEOUT_MS', 60000),
       maxBuffer: 1024 * 1024,
     }).catch((error) => {
       throw failed('Speech transcription', error);
     });
-    return stdout.trim();
+    const transcript = stdout.replace(/\s+/g, ' ').trim();
+    // Tags and silence hallucinations are not speech; callers drop empty text.
+    return isNonSpeechTranscript(transcript) ? '' : transcript;
   } finally {
     // Unique, request-owned temporary audio only; never touch source recordings.
     if (directory) await fs.rm(directory, { recursive: true, force: true }).catch(() => {});

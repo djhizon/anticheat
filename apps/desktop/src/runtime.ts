@@ -29,7 +29,8 @@ export interface RuntimePaths {
   readonly entry: string;
   readonly webRoot: string;
   readonly whisperBin: string;
-  readonly whisperModel: string;
+  /** Bundled model when packaged; undefined in development (the API resolves WHISPER_MODEL). */
+  readonly whisperModel: string | undefined;
   readonly ffmpegBin: string | undefined;
 }
 
@@ -61,6 +62,23 @@ export interface RuntimeHandle {
   stop(): Promise<void>;
 }
 
+/** File name the packaged app expects when the bundle cannot be listed. */
+export const DEFAULT_BUNDLED_WHISPER_MODEL = 'ggml-small.en-q5_1.bin';
+
+/** The packaged app ships exactly one ggml model (see scripts/build-whisper-portable.sh). */
+export function bundledWhisperModel(directory: string): string {
+  try {
+    const found = fs
+      .readdirSync(directory)
+      .filter((name) => /^ggml-.+\.bin$/.test(name))
+      .sort();
+    if (found[0] !== undefined) return path.join(directory, found[0]);
+  } catch {
+    // Missing folder: fall through to the default name; the API reports the missing model.
+  }
+  return path.join(directory, DEFAULT_BUNDLED_WHISPER_MODEL);
+}
+
 export function resolveRuntimePaths(
   deps: Pick<RuntimeDeps, 'isPackaged' | 'resourcesPath' | 'repoRoot'>,
 ): RuntimePaths {
@@ -72,7 +90,7 @@ export function resolveRuntimePaths(
       entry: path.join(base, 'api', 'api-server.mjs'),
       webRoot: path.join(base, 'web'),
       whisperBin: path.join(base, 'whisper', 'whisper-cli'),
-      whisperModel: path.join(base, 'whisper', 'ggml-base-q5_1.bin'),
+      whisperModel: bundledWhisperModel(path.join(base, 'whisper')),
       ffmpegBin: fs.existsSync(ffmpeg) ? ffmpeg : undefined,
     };
   }
@@ -81,7 +99,7 @@ export function resolveRuntimePaths(
     entry: path.join(api, 'dist', 'api-server.mjs'),
     webRoot: path.join(deps.repoRoot, 'apps', 'web', 'dist'),
     whisperBin: path.join(api, 'vendor', 'whisper.cpp', 'build', 'bin', 'whisper-cli'),
-    whisperModel: path.join(api, 'vendor', 'whisper.cpp', 'models', 'ggml-base.bin'),
+    whisperModel: undefined,
     ffmpegBin: undefined,
   };
 }
@@ -110,7 +128,8 @@ export function buildServerEnv(
   env.DATABASE_PATH = path.join(deps.userDataPath, 'data', 'exam-anti-cheat.sqlite');
   env.SERVE_WEB_DIST = paths.webRoot;
   env.WHISPER_BIN = paths.whisperBin;
-  env.WHISPER_MODEL_PATH = paths.whisperModel;
+  // Development keeps any WHISPER_MODEL / WHISPER_MODEL_PATH the developer set.
+  if (paths.whisperModel !== undefined) env.WHISPER_MODEL_PATH = paths.whisperModel;
   if (paths.ffmpegBin !== undefined) env.FFMPEG_BIN = paths.ffmpegBin;
   else if (deps.isPackaged) delete env.FFMPEG_BIN; // Fall back to PATH, never a stale value.
   return env;
