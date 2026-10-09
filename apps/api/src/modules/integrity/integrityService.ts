@@ -6,7 +6,9 @@ import type { IntegrityRepository } from './integrityRepository.js';
 import {
   generateChallenge,
   selectChallengeType,
+  signNonce,
   verifyFlashChallenge,
+  verifyNonceSignature,
   type ChallengeType,
   type GeneratedChallenge,
 } from './liveness.js';
@@ -125,6 +127,10 @@ export class IntegrityService {
     // Null when no GEMINI_API_KEYS are configured: monitoring still works,
     // only the Gemini-backed checks report that they are unavailable.
     private readonly gemini: GeminiRotatingClient | null,
+    // Signs liveness challenges. A per-process random secret is fine because
+    // challenges expire in 90s; set LIVENESS_SECRET to survive restarts.
+    private readonly livenessSecret: string = process.env.LIVENESS_SECRET ||
+      randomBytes(32).toString('hex'),
   ) {}
 
   private requireGemini(): GeminiRotatingClient {
@@ -146,7 +152,8 @@ export class IntegrityService {
       JSON.stringify(challenge.data),
       challenge.expiresAt,
     );
-    return challenge;
+    const signature = signNonce({ attemptId, ...challenge }, this.livenessSecret);
+    return { ...challenge, signature };
   }
 
   async verifyLiveness(
@@ -155,10 +162,15 @@ export class IntegrityService {
     layer: number,
     payload: Record<string, unknown>,
     imageBase64?: string,
+    signature?: unknown,
   ): Promise<LivenessVerifyResponse> {
     const row = this.repo.getLivenessChallenge(nonce);
     if (!row || row.attempt_id !== attemptId || row.used) {
       return { passed: false, layer, detail: 'Challenge invalid or used' };
+    }
+    const signed = { attemptId, nonce, type: row.challenge_type, expiresAt: row.expires_at };
+    if (!verifyNonceSignature(signed, signature, this.livenessSecret)) {
+      return { passed: false, layer, detail: 'Challenge signature invalid' };
     }
     if (new Date(row.expires_at) < new Date()) {
       return { passed: false, layer, detail: 'Challenge expired' };

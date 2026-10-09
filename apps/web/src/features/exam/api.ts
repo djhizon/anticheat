@@ -32,6 +32,7 @@ export interface LivenessChallenge {
   readonly type: string;
   readonly data: Readonly<Record<string, unknown>>;
   readonly expiresAt: string;
+  readonly signature: string;
 }
 
 export interface LivenessVerifyResult {
@@ -396,11 +397,18 @@ export class BrowserExamApi implements ExamApi {
       !isString(body.nonce) ||
       !isString(body.type) ||
       !isRecord(body.data) ||
-      !isString(body.expiresAt)
+      !isString(body.expiresAt) ||
+      !isString(body.signature)
     ) {
       throw new ExamApiError(fallbackProblem);
     }
-    return { nonce: body.nonce, type: body.type, data: body.data, expiresAt: body.expiresAt };
+    return {
+      nonce: body.nonce,
+      type: body.type,
+      data: body.data,
+      expiresAt: body.expiresAt,
+      signature: body.signature,
+    };
   }
 
   async postLivenessVerify(

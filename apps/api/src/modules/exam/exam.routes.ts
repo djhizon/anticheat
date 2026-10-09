@@ -416,6 +416,7 @@ export class ExamRoutes {
           Number(body.layer ?? 2),
           body as Record<string, unknown>,
           body.imageBase64 ? String(body.imageBase64) : undefined,
+          body.signature,
         );
         return jsonResponse(request, this.config.allowedOrigins, 200, result);
       }

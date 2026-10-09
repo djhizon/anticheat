@@ -36,3 +36,4 @@ known issues are documented in [docs/AUDIT.md](docs/AUDIT.md).
 - **CI** — GitHub Actions runs `npm run validate` on every push and pull request.
 - **Docs** — README rewritten around the consent-first story, demo accounts (student + instructor), optional features and the incremental commit trail.
 - **Config** — the API and demo seed now load the gitignored `.env.local` (repo root or `apps/api/`) at startup; previously credentials only worked when exported in the shell.
+- **Signed liveness challenges** — the unused `signNonce()` was a truncated SHA-256 hash, not an HMAC. Challenges are now signed with HMAC-SHA256 over attempt, nonce, type and expiry; the client echoes the signature and the server checks it in constant time before consuming the challenge, so forged, retyped or cross-attempt challenges are rejected without burning the real one.

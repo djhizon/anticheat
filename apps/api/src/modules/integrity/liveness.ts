@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 export const CHALLENGE_TTL_MS = 90_000;
 export const FLASH_BRIGHTNESS_THRESHOLD = 8.0;
@@ -32,6 +32,8 @@ export interface GeneratedChallenge {
   readonly type: ChallengeType;
   readonly data: Record<string, unknown>;
   readonly expiresAt: string;
+  /** HMAC over attempt, nonce, type and expiry; the client must echo it back. */
+  readonly signature?: string;
 }
 
 export function generateChallenge(type: ChallengeType): GeneratedChallenge {
@@ -78,7 +80,30 @@ export function verifyGestureChallenge(
   };
 }
 
-/** HMAC-based nonce signing so the client can't forge challenges */
-export function signNonce(nonce: string, secret: string): string {
-  return createHash('sha256').update(`${nonce}:${secret}`).digest('hex').slice(0, 16);
+interface SignedFields {
+  readonly attemptId: string;
+  readonly nonce: string;
+  readonly type: string;
+  readonly expiresAt: string;
+}
+
+/**
+ * HMAC-SHA256 over the challenge's identity, so a client cannot forge a
+ * challenge, swap its type, extend its expiry or replay it on another attempt.
+ */
+export function signNonce(fields: SignedFields, secret: string): string {
+  return createHmac('sha256', secret)
+    .update([fields.attemptId, fields.nonce, fields.type, fields.expiresAt].join('\n'))
+    .digest('base64url');
+}
+
+export function verifyNonceSignature(
+  fields: SignedFields,
+  signature: unknown,
+  secret: string,
+): boolean {
+  if (typeof signature !== 'string') return false;
+  const expected = Buffer.from(signNonce(fields, secret));
+  const received = Buffer.from(signature);
+  return expected.length === received.length && timingSafeEqual(expected, received);
 }

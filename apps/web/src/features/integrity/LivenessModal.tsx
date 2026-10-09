@@ -74,6 +74,7 @@ export function LivenessModal({ attemptId, examApi, videoEl, onComplete }: Liven
 
       const res = await examApi.postLivenessVerify(attemptId, {
         nonce: activeChallenge.nonce,
+        signature: activeChallenge.signature,
         layer: 3,
         payload: {
           brightnessDelta: activeChallenge.type === 'flash' ? 10.0 : undefined, // mock delta for now
