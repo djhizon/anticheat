@@ -39,7 +39,7 @@ export function createExamPlugin(
     repository,
     clock: dependencies.clock ?? new SystemClock(),
     idGenerator: dependencies.idGenerator ?? new SecureTokenGenerator(),
-    assertPhoneCanAnswer: (attemptId) => phonePresence.assertCanAnswer(attemptId),
+    // Phone loss never blocks answering: the student UI shows a banner and the loss is logged.
   });
 
   // Integrity monitoring always runs; Gemini only powers the AI-backed checks.

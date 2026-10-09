@@ -7,6 +7,7 @@ import {
   cameraTriggers,
   createEvidenceCapture,
   createEvidenceTracker,
+  resetEvidenceBudgets,
 } from './evidenceCapture.js';
 
 const live = (patch: Partial<CameraSnapshot>): CameraSnapshot => ({
@@ -17,7 +18,10 @@ const live = (patch: Partial<CameraSnapshot>): CameraSnapshot => ({
 });
 const JPEG = '/9j/AAAA'; // decodes to FF D8 FF ...
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  resetEvidenceBudgets();
+});
 
 describe('cameraTriggers', () => {
   it('maps vision results to triggers and ignores stale or non-live state', () => {
@@ -239,5 +243,61 @@ describe('createEvidenceCapture', () => {
     again.observeEvent('overlay_detected');
     await Promise.resolve();
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it('shares the 30 s per-trigger cap across capture instances for the same attempt', async () => {
+    stubCanvas();
+    const post = vi.fn(async (_id: string, _request: unknown) => undefined);
+    let now = 1_000_000;
+    const first = createEvidenceCapture({
+      attemptId: 'shared',
+      getVideo: video,
+      post,
+      now: () => now,
+    });
+    first.captureNow('text_injected');
+    await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    first.stop();
+    // The camera panel remounts: a new instance within 30 s must not resend.
+    const second = createEvidenceCapture({
+      attemptId: 'shared',
+      getVideo: video,
+      post,
+      now: () => now,
+    });
+    now += 5_000;
+    second.captureNow('text_injected');
+    await Promise.resolve();
+    expect(post).toHaveBeenCalledTimes(1);
+    now += 30_000;
+    second.captureNow('text_injected');
+    await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+  });
+
+  it('keeps the cap across a page reload (module state lost, sessionStorage kept)', async () => {
+    stubCanvas();
+    const post = vi.fn(async (_id: string, _request: unknown) => undefined);
+    let now = 2_000_000;
+    const first = createEvidenceCapture({
+      attemptId: 'reload',
+      getVideo: video,
+      post,
+      now: () => now,
+    });
+    first.captureNow('text_injected');
+    await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    vi.resetModules();
+    const fresh = await import('./evidenceCapture.js');
+    const second = fresh.createEvidenceCapture({
+      attemptId: 'reload',
+      getVideo: video,
+      post,
+      now: () => now,
+    });
+    now += 5_000;
+    second.captureNow('text_injected');
+    await Promise.resolve();
+    expect(post).toHaveBeenCalledTimes(1);
+    fresh.resetEvidenceBudgets();
   });
 });

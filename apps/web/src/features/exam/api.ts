@@ -200,6 +200,7 @@ function sanitizeDelivery(value: ExamDeliveryProjection): ExamDeliveryProjection
       effectiveDeadline: value.attempt.effectiveDeadline,
       submittedAt: value.attempt.submittedAt,
       expiredAt: value.attempt.expiredAt,
+      ...(value.attempt.awaitingStart === true ? { awaitingStart: true } : {}),
     },
     answers: {
       revision: value.answers.revision,
@@ -266,13 +267,21 @@ export interface ExamApi {
   generateExam(): Promise<ExamGenerationResponse>;
   getPhoneStatus(attemptId: string): Promise<{ active: boolean }>;
   uploadTelemetry(attemptId: string, payload: unknown): Promise<void>;
-  startAttempt(assignmentId: string): Promise<ExamDeliveryProjection>;
+  /** `setup: true` creates the attempt without starting its timer (see beginAttempt). */
+  startAttempt(
+    assignmentId: string,
+    options?: { readonly setup?: boolean },
+  ): Promise<ExamDeliveryProjection>;
+  /** Ends pre-exam setup: starts the attempt timer and releases the questions. */
+  beginAttempt(attemptId: string): Promise<ExamDeliveryProjection>;
   getAttempt(attemptId: string): Promise<ExamDeliveryProjection>;
   saveAnswers(attemptId: string, request: ExamAnswerSaveRequest): Promise<ExamAnswerSaveResponse>;
   submitAttempt(attemptId: string, request: ExamSubmitRequest): Promise<ExamSubmitResponse>;
   postLivenessChallenge(
     attemptId: string,
-    preferred?: Exclude<LivenessChallengeType, 'colour_flash'>,
+    preferred?: 'spoken_words',
+    /** 'spot_check': the mid-exam colour-reflection pulse (always colour, dimmer edge pulse). */
+    purpose?: 'spot_check',
   ): Promise<LivenessChallenge>;
   postLivenessVerify(
     attemptId: string,
@@ -343,10 +352,24 @@ export class BrowserExamApi implements ExamApi {
     };
   }
 
-  async startAttempt(assignmentId: string): Promise<ExamDeliveryProjection> {
+  async startAttempt(
+    assignmentId: string,
+    options: { readonly setup?: boolean } = {},
+  ): Promise<ExamDeliveryProjection> {
     return this.delivery(
       await this.request(
         `/exam/assignments/${encodeURIComponent(assignmentId)}/start`,
+        'POST',
+        options.setup === true ? { setup: true } : undefined,
+        true,
+      ),
+    );
+  }
+
+  async beginAttempt(attemptId: string): Promise<ExamDeliveryProjection> {
+    return this.delivery(
+      await this.request(
+        `/exam/attempts/${encodeURIComponent(attemptId)}/begin`,
         'POST',
         undefined,
         true,
@@ -425,18 +448,23 @@ export class BrowserExamApi implements ExamApi {
 
   async postLivenessChallenge(
     attemptId: string,
-    preferred?: Exclude<LivenessChallengeType, 'colour_flash'>,
+    preferred?: 'spoken_words',
+    purpose?: 'spot_check',
   ): Promise<LivenessChallenge> {
+    const request = {
+      ...(preferred === undefined ? {} : { preferred }),
+      ...(purpose === undefined ? {} : { purpose }),
+    };
     const body = await this.request(
       `/exam/attempts/${encodeURIComponent(attemptId)}/liveness-challenge`,
       'POST',
-      preferred === undefined ? undefined : { preferred },
+      Object.keys(request).length === 0 ? undefined : request,
       true,
     );
     if (
       !isRecord(body) ||
       !isString(body.nonce) ||
-      (body.type !== 'colour_flash' && body.type !== 'head_turn' && body.type !== 'spoken_words') ||
+      (body.type !== 'colour_flash' && body.type !== 'spoken_words') ||
       !isRecord(body.data) ||
       !isString(body.expiresAt) ||
       !isString(body.signature)

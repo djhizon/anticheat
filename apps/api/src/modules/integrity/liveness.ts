@@ -26,9 +26,12 @@ export function kindFromStoredType(stored: string): ChallengeType | undefined {
     : undefined;
 }
 
-/** Default is the effortless colour flash; students may opt into an alternative. */
+/**
+ * The colour reflection is the method. Spoken words is the only alternative (accessibility, in
+ * pre-exam setup). Head turn is no longer issued; its verifier stays for already-stored rows.
+ */
 export function selectChallengeType(preferred?: unknown): ChallengeType {
-  return preferred === 'head_turn' || preferred === 'spoken_words' ? preferred : 'colour_flash';
+  return preferred === 'spoken_words' ? preferred : 'colour_flash';
 }
 
 export const SPOKEN_WORD_POOL = [
@@ -78,7 +81,14 @@ export interface GeneratedChallenge {
   readonly signature?: string;
 }
 
-export function generateChallenge(type: ChallengeType): GeneratedChallenge {
+/**
+ * `pulse`: the mid-exam spot check. The same signed random colour sequence, shown as a subtle,
+ * low-intensity screen-edge pulse instead of a full-screen flash; scored with PULSE_THRESHOLDS.
+ */
+export function generateChallenge(
+  type: ChallengeType,
+  options: { readonly pulse?: boolean } = {},
+): GeneratedChallenge {
   const nonce = generateNonce();
   const expiresAt = new Date(Date.now() + CHALLENGE_TTL_MS).toISOString();
   let data: Record<string, unknown>;
@@ -90,7 +100,8 @@ export function generateChallenge(type: ChallengeType): GeneratedChallenge {
       const next = pick(COLOURS);
       if (next !== sequence[sequence.length - 1]) sequence.push(next);
     }
-    data = { kind: type, sequence };
+    data =
+      options.pulse === true ? { kind: type, sequence, mode: 'pulse' } : { kind: type, sequence };
   } else if (type === 'head_turn') {
     data = { kind: type, sequence: [pick(TURN_DIRECTIONS), pick(TURN_DIRECTIONS)] };
   } else {
@@ -121,11 +132,32 @@ export const COLOUR_MARGIN = 0.02;
 export const COLOUR_MIN_RISE = 0.03;
 /** Mean flashed-channel rise across all flashes (the "small overall rise"). */
 export const COLOUR_OVERALL_RISE = 0.04;
+
+export interface ColourThresholds {
+  readonly margin: number;
+  readonly minRise: number;
+  readonly overallRise: number;
+}
+export const FLASH_THRESHOLDS: ColourThresholds = {
+  margin: COLOUR_MARGIN,
+  minRise: COLOUR_MIN_RISE,
+  overallRise: COLOUR_OVERALL_RISE,
+};
+/**
+ * The mid-exam edge pulse is deliberately dim (photosensitivity), so its reflection is smaller.
+ * The same per-channel ratio rule applies; only the minimum rises are lower. A miss is retried
+ * and never treated as a finding on its own.
+ */
+export const PULSE_THRESHOLDS: ColourThresholds = {
+  margin: 0.006,
+  minRise: 0.01,
+  overallRise: 0.012,
+};
 export const COLOUR_REQUIRED_FLASHES = 2;
 /** Floor for baseline channel values so near-black frames do not explode ratios. */
 const BASELINE_FLOOR = 10;
 
-const COLOUR_RETRY_HINT = 'Try the head-turn check instead.';
+const COLOUR_RETRY_HINT = 'If it keeps failing, use the spoken-words check.';
 export const NO_FACE_DETAIL =
   "We couldn't see your face — sit facing the camera and try again. " + COLOUR_RETRY_HINT;
 
@@ -151,6 +183,7 @@ export function scoreColourResponse(
   baseline: unknown,
   frames: unknown,
   faces?: unknown,
+  thresholds: ColourThresholds = FLASH_THRESHOLDS,
 ): VerifyResult {
   if (!validRgb(baseline) || !Array.isArray(frames) || frames.length !== sequence.length) {
     return { passed: false, detail: `Colour readings were incomplete. ${COLOUR_RETRY_HINT}` };
@@ -177,14 +210,14 @@ export function scoreColourResponse(
     riseTotal += flashed - 1;
     if (
       faceSeen[index] &&
-      flashed - 1 >= COLOUR_MIN_RISE &&
-      others.every((o) => flashed - o >= COLOUR_MARGIN)
+      flashed - 1 >= thresholds.minRise &&
+      others.every((o) => flashed - o >= thresholds.margin)
     ) {
       hits += 1;
     }
   });
   const overall = riseTotal / sequence.length;
-  const passed = hits >= COLOUR_REQUIRED_FLASHES && overall >= COLOUR_OVERALL_RISE;
+  const passed = hits >= COLOUR_REQUIRED_FLASHES && overall >= thresholds.overallRise;
   return {
     passed,
     detail: passed

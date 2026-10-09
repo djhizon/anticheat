@@ -48,6 +48,8 @@ export interface ExamAttemptProjection {
   readonly effectiveDeadline: string;
   readonly submittedAt: string | null;
   readonly expiredAt: string | null;
+  /** True while pre-exam setup is unfinished: no timer yet and no questions delivered. */
+  readonly awaitingStart?: boolean;
 }
 
 export type ExamAnswerValue = string | number | boolean | null;

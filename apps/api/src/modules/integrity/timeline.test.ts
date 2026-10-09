@@ -488,6 +488,64 @@ describe('input behaviour in the timeline', () => {
   });
 });
 
+describe('liveness_unverified flag', () => {
+  it('is a non-accusatory liveness notice, not a conduct finding', () => {
+    const entries = buildTimeline(
+      rows({
+        apps: [
+          {
+            created_at: '2026-09-15T00:05:00.000Z',
+            foreground_app: 'flag:liveness_unverified',
+            display_count: 1,
+          },
+        ],
+      }),
+    ).filter((e) => e.kind === 'liveness_unverified');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.source).toBe('liveness');
+    expect(entries[0]!.severity).toBe('notice');
+    expect(entries[0]!.summary).toContain('not a conduct finding');
+  });
+});
+
+describe('presence spot checks and mandatory screen recording', () => {
+  it('maps each flag to a plain, non-accusatory entry', () => {
+    const flags = [
+      'presence_check_passed',
+      'presence_check_failed',
+      'screen_recording_stopped',
+      'screen_recording_resumed',
+    ];
+    const entries = buildTimeline(
+      rows({
+        apps: flags.map((flag, index) => ({
+          created_at: `2026-09-15T00:0${index + 1}:00.000Z`,
+          foreground_app: `flag:${flag}`,
+          display_count: 1,
+        })),
+      }),
+    );
+    const byKind = new Map(entries.map((entry) => [entry.kind, entry]));
+    expect(byKind.get('presence_check_passed')).toMatchObject({
+      source: 'liveness',
+      severity: 'info',
+    });
+    const failed = byKind.get('presence_check_failed')!;
+    expect(failed).toMatchObject({ source: 'liveness', severity: 'notice' });
+    expect(failed.summary).toContain('not a conduct finding');
+    expect(byKind.get('screen_recording_stopped')).toMatchObject({
+      source: 'system',
+      severity: 'notice',
+    });
+    expect(byKind.get('screen_recording_resumed')).toMatchObject({
+      source: 'system',
+      severity: 'info',
+    });
+    // None falls back to the generic "Recorded: …" entry.
+    expect(entries.filter((entry) => entry.kind === 'flag')).toHaveLength(0);
+  });
+});
+
 describe('input behaviour persistence', () => {
   let db!: DatabaseSync;
   let service!: IntegrityService;

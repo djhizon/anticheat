@@ -19,9 +19,12 @@ import { StudentExamPage } from './features/exam/StudentExamPage.js';
 import { PreflightCheck } from './features/integrity/PreflightCheck.js';
 import { DemoModeBanner } from './features/integrity/DemoModeBanner.js';
 import { DevelopmentExemptions } from './features/integrity/DevelopmentExemptions.js';
-import { AUDIO_CONSENT_TEXT } from './features/integrity/audioSession.js';
-import { acquireBuiltInMicrophone } from './features/integrity/builtInMicrophone.js';
-import { CameraGatePanel, useCameraGate } from './features/integrity/CameraGatePanel.js';
+import { ExamSetup, type SetupResult } from './features/exam/ExamSetup.js';
+import { loadSetupProgress, type ExamSetupSummary } from './features/exam/setupFlow.js';
+import { releaseSensorStreams } from './features/integrity/sensorHub.js';
+import { stopScreenRecording } from './features/integrity/screenRecordingSession.js';
+
+const OPEN_ASSIGNMENT_KEY = 'exam-open-assignment';
 
 export function isSessionExpiredError(error: unknown): boolean {
   return error instanceof ExamApiError && error.problem.code === 'unauthorized';
@@ -203,89 +206,71 @@ function StudentWorkspace({
     }
   }
 
-  // ── Consent modal state ─────────────────────────────────────────────────────
-  const [pendingAssignment, setPendingAssignment] = useState<ExamAssignmentProjection | null>(null);
-  const [consentChecked, setConsentChecked] = useState(false);
-  const [permissionsGranted, setPermissionsGranted] = useState(false);
-  const [permissionsError, setPermissionsError] = useState<string | null>(null);
-  const cameraGate = useCameraGate();
-  const resetCameraGate = cameraGate.reset;
-  // The preview stream is only for the consent step; free the camera once it closes.
-  useEffect(() => {
-    if (pendingAssignment === null) resetCameraGate();
-  }, [pendingAssignment, resetCameraGate]);
+  // ── Pre-exam setup state ───────────────────────────────────────────────────
+  const [setupAssignment, setSetupAssignment] = useState<ExamAssignmentProjection | null>(null);
+  const [setupAttemptId, setSetupAttemptId] = useState<string | null>(null);
+  const [examSetup, setExamSetup] = useState<ExamSetupSummary | null>(null);
   const tabGuardRef = useRef<{ release(): void } | null>(null);
   const [violations, setViolations] = useState<
     import('./features/integrity/tabGuard.js').ViolationEvent[]
   >([]);
+  const autoOpened = useRef(false);
 
-  function requestOpen(assignment: ExamAssignmentProjection): void {
-    console.log('requestOpen called for', assignment.title);
+  function rememberOpen(assignmentId: string | null): void {
     try {
-      if (tabGuardRef.current !== null) {
-        console.log('releasing old tab guard');
-        tabGuardRef.current.release();
-        tabGuardRef.current = null;
-      }
-      console.log('clearing local storage guard');
-      localStorage.removeItem(`exam-tab-guard:${assignment.id}`);
-
-      console.log('setting pending assignment', assignment.id);
-      setPendingAssignment(assignment);
-      setConsentChecked(false);
-      setPermissionsGranted(false);
-      setPermissionsError(null);
-    } catch (e) {
-      console.error('CRITICAL ERROR in requestOpen:', e);
-      alert('Error opening exam: ' + String(e));
+      if (assignmentId === null) sessionStorage.removeItem(OPEN_ASSIGNMENT_KEY);
+      else sessionStorage.setItem(OPEN_ASSIGNMENT_KEY, assignmentId);
+    } catch {
+      // Storage may be unavailable; a refresh then returns to the assignment list.
     }
   }
 
-  async function requestHardwarePermissions(preferredId?: string): Promise<void> {
-    try {
-      setPermissionsError(null);
-      setPermissionsGranted(false);
-      // Camera gate: a real native webcam with a live, non-static feed, or the exam cannot start.
-      const gate = await cameraGate.run(preferredId);
-      if (gate.state !== 'ok') return;
-      const microphone = await acquireBuiltInMicrophone();
-      microphone.getTracks().forEach((track) => track.stop());
-      setPermissionsGranted(true);
-    } catch (err) {
-      setPermissionsError(
-        err instanceof Error
-          ? err.message
-          : 'Camera or built-in microphone unavailable. Check macOS Privacy settings.',
-      );
-    }
-  }
-
-  async function confirmOpen(): Promise<void> {
-    if (pendingAssignment === null) return;
-    const assignment = pendingAssignment;
-    setPendingAssignment(null);
-    setExamLoading(true);
-
-    // ── Install tab guard BEFORE loading the exam (use assignment ID) ────
+  async function enterExam(
+    assignment: ExamAssignmentProjection,
+    nextDelivery: ExamDeliveryProjection,
+  ): Promise<void> {
+    // Install the tab guard once the exam is running (use assignment ID).
     const { createTabGuard } = await import('./features/integrity/tabGuard.js');
     setViolations([]);
-    const guard = createTabGuard(assignment.id, (v) => {
-      setViolations((prev) => {
-        const next = [...prev, v];
-        // If this violation immediately demands a kick, it will be caught by exam page
-        return next;
-      });
-    });
-    // Release any previous guard
+    const guard = createTabGuard(assignment.id, (v) => setViolations((prev) => [...prev, v]));
     tabGuardRef.current?.release();
     tabGuardRef.current = guard;
-
+    const progress = loadSetupProgress(assignment.id);
+    setExamSetup({
+      identityVerified: progress.identity && progress.identityUnverified !== true,
+      phoneUsed: progress.phone,
+    });
+    rememberOpen(assignment.id);
+    setSetupAssignment(null);
     setSelectedAssignment(assignment.id);
-    setExamLoading(true);
-    setDelivery(null);
     setError(null);
+    setDelivery(nextDelivery);
+  }
+
+  async function requestOpen(assignment: ExamAssignmentProjection): Promise<void> {
+    if (tabGuardRef.current !== null) {
+      tabGuardRef.current.release();
+      tabGuardRef.current = null;
+    }
+    localStorage.removeItem(`exam-tab-guard:${assignment.id}`);
+    setSetupAttemptId(null);
+    if (assignment.attemptStatus !== 'in_progress') {
+      // Nothing is created until the student consents (first setup step).
+      rememberOpen(assignment.id);
+      setSetupAssignment(assignment);
+      return;
+    }
+    // An attempt exists: setup is still pending, or the exam already began (refresh mid-exam).
+    setExamLoading(true);
     try {
-      setDelivery(await examApi.startAttempt(assignment.id));
+      const existing = await examApi.startAttempt(assignment.id, { setup: true });
+      if (existing.attempt.awaitingStart === true) {
+        setSetupAttemptId(existing.attempt.id);
+        rememberOpen(assignment.id);
+        setSetupAssignment(assignment);
+      } else {
+        await enterExam(assignment, existing);
+      }
     } catch (caught) {
       if (isSessionExpiredError(caught)) {
         await onSessionExpired();
@@ -297,11 +282,48 @@ function StudentWorkspace({
     }
   }
 
+  async function createSetupAttempt(assignment: ExamAssignmentProjection): Promise<string> {
+    const created = await examApi.startAttempt(assignment.id, { setup: true });
+    setSetupAttemptId(created.attempt.id);
+    return created.attempt.id;
+  }
+
+  async function beginExam(
+    assignment: ExamAssignmentProjection,
+    result: SetupResult,
+  ): Promise<void> {
+    const begun = await examApi.beginAttempt(result.attemptId);
+    await enterExam(assignment, begun);
+  }
+
+  // After a refresh mid-setup or mid-exam, reopen the same assignment (no consent modal).
+  useEffect(() => {
+    if (!preflightPassed || loading || autoOpened.current) return;
+    autoOpened.current = true;
+    let remembered: string | null = null;
+    try {
+      remembered = sessionStorage.getItem(OPEN_ASSIGNMENT_KEY);
+    } catch {
+      remembered = null;
+    }
+    const match = assignments.find((a) => a.id === remembered && a.attemptStatus === 'in_progress');
+    if (match !== undefined) void requestOpen(match);
+    else if (remembered !== null) {
+      const pending = assignments.find((a) => a.id === remembered && a.attemptStatus === null);
+      if (pending !== undefined) void requestOpen(pending);
+    }
+  }, [preflightPassed, loading, assignments]);
+
   function goBack(): void {
     tabGuardRef.current?.release();
     tabGuardRef.current = null;
+    releaseSensorStreams();
+    stopScreenRecording();
+    rememberOpen(null);
     setViolations([]);
     setSelectedAssignment(null);
+    setSetupAssignment(null);
+    setExamSetup(null);
     setDelivery(null);
     setError(null);
     // The attempt may have been submitted: show its real status, not the stale list.
@@ -314,13 +336,30 @@ function StudentWorkspace({
     );
   }
 
+  if (setupAssignment !== null) {
+    const assignment = setupAssignment;
+    return (
+      <ExamSetup
+        key={assignment.id}
+        assignmentId={assignment.id}
+        title={assignment.title}
+        examApi={examApi}
+        attemptId={setupAttemptId}
+        ensureAttempt={() => createSetupAttempt(assignment)}
+        onBegin={(result) => beginExam(assignment, result)}
+        onCancel={goBack}
+      />
+    );
+  }
+
   if (selectedAssignment !== null) {
     return (
       <StudentExamPage
         delivery={delivery}
         error={error}
         examApi={examApi}
-        sensorsConsented={consentChecked && permissionsGranted}
+        sensorsConsented
+        {...(examSetup !== null ? { setup: examSetup } : {})}
         loading={examLoading}
         onBack={goBack}
         violations={violations}
@@ -331,162 +370,6 @@ function StudentWorkspace({
 
   return (
     <>
-      {/* ── Consent modal ───────────────────────────────────────────────────── */}
-      {pendingAssignment !== null && (
-        <div className="modal-backdrop" onClick={() => setPendingAssignment(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-icon">🛡️</div>
-            <h2 className="modal-title">Before you begin</h2>
-            <p className="modal-subtitle">{pendingAssignment.title}</p>
-
-            <ul className="consent-list">
-              <li>
-                <span className="consent-icon">📷</span>
-                <div>
-                  <strong>Camera &amp; Face Detection</strong>
-                  <p>
-                    Your face will be monitored throughout the exam to verify your identity and
-                    detect phone use. Camera checks start automatically when the exam opens; you can
-                    stop and restart them from the sidebar.
-                  </p>
-                </div>
-              </li>
-              <li>
-                <span className="consent-icon">🎙️</span>
-                <div>
-                  <strong>Audio Monitoring</strong>
-                  <p>
-                    Audio checks start automatically a moment after the camera and can be stopped
-                    from the sidebar. The face-liveness check and screen recording are never started
-                    automatically.
-                  </p>
-                  <p>{AUDIO_CONSENT_TEXT}</p>
-                </div>
-              </li>
-              <li>
-                <span className="consent-icon">🌐</span>
-                <div>
-                  <strong>Browser Integrity</strong>
-                  <p>Tab switching, focus loss, and suspicious keyboard patterns will be logged.</p>
-                </div>
-              </li>
-              <li>
-                <span className="consent-icon">🔒</span>
-                <div>
-                  <strong>One Tab Only</strong>
-                  <p>Only one exam tab is permitted. Opening another will lock this session.</p>
-                </div>
-              </li>
-              <li>
-                <span className="consent-icon">☁️</span>
-                <div>
-                  <strong>Optional Screen Recording</strong>
-                  <p>
-                    Only if you turn it on: your screen is recorded in short segments and uploaded
-                    to the school&apos;s secure OneDrive for exam review. Quality adapts to your
-                    connection; if the connection is poor, segments are saved on your computer
-                    instead.
-                  </p>
-                </div>
-              </li>
-              <li>
-                <span className="consent-icon">📸</span>
-                <div>
-                  <strong>Evidence Photos</strong>
-                  <p>
-                    If something unusual is detected (another person, a phone, looking away for a
-                    long time), one still photo is saved for your instructor and shown in your
-                    report.
-                  </p>
-                </div>
-              </li>
-              <li>
-                <span className="consent-icon">🖱️</span>
-                <div>
-                  <strong>Typing and Mouse Patterns</strong>
-                  <p>Typing rhythm and mouse movement patterns (not what you type).</p>
-                </div>
-              </li>
-              <li>
-                <span className="consent-icon">✍️</span>
-                <div>
-                  <strong>No Paste Allowed</strong>
-                  <p>All answers must be typed manually. Paste is blocked and logged.</p>
-                </div>
-              </li>
-              <li>
-                <span className="consent-icon">🤖</span>
-                <div>
-                  <strong>AI Integrity Check</strong>
-                  <p>
-                    Your instructor may ask Gemini AI to review written answers for signs of
-                    AI-generated text. Results are a lead for a conversation, never an automatic
-                    penalty.
-                  </p>
-                </div>
-              </li>
-            </ul>
-
-            <label className="consent-checkbox">
-              <input
-                type="checkbox"
-                checked={consentChecked}
-                onChange={(e) => setConsentChecked(e.target.checked)}
-              />
-              <span>I understand and agree to these monitoring conditions for this exam.</span>
-            </label>
-
-            <CameraGatePanel
-              state={cameraGate.state}
-              cameras={cameraGate.cameras}
-              stream={cameraGate.stream}
-              onCheck={(id) => void requestHardwarePermissions(id)}
-            />
-
-            {!permissionsGranted ? (
-              <div style={{ marginTop: '1rem', textAlign: 'center' }}>
-                <button
-                  className="topbar-submit"
-                  disabled={!consentChecked}
-                  onClick={() => void requestHardwarePermissions()}
-                  type="button"
-                  style={{ width: '100%', padding: '1rem' }}
-                >
-                  Grant Camera & Microphone Access
-                </button>
-                {permissionsError && (
-                  <div style={{ marginTop: '0.5rem', textAlign: 'center' }}>
-                    <p style={{ color: '#ff6b6b', fontSize: '0.9rem', marginBottom: '0.5rem' }}>
-                      {permissionsError}
-                    </p>
-                    <button
-                      onClick={() => void requestHardwarePermissions()}
-                      className="btn btn-secondary"
-                      style={{ fontSize: '0.8rem', padding: '0.25rem 0.75rem' }}
-                    >
-                      Retry Camera Connection
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="modal-actions" style={{ marginTop: '1rem' }}>
-                <button
-                  className="secondary-button"
-                  onClick={() => setPendingAssignment(null)}
-                  type="button"
-                >
-                  Cancel
-                </button>
-                <button className="topbar-submit" onClick={() => void confirmOpen()} type="button">
-                  I Agree — Start Exam
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* ── Assignments page ─────────────────────────────────────────────────── */}
       <main className="workspace">
         <header className="topbar">
@@ -575,7 +458,7 @@ function StudentWorkspace({
                   <button
                     className="submit-button"
                     disabled={loading}
-                    onClick={() => requestOpen(assignment)}
+                    onClick={() => void requestOpen(assignment)}
                     type="button"
                   >
                     {assignment.attemptStatus === null ? 'Start exam' : 'Open exam'}

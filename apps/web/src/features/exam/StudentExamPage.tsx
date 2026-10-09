@@ -17,9 +17,11 @@ import type {
 } from '@examguard/contracts/exam';
 
 import type { ExamApi } from './api.js';
-import { NativePhoneModal } from '../integrity/NativePhoneModal.js';
+import { PhonePairingPanel } from '../integrity/PhonePairingPanel.js';
 import { usePhonePresence } from '../integrity/usePhonePresence.js';
-import { LivenessModal } from '../integrity/LivenessModal.js';
+import { acquireBuiltInMicrophone } from '../integrity/builtInMicrophone.js';
+import { hasHeldSensors, holdSensorStreams } from '../integrity/sensorHub.js';
+import type { ExamSetupSummary } from './setupFlow.js';
 import { embedWatermark } from '../integrity/watermark.js';
 import { shouldKick } from '../integrity/tabGuard.js';
 import { TransparencyReport } from '../integrity/TransparencyReport.js';
@@ -35,6 +37,24 @@ import {
 import { CameraLostOverlay } from '../integrity/CameraGatePanel.js';
 import { desktopWatcherBridge, startDesktopWatcher } from '../integrity/desktopWatcher.js';
 import { useExamBrightness } from '../integrity/desktopBrightness.js';
+import {
+  reopenAfterFailedSubmit,
+  screenRecordingState,
+  startScreenRecording,
+  stopScreenRecording,
+  useScreenRecording,
+} from '../integrity/screenRecordingSession.js';
+import { ScreenRecordingPausedOverlay } from '../integrity/ScreenRecordingPausedOverlay.js';
+import {
+  PresenceNote,
+  usePresenceSpotChecks,
+  type SpotCheckResult,
+} from '../integrity/PresenceSpotCheck.js';
+import { captureEdgePulse } from '../integrity/edgePulse.js';
+import { prefersReducedMotion } from '../integrity/LivenessModal.js';
+import type { Box } from '../integrity/gazeEstimator.js';
+import type { VisionObservation } from '../integrity/visionSignals.js';
+import type { LivenessColour } from '@examguard/contracts/exam';
 
 /** Optional per-question time limit (focused mode); not every question has one. */
 function timeLimitOf(question: object): number | undefined {
@@ -60,6 +80,8 @@ export interface StudentExamPageProps {
   readonly examApi?: ExamApi;
   /** True only after the consent checkbox and camera/microphone grant in the consent modal. */
   readonly sensorsConsented?: boolean;
+  /** Result of the pre-exam setup; drives the read-only status chips. */
+  readonly setup?: ExamSetupSummary;
   readonly violations?: import('../integrity/tabGuard.js').ViolationEvent[];
   readonly onViolation?: (event: import('../integrity/tabGuard.js').ViolationEvent) => void;
 }
@@ -78,6 +100,47 @@ function createIdempotencyKey(prefix: string): string {
   const randomUuid = globalThis.crypto?.randomUUID?.();
   return `${prefix}-${randomUuid ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 }
+function visibleDeliveryId(
+  current: ExamDeliveryProjection | null,
+  initial: ExamDeliveryProjection | null,
+): string {
+  return (current ?? initial)?.attempt.id ?? '';
+}
+
+/** True only when the browser reports both camera and microphone as already allowed. */
+async function permissionsRemembered(): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !navigator.permissions?.query) return false;
+  try {
+    const states = await Promise.all(
+      (['camera', 'microphone'] as const).map((name) =>
+        navigator.permissions.query({ name: name as PermissionName }),
+      ),
+    );
+    return states.every((status) => status.state === 'granted');
+  } catch {
+    return false;
+  }
+}
+
+/** Camera gate (native webcam only) plus the built-in microphone, handed to the sensor panels. */
+async function acquireMonitoringStreams(): Promise<
+  { readonly ok: true } | { readonly ok: false; readonly message: string }
+> {
+  const camera = await checkCamera();
+  if (camera.state !== 'ok') return { ok: false, message: camera.title };
+  try {
+    const microphone = await acquireBuiltInMicrophone();
+    holdSensorStreams({ camera: camera.stream, microphone });
+    return { ok: true };
+  } catch (failure) {
+    camera.stream.getTracks().forEach((track) => track.stop());
+    return {
+      ok: false,
+      message: failure instanceof Error ? failure.message : 'Microphone unavailable.',
+    };
+  }
+}
+
 function displayValue(value: ExamAnswerValue): string {
   return value === null ? '' : String(value);
 }
@@ -89,6 +152,7 @@ export function StudentExamPage({
   onBack,
   examApi,
   sensorsConsented = false,
+  setup,
   violations = [],
   onViolation,
 }: StudentExamPageProps): React.ReactElement {
@@ -108,14 +172,30 @@ export function StudentExamPage({
 
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [examPaused, setExamPaused] = useState(false);
-  const [showPhoneModal, setShowPhoneModal] = useState(false);
-  const [showLivenessModal, setShowLivenessModal] = useState(false);
-  const [livenessOutcome, setLivenessOutcome] = useState<'verified' | 'not_verified' | null>(null);
-  // Read by the window blur handler: the camera/mic permission prompt and the
-  // modal's own focus changes must not count as focus loss.
-  const livenessOpenRef = useRef(false);
-  const [recordScreen, setRecordScreen] = useState(false);
-  const [recordingStatus, setRecordingStatus] = useState('Screen recording is off.');
+  // Screen recording is mandatory: it was started in setup and only a stop pauses answering.
+  const recording = useScreenRecording();
+  const [recordingBusy, setRecordingBusy] = useState(false);
+  const [recordingError, setRecordingError] = useState('');
+  const recordingStopLogged = useRef(false);
+  // Latest single-face box from the running camera checks (where the spot check reads colour).
+  const latestFace = useRef<{ box: Box; at: number } | null>(null);
+  const emitVision = useCallback((observation: VisionObservation) => {
+    latestFace.current =
+      observation.faces === 1 && observation.faceBox
+        ? { box: observation.faceBox, at: performance.now() }
+        : null;
+  }, []);
+  const lastKeyAt = useRef(0);
+  // Camera/microphone monitoring. Setup hands its verified streams over (no new prompt); after a
+  // refresh they are re-acquired automatically, with one "Resume monitoring" button as fallback.
+  const [monitoring, setMonitoring] = useState<'starting' | 'running' | 'needs_gesture'>(() =>
+    hasHeldSensors() ? 'running' : 'starting',
+  );
+  const [monitorEpoch, setMonitorEpoch] = useState(0);
+  const [resumeBusy, setResumeBusy] = useState(false);
+  const [resumeError, setResumeError] = useState('');
+  const [cameraLive, setCameraLive] = useState(false);
+  const [micLive, setMicLive] = useState(false);
   const [focusedMode] = useState(true);
   const phonePresence = usePhonePresence(
     currentDelivery?.attempt.id,
@@ -131,8 +211,8 @@ export function StudentExamPage({
   });
   const continuityRef = useRef<CameraContinuity | null>(null);
   const cameraPaused = cameraState.paused;
-  const phoneBlockedRef = useRef(phonePresence.blocked);
-  phoneBlockedRef.current = phonePresence.blocked;
+  const phoneEverConnected = useRef(false);
+  const phoneLossLogged = useRef(false);
 
   function handleNextQuestion(): void {
     setCurrentQuestionIndex((index) =>
@@ -185,7 +265,6 @@ export function StudentExamPage({
     let pageHiddenCount = 0;
 
     const onBlur = () => {
-      if (livenessOpenRef.current) return;
       setExamPaused(true);
       focusLostCount += 1;
       examApi?.patchEvents(currentDelivery.attempt.id, { event: 'focus_lost' }).catch(() => {});
@@ -399,57 +478,182 @@ export function StudentExamPage({
     // A new epoch (after a resume) restarts the guard so repeat events are reported again.
   }, [currentDelivery?.attempt.id, currentDelivery?.attempt.status, examApi, cameraState.epoch]);
 
-  // Explicit opt-in recording; adapts to the network and never blocks the exam.
-
+  // Re-acquire camera and microphone automatically after a refresh when the browser still
+  // remembers the permission; otherwise ask for a single "Resume monitoring" click.
+  const attemptActive = currentDelivery?.attempt.status === 'in_progress';
   useEffect(() => {
-    if (!recordScreen || !currentDelivery || currentDelivery.attempt.status !== 'in_progress')
-      return;
-
-    let stopRecorder: (() => void) | null = null;
-    let disposed = false;
-    let started = false;
-    import('../integrity/screenRecorder.js')
-      .then(({ createScreenRecorder }) => {
-        if (disposed) return;
-        const recorder = createScreenRecorder(currentDelivery.attempt.id, examApi, (message) => {
-          if (!disposed) setRecordingStatus(message);
-        });
-        const attemptId = currentDelivery.attempt.id;
-        recorder
-          .start()
-          .then(() => {
-            started = true;
-            examApi?.patchEvents(attemptId, { event: 'recording_started' }).catch(() => {});
-          })
-          .catch((err) => {
-            if (!disposed) {
-              setRecordingStatus(
-                err instanceof Error ? err.message : 'Screen recording failed. Retry.',
-              );
-              setRecordScreen(false);
-            }
-          });
-        stopRecorder = recorder.stop;
-      })
-      .catch((err) => {
-        if (!disposed) {
-          setRecordingStatus(
-            err instanceof Error ? err.message : 'Screen recording could not be loaded. Retry.',
-          );
-          setRecordScreen(false);
-        }
-      });
-
-    return () => {
-      disposed = true;
-      stopRecorder?.();
-      if (started) {
-        examApi
-          ?.patchEvents(currentDelivery.attempt.id, { event: 'recording_stopped' })
-          .catch(() => {});
+    if (!attemptActive || !sensorsConsented || monitoring !== 'starting') return;
+    let cancelled = false;
+    void (async () => {
+      const remembered = await permissionsRemembered();
+      if (cancelled) return;
+      if (!remembered) {
+        setMonitoring('needs_gesture');
+        return;
       }
+      const result = await acquireMonitoringStreams();
+      if (cancelled) return;
+      if (result.ok) {
+        setMonitorEpoch((value) => value + 1);
+        setMonitoring('running');
+      } else {
+        setResumeError(result.message);
+        setMonitoring('needs_gesture');
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
-  }, [recordScreen, currentDelivery?.attempt.id, currentDelivery?.attempt.status, examApi]);
+  }, [attemptActive, sensorsConsented, monitoring]);
+
+  async function resumeMonitoring(): Promise<void> {
+    setResumeBusy(true);
+    setResumeError('');
+    const result = await acquireMonitoringStreams();
+    setResumeBusy(false);
+    if (result.ok) {
+      setMonitorEpoch((value) => value + 1);
+      setMonitoring('running');
+    } else {
+      setResumeError(result.message);
+    }
+  }
+
+  // A lost iPhone never blocks answering: show a banner and log the loss and the recovery.
+  const phoneExpected =
+    phonePresence.required === true && (setup?.phoneUsed === true || phoneEverConnected.current);
+  if (phonePresence.connected) phoneEverConnected.current = true;
+  const phoneLost =
+    attemptActive && phoneExpected && !phonePresence.connected && !phonePresence.checking;
+  useEffect(() => {
+    const attemptId = currentDelivery?.attempt.id;
+    if (!examApi || !attemptId || !attemptActive) return;
+    if (phoneLost && !phoneLossLogged.current) {
+      phoneLossLogged.current = true;
+      examApi.patchEvents(attemptId, { event: 'iphone_disconnected' }).catch(() => {});
+    } else if (!phoneLost && phonePresence.connected && phoneLossLogged.current) {
+      phoneLossLogged.current = false;
+      examApi.patchEvents(attemptId, { event: 'iphone_reconnected' }).catch(() => {});
+    }
+  }, [phoneLost, phonePresence.connected, attemptActive, currentDelivery?.attempt.id, examApi]);
+
+  // Mandatory screen recording: when it is not running during the exam, answering pauses until
+  // the student resumes it (one button). Stops and resumes are logged for the instructor.
+  const attemptIdForRecording = currentDelivery?.attempt.id;
+  const recordingPaused =
+    attemptActive &&
+    sensorsConsented &&
+    !(
+      (recording.phase === 'running' || recording.phase === 'finished') &&
+      recording.attemptId === attemptIdForRecording
+    );
+  useEffect(() => {
+    if (!examApi || !attemptIdForRecording || !attemptActive || !sensorsConsented) return;
+    if (recordingPaused && !recordingStopLogged.current) {
+      recordingStopLogged.current = true;
+      examApi
+        .patchEvents(attemptIdForRecording, { event: 'screen_recording_stopped' })
+        .catch(() => {});
+    } else if (!recordingPaused && recordingStopLogged.current) {
+      recordingStopLogged.current = false;
+      examApi
+        .patchEvents(attemptIdForRecording, { event: 'screen_recording_resumed' })
+        .catch(() => {});
+    }
+  }, [recordingPaused, attemptActive, sensorsConsented, attemptIdForRecording, examApi]);
+
+  // The attempt ended (submitted or expired): stop the recording on purpose.
+  const attemptStatus = currentDelivery?.attempt.status;
+  useEffect(() => {
+    if (!attemptIdForRecording || attemptStatus === undefined || attemptStatus === 'in_progress')
+      return;
+    if (screenRecordingState().attemptId !== attemptIdForRecording) return;
+    const phase = screenRecordingState().phase;
+    const wasRunning = phase === 'running' || phase === 'finished';
+    stopScreenRecording();
+    if (wasRunning)
+      examApi?.patchEvents(attemptIdForRecording, { event: 'recording_stopped' }).catch(() => {});
+  }, [attemptStatus, attemptIdForRecording, examApi]);
+
+  async function resumeRecording(): Promise<void> {
+    if (!attemptIdForRecording || recordingBusy) return;
+    setRecordingBusy(true);
+    setRecordingError('');
+    try {
+      await startScreenRecording(attemptIdForRecording, examApi);
+    } catch (failure) {
+      setRecordingError(
+        failure instanceof Error ? failure.message : 'Screen recording could not start.',
+      );
+    } finally {
+      setRecordingBusy(false);
+    }
+  }
+
+  // Mid-exam presence spot checks: a subtle screen-edge colour pulse at natural breaks.
+  const runSpotCheck = useCallback(
+    async (signal: AbortSignal): Promise<SpotCheckResult> => {
+      const attemptId = currentDeliveryRef.current?.attempt.id;
+      const track = activeCameraTrack();
+      if (!examApi || !attemptId || track === null || track.readyState !== 'live')
+        return 'unavailable';
+      const freshFace = () => {
+        const face = latestFace.current;
+        return face !== null && performance.now() - face.at <= 1000 ? face.box : null;
+      };
+      if (freshFace() === null) return 'unavailable';
+      const challenge = await examApi.postLivenessChallenge(attemptId, undefined, 'spot_check');
+      if (signal.aborted || challenge.type !== 'colour_flash') return 'unavailable';
+      const sequence = Array.isArray(challenge.data.sequence)
+        ? (challenge.data.sequence as LivenessColour[])
+        : [];
+      const evidence = await captureEdgePulse(sequence, {
+        stream: new MediaStream([track]),
+        face: freshFace,
+        reducedMotion: prefersReducedMotion(),
+        signal,
+      });
+      if (signal.aborted) return 'unavailable';
+      const result = await examApi.postLivenessVerify(attemptId, {
+        nonce: challenge.nonce,
+        signature: challenge.signature,
+        layer: 3,
+        payload: { baseline: evidence.baseline, frames: evidence.frames, faces: evidence.faces },
+        camera: { label: evidence.cameraLabel },
+      });
+      return result.passed ? 'passed' : 'failed';
+    },
+    [examApi],
+  );
+  const spotChecks = usePresenceSpotChecks({
+    active: attemptActive && sensorsConsented && examApi !== undefined,
+    paused: cameraPaused || recordingPaused,
+    run: runSpotCheck,
+    reportFailed: () => {
+      const attemptId = currentDeliveryRef.current?.attempt.id;
+      if (examApi && attemptId)
+        examApi.patchEvents(attemptId, { event: 'presence_check_failed' }).catch(() => {});
+    },
+    sinceLastKey: () => (lastKeyAt.current === 0 ? Infinity : Date.now() - lastKeyAt.current),
+  });
+  const itemBoundary = spotChecks.itemBoundary;
+  // Moving to another question is a natural break.
+  const previousQuestion = useRef<number | null>(null);
+  useEffect(() => {
+    const before = previousQuestion.current;
+    previousQuestion.current = currentQuestionIndex;
+    if (before === null || before === currentQuestionIndex) return;
+    const question = currentDeliveryRef.current?.questions[before];
+    const value = question === undefined ? null : answersRef.current[question.id];
+    itemBoundary(value !== null && value !== undefined && value !== '');
+  }, [currentQuestionIndex, itemBoundary]);
+  useEffect(() => {
+    const onKey = () => {
+      lastKeyAt.current = Date.now();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
 
   useEffect(
     () => () => {
@@ -512,10 +716,6 @@ export function StudentExamPage({
       if (activeDelivery === null || activeDelivery.attempt.status !== 'in_progress') {
         return null;
       }
-      if (phoneBlockedRef.current) {
-        setSaveState('Not saved');
-        return null;
-      }
       setSaveState('Saving…');
       const response = await examApi.saveAnswers(activeDelivery.attempt.id, {
         revision: revisionRef.current,
@@ -573,7 +773,6 @@ export function StudentExamPage({
   }
 
   function updateAnswer(questionId: string, value: ExamAnswerValue, valStr?: string): void {
-    if (phoneBlockedRef.current) return;
     const next = { ...answersRef.current, [questionId]: value };
     answersRef.current = next;
     setAnswers(next);
@@ -633,8 +832,7 @@ export function StudentExamPage({
       examApi === undefined ||
       activeDelivery === null ||
       activeDelivery.attempt.status !== 'in_progress' ||
-      submitting ||
-      (phoneBlockedRef.current && !savedOnly)
+      submitting
     ) {
       return;
     }
@@ -683,6 +881,7 @@ export function StudentExamPage({
           : 'The deadline passed before submission could be recorded.',
       );
     } catch {
+      reopenAfterFailedSubmit();
       setSubmitError(
         'Submission could not be completed. Your last acknowledged save is preserved.',
       );
@@ -703,7 +902,7 @@ export function StudentExamPage({
       examApi === undefined ||
       examPaused ||
       cameraPaused ||
-      phonePresence.blocked ||
+      recordingPaused ||
       timeOut;
 
     if (question.type === 'multiple_choice') {
@@ -717,7 +916,10 @@ export function StudentExamPage({
                 data-integrity-control="choice"
                 checked={value === option.id}
                 name={`question-${question.id}`}
-                onChange={() => updateAnswer(question.id, option.id)}
+                onChange={() => {
+                  updateAnswer(question.id, option.id);
+                  itemBoundary(true);
+                }}
                 type="radio"
                 value={option.id}
               />
@@ -738,7 +940,10 @@ export function StudentExamPage({
                 data-integrity-control="choice"
                 checked={value === choice}
                 name={`question-${question.id}`}
-                onChange={() => updateAnswer(question.id, choice)}
+                onChange={() => {
+                  updateAnswer(question.id, choice);
+                  itemBoundary(true);
+                }}
                 type="radio"
               />
               <span>{choice ? 'True' : 'False'}</span>
@@ -869,7 +1074,16 @@ export function StudentExamPage({
           onRetry={() => void continuityRef.current?.recheck()}
         />
       )}
-      {examPaused && !phonePresence.blocked && (
+      {isActive && recordingPaused && !cameraPaused && (
+        <ScreenRecordingPausedOverlay
+          busy={recordingBusy || recording.phase === 'starting'}
+          reason={recording.error}
+          error={recordingError}
+          onResume={() => void resumeRecording()}
+        />
+      )}
+      {isActive && sensorsConsented && <PresenceNote phase={spotChecks.phase} />}
+      {examPaused && (
         <div className="exam-pause-overlay" onClick={() => setExamPaused(false)}>
           <div className="pause-card">
             <span className="pause-icon">⏸</span>
@@ -881,51 +1095,38 @@ export function StudentExamPage({
           </div>
         </div>
       )}
-      {isActive && phonePresence.blocked && (
-        <div role="alert" className="phone-connection-notice">
-          <section>
-            <h2>
-              {phonePresence.checking
-                ? 'Checking phone connection…'
-                : 'Phone connection lost — answering paused'}
-            </h2>
-            <p>
-              Keep the paired iPhone app open and active. Returning to it resumes answering after a
-              fresh ping. Your draft stays here; the exam deadline continues.
-            </p>
-            <p>
-              Home, screen lock, permission prompts, calls, or a Wi-Fi interruption may cause a
-              pause. This is not a cheating verdict.
-            </p>
-            <p>
-              You can navigate questions while setting up. Answering and saving remain paused;
-              timers are unchanged.
-            </p>
-            <div className="exam-control-group">
-              <button
-                className="exam-control"
-                type="button"
-                onClick={() => setShowPhoneModal(true)}
-              >
-                Pair / replace iPhone
-              </button>
-              <button
-                className="exam-control exam-control--secondary"
-                type="button"
-                disabled={submitting}
-                onClick={() => void submit(true)}
-              >
-                Submit last saved answers only
-              </button>
-              <button
-                className="exam-control exam-control--secondary"
-                type="button"
-                onClick={onBack}
-              >
-                Back to assignments
-              </button>
-            </div>
-          </section>
+      {isActive && monitoring === 'needs_gesture' && (
+        <div className="monitor-resume-banner" role="status" aria-live="polite">
+          <p>
+            Monitoring needs to reconnect your camera and microphone (the page was refreshed or a
+            device dropped). Your answers are safe and the exam clock keeps running.
+          </p>
+          {resumeError !== '' && <p role="alert">{resumeError}</p>}
+          <button
+            className="exam-control"
+            type="button"
+            disabled={resumeBusy}
+            onClick={() => void resumeMonitoring()}
+          >
+            {resumeBusy ? 'Resuming…' : 'Resume monitoring'}
+          </button>
+        </div>
+      )}
+      {isActive && phoneLost && examApi !== undefined && (
+        <div className="phone-lost-banner" role="status" aria-live="polite">
+          <p>
+            <strong>iPhone disconnected.</strong> You can keep answering; this is logged for your
+            instructor and is not a verdict. To reconnect: unlock the iPhone, open Exam Companion
+            and keep it open, on the same Wi-Fi as this computer.
+          </p>
+          <details>
+            <summary>Still not connecting? Show a new QR code</summary>
+            <PhonePairingPanel
+              attemptId={visibleDeliveryId(currentDelivery, delivery)}
+              api={examApi}
+              heading="Reconnect your iPhone"
+            />
+          </details>
         </div>
       )}
       {violations.length > 0 && !kickViolation && (
@@ -947,76 +1148,62 @@ export function StudentExamPage({
             <span className="topbar-name">{visibleDelivery.exam.title}</span>
           </div>
           <div className="topbar-meta">
-            <span className="topbar-chip topbar-chip--save" aria-live="polite" role="status">
-              {saveState === 'Saved' ? '✅' : saveState === 'Saving…' ? '⏳' : '⚠️'} {saveState}
-            </span>
-            {submitError !== null && (
+            {isActive && saveState !== 'Not saved' && (
+              <span className="topbar-chip topbar-chip--save" aria-live="polite" role="status">
+                {saveState === 'Saved' ? '✅' : saveState === 'Saving…' ? '⏳' : '⚠️'} {saveState}
+              </span>
+            )}
+            {isActive && submitError !== null && (
               <span className="topbar-chip topbar-chip--error" role="alert">
                 ⚠️ Submit failed
               </span>
             )}
-            {receiptMessage !== null && (
-              <span className="topbar-chip topbar-chip--ok" role="status">
-                ✅ Submitted
-              </span>
-            )}
-            {livenessOutcome !== null && (
-              <span
-                className={`topbar-chip ${livenessOutcome === 'verified' ? 'topbar-chip--ok' : 'topbar-chip--error'}`}
-                role="status"
-              >
-                {livenessOutcome === 'verified'
-                  ? '✅ Presence check passed'
-                  : 'Not verified — you can try again'}
-              </span>
+            {isActive && (
+              <div className="topbar-statuses" role="group" aria-label="Monitoring status">
+                <span
+                  className={`topbar-chip ${cameraLive && !cameraPaused ? 'topbar-chip--ok' : ''}`}
+                >
+                  Camera {cameraLive && !cameraPaused ? '✓' : '…'}
+                </span>
+                <span className={`topbar-chip ${micLive ? 'topbar-chip--ok' : ''}`}>
+                  Mic {micLive ? '✓' : '…'}
+                </span>
+                <span className={`topbar-chip ${phonePresence.connected ? 'topbar-chip--ok' : ''}`}>
+                  iPhone {phonePresence.connected ? 'Connected ✓' : phoneExpected ? 'Lost ✗' : '—'}
+                </span>
+                <span
+                  className={`topbar-chip ${setup?.identityVerified === true ? 'topbar-chip--ok' : ''}`}
+                >
+                  Verified {setup?.identityVerified === true ? '✓' : '—'}
+                </span>
+              </div>
             )}
             {isActive && examApi !== undefined && (
-              <>
-                <button
-                  className="topbar-submit"
-                  onClick={() => {
-                    livenessOpenRef.current = true;
-                    setLivenessOutcome(null);
-                    setExamPaused(true);
-                    setShowLivenessModal(true);
-                  }}
-                  type="button"
-                >
-                  🙋 Verify I&apos;m here
-                </button>
-                <button
-                  className="topbar-submit"
-                  onClick={() => setShowPhoneModal(true)}
-                  type="button"
-                >
-                  📱 {phonePresence.required ? 'Replace iPhone pairing' : 'Require iPhone'}
-                </button>
-                <button
-                  className="topbar-submit"
-                  disabled={submitting || phonePresence.blocked}
-                  onClick={() => void submit()}
-                  type="button"
-                >
-                  {submitting ? 'Submitting…' : 'Submit Exam'}
-                </button>
-              </>
+              <button
+                className="topbar-submit"
+                disabled={submitting}
+                onClick={() => void submit()}
+                type="button"
+              >
+                {submitting ? 'Submitting…' : 'Submit Exam'}
+              </button>
             )}
-            {isActive && phonePresence.connected && <span role="status">iPhone connected</span>}
-            {isActive &&
-              !phonePresence.blocked &&
-              (saveState === 'Not saved' || saveState === 'Save failed') && (
-                <button
-                  className="exam-control"
-                  type="button"
-                  disabled={submitting}
-                  onClick={() => void enqueueSave(answersRef.current).catch(() => {})}
-                >
-                  Save retained draft
-                </button>
-              )}
+            {isActive && saveState === 'Save failed' && (
+              <button
+                className="exam-control exam-control--secondary"
+                type="button"
+                disabled={submitting}
+                onClick={() => void enqueueSave(answersRef.current).catch(() => {})}
+              >
+                Save retained draft
+              </button>
+            )}
             {!isActive && (
-              <span className={`status status-${visibleDelivery.attempt.status}`}>
-                {visibleDelivery.attempt.status}
+              <span
+                className={`topbar-chip topbar-chip--ok status-${visibleDelivery.attempt.status}`}
+                role="status"
+              >
+                {visibleDelivery.attempt.status === 'submitted' ? '✅ Submitted' : 'Time expired'}
               </span>
             )}
           </div>
@@ -1030,11 +1217,14 @@ export function StudentExamPage({
               <p className="sidebar-label">📷 Camera &amp; Detection</p>
               <Suspense fallback={<p className="sidebar-loading">Loading…</p>}>
                 <CameraIntegrityPanel
-                  key={cameraState.epoch}
+                  key={`${cameraState.epoch}:${monitorEpoch}`}
                   attempt={attemptProps}
-                  autoStart={sensorsConsented}
+                  autoStart={sensorsConsented && monitoring === 'running'}
                   api={examApi}
                   paused={cameraPaused}
+                  onLiveChange={setCameraLive}
+                  onUnavailable={() => setMonitoring('needs_gesture')}
+                  onVisionSample={emitVision}
                 />
               </Suspense>
             </div>
@@ -1046,100 +1236,114 @@ export function StudentExamPage({
             ref={questionRootRef}
             {...(cameraPaused ? { style: { visibility: 'hidden' as const } } : {})}
           >
-            {/* Progress bar */}
-            <div className="exam-progress-bar">
-              <div
-                className="exam-progress-fill"
-                style={{ width: `${((currentQuestionIndex + 1) / totalQuestions) * 100}%` }}
-              />
-            </div>
-
-            <div className="question-stage">
-              {/* Question badge */}
-              <div className="question-badge">
-                <span className="badge-num">{currentQuestionIndex + 1}</span>
-                <span className="badge-of">/ {totalQuestions}</span>
-                {answeredCount > 0 && (
-                  <span className="badge-answered">{answeredCount} answered</span>
-                )}
-              </div>
-
-              {currentQuestion !== undefined ? (
-                <>
-                  <p className="question-type-tag">{formatQuestionType(currentQuestion.type)}</p>
-
-                  {/* Per-question timer */}
-                  {timeLeft !== undefined && (
-                    <div className={`question-timer-bar ${timeLeft < 10 ? 'urgent' : ''}`}>
-                      <div
-                        className="question-timer-fill"
-                        style={{
-                          width: `${Math.max(0, (timeLeft / ((currentQuestion as { timeLimitSeconds?: number }).timeLimitSeconds ?? 60)) * 100)}%`,
-                        }}
-                      />
-                      <span className="question-timer-label">
-                        {timeLeft > 0 ? `${timeLeft}s` : 'Time up'}
-                      </span>
-                    </div>
-                  )}
-
-                  <h2 className="question-prompt">
-                    {embedWatermark(currentQuestion.prompt, visibleDelivery.attempt.id)}
-                  </h2>
-
-                  <div className="answer-area">
-                    {renderAnswerControl(currentQuestion, isActive)}
-                  </div>
-                </>
-              ) : (
-                <p className="muted">No question at this index.</p>
-              )}
-            </div>
-
-            {/* Navigation row + dot indicators */}
-            <div className="question-nav">
-              <button
-                className="nav-btn nav-btn--prev"
-                disabled={currentQuestionIndex === 0}
-                onClick={() => setCurrentQuestionIndex((i) => i - 1)}
-                type="button"
-              >
-                ←
-              </button>
-
-              <div className="progress-dots">
-                {visibleDelivery.questions.map((q, i) => (
-                  <button
-                    key={q.id}
-                    className={[
-                      'dot',
-                      i === currentQuestionIndex ? 'dot--active' : '',
-                      answers[q.id] !== null && answers[q.id] !== undefined && answers[q.id] !== ''
-                        ? 'dot--answered'
-                        : '',
-                    ].join(' ')}
-                    onClick={() => {
-                      if (i > currentQuestionIndex) {
-                        handleNextQuestion();
-                      } else {
-                        setCurrentQuestionIndex(i);
-                      }
-                    }}
-                    title={`Question ${i + 1}`}
-                    type="button"
+            {receiptMessage !== null && (
+              <p className="sr-only" role="status">
+                {receiptMessage}
+              </p>
+            )}
+            {/* After submit the report replaces the question area. */}
+            {(isActive || examApi?.getTransparencyReport === undefined) && (
+              <>
+                {/* Progress bar */}
+                <div className="exam-progress-bar">
+                  <div
+                    className="exam-progress-fill"
+                    style={{ width: `${((currentQuestionIndex + 1) / totalQuestions) * 100}%` }}
                   />
-                ))}
-              </div>
+                </div>
 
-              <button
-                className="nav-btn nav-btn--next"
-                disabled={currentQuestionIndex === totalQuestions - 1}
-                onClick={handleNextQuestion}
-                type="button"
-              >
-                →
-              </button>
-            </div>
+                <div className="question-stage">
+                  {/* Question badge */}
+                  <div className="question-badge">
+                    <span className="badge-num">{currentQuestionIndex + 1}</span>
+                    <span className="badge-of">/ {totalQuestions}</span>
+                    {answeredCount > 0 && (
+                      <span className="badge-answered">{answeredCount} answered</span>
+                    )}
+                  </div>
+
+                  {currentQuestion !== undefined ? (
+                    <>
+                      <p className="question-type-tag">
+                        {formatQuestionType(currentQuestion.type)}
+                      </p>
+
+                      {/* Per-question timer */}
+                      {timeLeft !== undefined && (
+                        <div className={`question-timer-bar ${timeLeft < 10 ? 'urgent' : ''}`}>
+                          <div
+                            className="question-timer-fill"
+                            style={{
+                              width: `${Math.max(0, (timeLeft / ((currentQuestion as { timeLimitSeconds?: number }).timeLimitSeconds ?? 60)) * 100)}%`,
+                            }}
+                          />
+                          <span className="question-timer-label">
+                            {timeLeft > 0 ? `${timeLeft}s` : 'Time up'}
+                          </span>
+                        </div>
+                      )}
+
+                      <h2 className="question-prompt">
+                        {embedWatermark(currentQuestion.prompt, visibleDelivery.attempt.id)}
+                      </h2>
+
+                      <div className="answer-area">
+                        {renderAnswerControl(currentQuestion, isActive)}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="muted">No question at this index.</p>
+                  )}
+                </div>
+
+                {/* Navigation row + dot indicators */}
+                <div className="question-nav">
+                  <button
+                    className="nav-btn nav-btn--prev"
+                    disabled={currentQuestionIndex === 0}
+                    onClick={() => setCurrentQuestionIndex((i) => i - 1)}
+                    type="button"
+                  >
+                    ←
+                  </button>
+
+                  <div className="progress-dots">
+                    {visibleDelivery.questions.map((q, i) => (
+                      <button
+                        key={q.id}
+                        className={[
+                          'dot',
+                          i === currentQuestionIndex ? 'dot--active' : '',
+                          answers[q.id] !== null &&
+                          answers[q.id] !== undefined &&
+                          answers[q.id] !== ''
+                            ? 'dot--answered'
+                            : '',
+                        ].join(' ')}
+                        onClick={() => {
+                          if (i > currentQuestionIndex) {
+                            handleNextQuestion();
+                          } else {
+                            setCurrentQuestionIndex(i);
+                          }
+                        }}
+                        title={`Question ${i + 1}`}
+                        type="button"
+                      />
+                    ))}
+                  </div>
+
+                  <button
+                    className="nav-btn nav-btn--next"
+                    disabled={currentQuestionIndex === totalQuestions - 1}
+                    onClick={handleNextQuestion}
+                    type="button"
+                  >
+                    →
+                  </button>
+                </div>
+              </>
+            )}
             {!isActive && examApi?.getTransparencyReport !== undefined && (
               <TransparencyReport
                 attemptId={visibleDelivery.attempt.id}
@@ -1154,36 +1358,30 @@ export function StudentExamPage({
           {/* RIGHT SIDEBAR: Audio + Exam Info */}
           <aside className="exam-sidebar exam-sidebar--right">
             <section className="sidebar-section">
-              <p className="sidebar-label">Screen recording (optional)</p>
+              <p className="sidebar-label">Screen recording</p>
               <p className="muted">
-                Includes the built-in microphone. Segments upload to the school&apos;s secure
-                OneDrive for exam review; quality adapts to your connection. On a poor connection
-                they are saved on your computer instead.
+                Your entire screen is recorded for the whole exam, with the built-in microphone.
+                Segments upload to the school&apos;s secure OneDrive for exam review; quality adapts
+                to your connection. On a poor connection they are saved on your computer instead.
               </p>
-              {isActive && (
-                <button
-                  className="exam-control"
-                  type="button"
-                  onClick={() => {
-                    setRecordScreen((value) => !value);
-                    if (recordScreen)
-                      setRecordingStatus(
-                        'Recording stopped. Any segments still waiting will finish uploading or be saved on your computer.',
-                      );
-                  }}
-                >
-                  {recordScreen ? 'Stop recording' : 'Start recording'}
-                </button>
-              )}
-              <p role="status">{recordingStatus}</p>
+              <p role="status">
+                {recording.phase === 'running' && recording.attemptId === attemptIdForRecording
+                  ? recording.status || 'Recording your entire screen.'
+                  : isActive
+                    ? 'Screen recording is not running.'
+                    : 'Screen recording ended.'}
+              </p>
             </section>
             <div className="sidebar-section">
               <p className="sidebar-label">🎙️ Audio Monitor</p>
               <Suspense fallback={<p className="sidebar-loading">Loading…</p>}>
                 <AudioPanel
+                  key={monitorEpoch}
                   attemptId={visibleDelivery.attempt.id}
                   active={isActive}
-                  autoStart={sensorsConsented}
+                  autoStart={sensorsConsented && monitoring === 'running'}
+                  onLiveChange={setMicLive}
+                  onUnavailable={() => setMonitoring('needs_gesture')}
                   {...(examApi ? { examApi } : {})}
                 />
               </Suspense>
@@ -1208,27 +1406,6 @@ export function StudentExamPage({
           </aside>
         </div>
       </div>
-
-      {showPhoneModal && examApi !== undefined && (
-        <NativePhoneModal
-          attemptId={visibleDelivery.attempt.id}
-          api={examApi}
-          onClose={() => setShowPhoneModal(false)}
-        />
-      )}
-
-      {showLivenessModal && examApi && (
-        <LivenessModal
-          attemptId={visibleDelivery.attempt.id}
-          examApi={examApi}
-          onComplete={(success) => {
-            livenessOpenRef.current = false;
-            setLivenessOutcome(success ? 'verified' : 'not_verified');
-            setShowLivenessModal(false);
-            setExamPaused(false);
-          }}
-        />
-      )}
     </>
   );
 }

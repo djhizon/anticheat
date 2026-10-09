@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { createScreenRecorder } from './screenRecorder.js';
+import {
+  WholeScreenRequiredError,
+  createScreenRecorder,
+  dataUrlToBase64,
+  displayMediaRequest,
+  isWholeScreen,
+} from './screenRecorder.js';
 import { ExamApiError, type ExamApi } from '../exam/api.js';
 const mocks = vi.hoisted(() => ({ acquire: vi.fn() }));
 vi.mock('./builtInMicrophone.js', () => ({ acquireBuiltInMicrophone: mocks.acquire }));
@@ -294,4 +300,107 @@ it('saves local downloads one at a time, about 400 ms apart', async () => {
   await vi.advanceTimersByTimeAsync(1);
   expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
   recorder.stop();
+});
+
+it('asks for the whole screen and refuses a shared window or browser tab', async () => {
+  for (const surface of ['window', 'browser']) {
+    const shared = Object.assign(new Track(), {
+      getSettings: () => ({ displaySurface: surface }),
+    });
+    vi.mocked(navigator.mediaDevices.getDisplayMedia).mockResolvedValueOnce(
+      new Stream([shared]) as unknown as MediaStream,
+    );
+    const recorder = createScreenRecorder('a');
+    await expect(recorder.start()).rejects.toBeInstanceOf(WholeScreenRequiredError);
+    expect(shared.stop).toHaveBeenCalled();
+    expect(mocks.acquire).not.toHaveBeenCalled();
+  }
+  expect(Recorder.instances).toHaveLength(0);
+  const request = vi.mocked(navigator.mediaDevices.getDisplayMedia).mock.calls[0]![0] as {
+    video: { displaySurface?: string };
+    selfBrowserSurface?: string;
+  };
+  expect(request.video.displaySurface).toBe('monitor');
+  expect(request.selfBrowserSurface).toBe('exclude');
+});
+
+it('never sends size or frame-rate capture constraints (the desktop app rejects them)', async () => {
+  expect(displayMediaRequest(true)).toEqual({ video: true, audio: false });
+  const browser = displayMediaRequest(false) as { video: Record<string, unknown> };
+  expect(browser.video).toEqual({ displaySurface: 'monitor' });
+
+  // Desktop: plain request and no applyConstraints on the capture track at all.
+  const applyConstraints = vi.fn(async () => {
+    throw Object.assign(new Error('invalid capture constraints'), {
+      name: 'OverconstrainedError',
+    });
+  });
+  const screenTrack = Object.assign(new Track(), { applyConstraints });
+  vi.mocked(navigator.mediaDevices.getDisplayMedia).mockResolvedValueOnce(
+    new Stream([screenTrack]) as unknown as MediaStream,
+  );
+  const desktop = createScreenRecorder('a', undefined, () => {}, { desktop: true });
+  await desktop.start();
+  expect(vi.mocked(navigator.mediaDevices.getDisplayMedia)).toHaveBeenLastCalledWith({
+    video: true,
+    audio: false,
+  });
+  expect(applyConstraints).not.toHaveBeenCalled();
+  expect(Recorder.instances).toHaveLength(1);
+  desktop.stop();
+
+  // Browser: a rejected resize is ignored and recording keeps going.
+  const browserTrack = Object.assign(new Track(), { applyConstraints });
+  vi.mocked(navigator.mediaDevices.getDisplayMedia).mockResolvedValueOnce(
+    new Stream([browserTrack]) as unknown as MediaStream,
+  );
+  const web = createScreenRecorder('a', undefined, () => {}, { desktop: false });
+  await web.start();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(applyConstraints).toHaveBeenCalled();
+  expect(Recorder.instances).toHaveLength(2);
+  expect(Recorder.instances[1]!.state).toBe('recording');
+  web.stop();
+});
+
+it('strips the data-URL header even when the MIME type contains a comma', () => {
+  expect(dataUrlToBase64('data:video/webm;codecs=vp8,opus;base64,GkXfo59C')).toBe('GkXfo59C');
+  expect(dataUrlToBase64('data:video/webm;base64,GkXfo59C')).toBe('GkXfo59C');
+});
+
+it('accepts a whole monitor and browsers that do not report the surface', () => {
+  const monitor = { getSettings: () => ({ displaySurface: 'monitor' }) } as MediaStreamTrack;
+  const unreported = { getSettings: () => ({}) } as MediaStreamTrack;
+  const tab = { getSettings: () => ({ displaySurface: 'browser' }) } as MediaStreamTrack;
+  expect(isWholeScreen(monitor)).toBe(true);
+  expect(isWholeScreen(unreported)).toBe(true);
+  expect(isWholeScreen(tab)).toBe(false);
+  expect(isWholeScreen(undefined)).toBe(false);
+});
+
+it('reports an unexpected end once and continues segment numbering when resumed', async () => {
+  const onEnded = vi.fn();
+  const indexes: number[] = [];
+  const recorder = createScreenRecorder('a', undefined, () => {}, {
+    firstIndex: 7,
+    onEnded,
+    onSegmentIndex: (next) => indexes.push(next),
+  });
+  await recorder.start();
+  await vi.advanceTimersByTimeAsync(60000);
+  expect(indexes).toEqual([8]);
+  video.dispatchEvent(new Event('ended'));
+  expect(onEnded).toHaveBeenCalledOnce();
+  expect(onEnded.mock.calls[0]![0]).toContain('Screen sharing ended');
+  recorder.stop();
+  expect(onEnded).toHaveBeenCalledOnce();
+});
+
+it('finish() waits for the last segment before resolving', async () => {
+  const recorder = createScreenRecorder('a');
+  await recorder.start();
+  const done = recorder.finish(1000);
+  await vi.advanceTimersByTimeAsync(200);
+  await done;
+  expect(URL.createObjectURL).toHaveBeenCalledOnce(); // the final local segment was saved
 });

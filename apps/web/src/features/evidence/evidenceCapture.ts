@@ -144,6 +144,58 @@ export interface EvidenceCaptureOptions {
   readonly now?: () => number;
 }
 
+// Caps are shared per attempt across capture instances: the camera panel remounts (pause/resume,
+// setup → exam), and a fresh instance must not resend what the server would reject with 429.
+const attemptBudgets = new Map<string, { recent: Map<string, number>; sent: number }>();
+
+// Also kept in sessionStorage so a page reload mid-exam does not reset the caps.
+const budgetKey = (attemptId: string) => `examguard-evidence-${attemptId}`;
+
+function loadBudget(attemptId: string): { recent: Map<string, number>; sent: number } {
+  try {
+    const raw = sessionStorage.getItem(budgetKey(attemptId));
+    if (raw) {
+      const parsed = JSON.parse(raw) as { recent?: [string, number][]; sent?: number };
+      return { recent: new Map(parsed.recent ?? []), sent: Number(parsed.sent) || 0 };
+    }
+  } catch {
+    // Storage unavailable or corrupt: start a fresh budget.
+  }
+  return { recent: new Map(), sent: 0 };
+}
+
+function saveBudget(attemptId: string, budget: { recent: Map<string, number>; sent: number }) {
+  try {
+    sessionStorage.setItem(
+      budgetKey(attemptId),
+      JSON.stringify({ recent: [...budget.recent], sent: budget.sent }),
+    );
+  } catch {
+    // Best effort only.
+  }
+}
+
+function attemptBudget(attemptId: string) {
+  let budget = attemptBudgets.get(attemptId);
+  if (budget === undefined) {
+    budget = loadBudget(attemptId);
+    attemptBudgets.set(attemptId, budget);
+  }
+  return budget;
+}
+
+/** Test hook: forget shared per-attempt caps. */
+export function resetEvidenceBudgets(): void {
+  for (const attemptId of attemptBudgets.keys()) {
+    try {
+      sessionStorage.removeItem(budgetKey(attemptId));
+    } catch {
+      // ignore
+    }
+  }
+  attemptBudgets.clear();
+}
+
 /**
  * Takes single still snapshots when a trigger holds. Never records continuous video.
  * The client-side caps mirror the server: 1 per (source, trigger) per 30 s, 60 per attempt.
@@ -151,9 +203,9 @@ export interface EvidenceCaptureOptions {
 export function createEvidenceCapture(options: EvidenceCaptureOptions) {
   const now = options.now ?? Date.now;
   const tracker = createEvidenceTracker(now);
-  const recent = new Map<string, number>();
+  const budget = attemptBudget(options.attemptId);
+  const recent = budget.recent;
   const eventState = new Map<EvidenceTrigger, { since: number; last: number }>();
-  let sent = 0;
   let stopped = false;
 
   async function submit(
@@ -161,13 +213,14 @@ export function createEvidenceCapture(options: EvidenceCaptureOptions) {
     trigger: EvidenceTrigger,
     image: string | null,
   ): Promise<void> {
-    if (stopped || image === null || sent >= EVIDENCE_MAX_PER_ATTEMPT) return;
+    if (stopped || image === null || budget.sent >= EVIDENCE_MAX_PER_ATTEMPT) return;
     const key = `${source}:${trigger}`;
     const at = now();
     const last = recent.get(key);
     if (last !== undefined && at - last < EVIDENCE_MIN_GAP_MS) return;
     recent.set(key, at);
-    sent += 1;
+    budget.sent += 1;
+    saveBudget(options.attemptId, budget);
     try {
       await options.post(options.attemptId, {
         source,

@@ -2,6 +2,7 @@ import type { CameraEngine, CameraEnvironment } from './cameraSession.js';
 import type { VisionReply } from './visionSignals.js';
 import { VISION_WORKER_CSP } from './visionPolicy.js';
 import { acquirePhysicalCamera, setActiveCameraStream } from './physicalCamera.js';
+import { heldCameraStream } from './sensorHub.js';
 
 export function cameraEnvironment(
   video: HTMLVideoElement,
@@ -76,7 +77,8 @@ export function cameraEnvironment(
     },
     acquire: async () => {
       try {
-        const stream = await acquirePhysicalCamera();
+        // Reuse the stream the pre-exam camera check verified; fall back to a fresh acquire.
+        const stream = heldCameraStream() ?? (await acquirePhysicalCamera());
         cameraStatus(`Camera: ${stream.getVideoTracks()[0]?.label ?? 'Selected webcam'}`);
         return stream;
       } catch (error) {

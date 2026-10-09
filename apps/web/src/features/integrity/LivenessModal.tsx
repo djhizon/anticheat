@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { LivenessColour, LivenessTurnDirection } from '@examguard/contracts/exam';
+import type { LivenessColour } from '@examguard/contracts/exam';
 
 import type { ExamApi, LivenessChallenge } from '../exam/api.js';
-import { captureHeadTurn, withTimeout } from './headTurn.js';
+import { withTimeout } from './faceModelSource.js';
 import { captureColourFlash } from './livenessCapture.js';
 import { captureSpokenWords } from './spokenWords.js';
 
@@ -10,15 +10,23 @@ interface LivenessModalProps {
   readonly attemptId: string;
   readonly examApi: ExamApi;
   readonly onComplete: (success: boolean) => void;
+  /**
+   * Render in the page (pre-exam setup) instead of as a modal dialog: no overlay, no focus trap
+   * and no Close link, so the student can only leave by passing.
+   */
+  readonly inline?: boolean;
+  /** Called each time a verification try ends without passing (any method, errors included). */
+  readonly onFailedAttempt?: () => void;
 }
 
-type Preferred = 'head_turn' | 'spoken_words' | undefined;
+/** Colour reflection is the method; spoken words is the accessibility alternative. */
+type Preferred = 'spoken_words' | undefined;
 type Phase = 'loading' | 'ready' | 'running' | 'done';
 
 /** Camera permission, flash, microphone and the verify request each get this long. */
 export const CHECK_TIMEOUT_MS = 30_000;
-/** Head turn and colour flash load a face model on-device, so they get a longer budget. */
-export const HEAD_TURN_TIMEOUT_MS = 60_000;
+/** The colour check loads a face model on-device, so it gets a longer budget. */
+export const VISUAL_CHECK_TIMEOUT_MS = 60_000;
 export const NOT_VERIFIED_COPY = 'Not verified — you can try again.';
 
 export function prefersReducedMotion(): boolean {
@@ -56,7 +64,13 @@ const linkButton: React.CSSProperties = {
   padding: '0.4rem',
 };
 
-export function LivenessModal({ attemptId, examApi, onComplete }: LivenessModalProps) {
+export function LivenessModal({
+  attemptId,
+  examApi,
+  onComplete,
+  inline = false,
+  onFailedAttempt,
+}: LivenessModalProps) {
   const [phase, setPhase] = useState<Phase>('loading');
   const [challenge, setChallenge] = useState<LivenessChallenge | null>(null);
   const [status, setStatus] = useState('');
@@ -67,7 +81,8 @@ export function LivenessModal({ attemptId, examApi, onComplete }: LivenessModalP
   const completed = useRef(false);
   const abort = useRef<AbortController | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
-  const defaultPreferred = useRef<Preferred>(prefersReducedMotion() ? 'head_turn' : undefined);
+  // Students who ask for reduced motion start with the spoken-words check (no flashing).
+  const defaultPreferred = useRef<Preferred>(prefersReducedMotion() ? 'spoken_words' : undefined);
 
   const finish = useCallback(
     (success: boolean) => {
@@ -79,6 +94,8 @@ export function LivenessModal({ attemptId, examApi, onComplete }: LivenessModalP
     },
     [onComplete],
   );
+  const failedRef = useRef(onFailedAttempt);
+  failedRef.current = onFailedAttempt;
   const passedRef = useRef(false);
   passedRef.current = passed === true;
 
@@ -117,6 +134,7 @@ export function LivenessModal({ attemptId, examApi, onComplete }: LivenessModalP
 
   // Focus moves into the dialog on open and returns to the trigger on close.
   useEffect(() => {
+    if (inline) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = dialogRef.current;
     (dialog?.querySelector<HTMLElement>(FOCUSABLE) ?? dialog)?.focus();
@@ -131,16 +149,17 @@ export function LivenessModal({ attemptId, examApi, onComplete }: LivenessModalP
       document.removeEventListener('keydown', onKey);
       previous?.focus();
     };
-  }, [finish]);
+  }, [finish, inline]);
 
   // The dialog has no focusable content while loading except Close, so keep
   // focus inside whenever the focused button disappears.
   useEffect(() => {
+    if (inline) return;
     const dialog = dialogRef.current;
     if (dialog && !dialog.contains(document.activeElement)) {
       (dialog.querySelector<HTMLElement>(FOCUSABLE) ?? dialog).focus();
     }
-  }, [phase]);
+  }, [phase, inline]);
 
   const trapTab = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'Tab') return;
@@ -188,19 +207,6 @@ export function LivenessModal({ attemptId, examApi, onComplete }: LivenessModalP
           camera: { label: evidence.cameraLabel },
         };
       }
-      if (challenge.type === 'head_turn') {
-        const evidence = await captureHeadTurn(
-          asList(challenge.data.sequence) as LivenessTurnDirection[],
-          setStatus,
-          undefined,
-          undefined,
-          signal,
-        );
-        return {
-          payload: { samples: evidence.samples },
-          camera: { label: evidence.cameraLabel },
-        };
-      }
       setStatus('Getting the microphone ready…');
       const evidence = await captureSpokenWords(
         undefined,
@@ -214,7 +220,8 @@ export function LivenessModal({ attemptId, examApi, onComplete }: LivenessModalP
       };
     };
     try {
-      const timeoutMs = challenge.type === 'spoken_words' ? CHECK_TIMEOUT_MS : HEAD_TURN_TIMEOUT_MS;
+      const timeoutMs =
+        challenge.type === 'spoken_words' ? CHECK_TIMEOUT_MS : VISUAL_CHECK_TIMEOUT_MS;
       let request: Record<string, unknown>;
       try {
         request = await withTimeout(
@@ -241,6 +248,7 @@ export function LivenessModal({ attemptId, examApi, onComplete }: LivenessModalP
       setPassed(res.passed);
       setStatus(res.detail);
       setPhase('done');
+      if (!res.passed) failedRef.current?.();
       if (res.passed) closing.current = setTimeout(() => finish(true), 1800);
     } catch (e) {
       if (!alive.current) return;
@@ -248,48 +256,59 @@ export function LivenessModal({ attemptId, examApi, onComplete }: LivenessModalP
       setStatus('');
       setError(e instanceof Error ? e.message : 'The check could not be completed.');
       setPhase('done');
+      failedRef.current?.();
     }
   };
 
   const words = challenge?.type === 'spoken_words' ? asList(challenge.data.words) : [];
   const busy = phase === 'loading' || phase === 'running';
 
+  const shell: React.HTMLAttributes<HTMLDivElement> & { ref: typeof dialogRef } = inline
+    ? {
+        ref: dialogRef,
+        role: 'group',
+        'aria-labelledby': 'liveness-title',
+        style: { color: '#fff' },
+      }
+    : {
+        ref: dialogRef,
+        role: 'dialog',
+        'aria-modal': true,
+        'aria-labelledby': 'liveness-title',
+        tabIndex: -1,
+        onKeyDown: trapTab,
+        style: {
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.85)',
+          zIndex: 100000,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#fff',
+        },
+      };
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="liveness-title"
-      ref={dialogRef}
-      tabIndex={-1}
-      onKeyDown={trapTab}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        backgroundColor: 'rgba(0,0,0,0.85)',
-        zIndex: 100000,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: '#fff',
-      }}
-    >
+    <div {...shell}>
       <div
         style={{
           background: '#1e1e1e',
-          padding: '2.5rem',
+          padding: inline ? '1.5rem' : '2.5rem',
           borderRadius: '16px',
           border: '1px solid #333',
           textAlign: 'center',
           maxWidth: '520px',
           width: '100%',
+          margin: inline ? '0 auto' : undefined,
         }}
       >
         <h2 id="liveness-title" style={{ marginBottom: '0.5rem', color: '#60a5fa' }}>
           Quick presence check
         </h2>
         <p style={{ color: '#aaa', marginBottom: '1.5rem' }}>
-          Done on this computer. Answering and question timers are paused while this is open; the
-          exam deadline keeps running.
+          {inline
+            ? 'Done on this computer. Pick whichever option works for you; you can switch method at any time.'
+            : 'Done on this computer. Answering and question timers are paused while this is open; the exam deadline keeps running.'}
         </p>
 
         <div aria-live="polite" style={{ minHeight: '5rem', marginBottom: '1.5rem' }}>
@@ -299,13 +318,6 @@ export function LivenessModal({ attemptId, examApi, onComplete }: LivenessModalP
               <strong>Warning: flashing colours.</strong> The screen will show three quick colours
               (red, green, blue) for about two seconds. If flashing bothers you, choose another
               option below.
-            </p>
-          )}
-          {phase === 'ready' && challenge?.type === 'head_turn' && (
-            <p style={{ fontSize: '1.15rem' }}>
-              You will be asked to turn your head{' '}
-              <strong>{asList(challenge.data.sequence).join(', then ')}</strong>, facing the screen
-              again between turns.
             </p>
           )}
           {phase === 'ready' && challenge?.type === 'spoken_words' && (
@@ -355,9 +367,9 @@ export function LivenessModal({ attemptId, examApi, onComplete }: LivenessModalP
             alignItems: 'center',
           }}
         >
-          {!busy && !passed && challenge?.type !== 'head_turn' && (
-            <button type="button" style={linkButton} onClick={() => load('head_turn')}>
-              Try head turn instead
+          {!busy && !passed && challenge?.type === 'spoken_words' && (
+            <button type="button" style={linkButton} onClick={() => load(undefined)}>
+              Use the colour check instead
             </button>
           )}
           {!busy && !passed && challenge?.type !== 'spoken_words' && (
@@ -365,9 +377,11 @@ export function LivenessModal({ attemptId, examApi, onComplete }: LivenessModalP
               I can&apos;t do the visual check
             </button>
           )}
-          <button type="button" style={linkButton} onClick={() => finish(passed === true)}>
-            Close
-          </button>
+          {!inline && (
+            <button type="button" style={linkButton} onClick={() => finish(passed === true)}>
+              Close
+            </button>
+          )}
         </div>
       </div>
     </div>

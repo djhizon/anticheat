@@ -92,7 +92,10 @@ it('issues signed challenges that cover the random sequence and are stored under
   expect(challenge.signature).toBe(
     signNonce({ attemptId: 'a', ...challenge, data: JSON.stringify(challenge.data) }, secret),
   );
-  expect(service(repo).issueLivenessChallenge('a', 'head_turn').type).toBe('head_turn');
+  expect(service(repo).issueLivenessChallenge('a', 'head_turn').type).toBe('colour_flash');
+  const pulse = service(repo).issueLivenessChallenge('a', 'spoken_words', 'spot_check');
+  expect(pulse.type).toBe('colour_flash');
+  expect(pulse.data.mode).toBe('pulse');
   expect(service(repo).issueLivenessChallenge('a', 'spoken_words').type).toBe('spoken_words');
 });
 
@@ -146,7 +149,49 @@ it('scores a colour flash from the measured readings', async () => {
   expect(flat.passed).toBe(false);
 });
 
-it('verifies head turns', async () => {
+it('logs a passed mid-exam pulse as a presence check and never as a liveness failure', async () => {
+  const pulseData = JSON.stringify({
+    kind: 'colour_flash',
+    sequence: ['red', 'green', 'blue'],
+    mode: 'pulse',
+  });
+  const dim = {
+    faces: [true, true, true],
+    baseline: { r: 100, g: 100, b: 100 },
+    frames: [
+      { r: 102.2, g: 100, b: 100 },
+      { r: 100, g: 102.2, b: 100 },
+      { r: 100, g: 100, b: 102.2 },
+    ],
+  };
+  const passRepo = { ...repoFor(pulseData), insertAppEvent: vi.fn() };
+  const passed = await service(passRepo).verifyLiveness(
+    'a',
+    'nonce',
+    3,
+    dim,
+    sign('colour_flash', pulseData),
+    label,
+  );
+  expect(passed.passed).toBe(true);
+  expect(passRepo.insertAppEvent).toHaveBeenCalledWith('a', 'flag:presence_check_passed', 1);
+  expect(passRepo.insertLivenessEvent).not.toHaveBeenCalled();
+
+  const missRepo = { ...repoFor(pulseData), insertAppEvent: vi.fn() };
+  const missed = await service(missRepo).verifyLiveness(
+    'a',
+    'nonce',
+    3,
+    { ...dim, frames: [dim.baseline, dim.baseline, dim.baseline] },
+    sign('colour_flash', pulseData),
+    label,
+  );
+  expect(missed.passed).toBe(false);
+  expect(missRepo.insertAppEvent).not.toHaveBeenCalled();
+  expect(missRepo.insertLivenessEvent).not.toHaveBeenCalled();
+});
+
+it('still verifies head turns stored before they were retired', async () => {
   const samples = [0, -20, 0, 22, 0, 0].map((yaw, i) => ({ t: i * 250, yaw }));
   const result = await service(repoFor(turnData, 'gesture')).verifyLiveness(
     'a',

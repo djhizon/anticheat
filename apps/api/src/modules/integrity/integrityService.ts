@@ -7,6 +7,8 @@ import {
   CHALLENGE_TYPES,
   generateChallenge,
   kindFromStoredType,
+  FLASH_THRESHOLDS,
+  PULSE_THRESHOLDS,
   scoreColourResponse,
   selectChallengeType,
   signNonce,
@@ -101,6 +103,17 @@ export interface TelemetryCounts {
   readonly voice: number;
 }
 
+/** Plain-language student report lines for routine (non-accusatory) events. */
+const TRANSPARENCY_NOTES: Readonly<Record<string, string>> = {
+  'flag:presence_check_passed': 'A quick presence check passed',
+  'flag:presence_check_failed':
+    'A quick presence check could not confirm you after a retry; an instructor may review (not a verdict)',
+  'flag:screen_recording_stopped': 'Screen recording stopped and answering paused until it resumed',
+  'flag:screen_recording_resumed': 'Screen recording resumed',
+  'flag:recording_started': 'Screen recording started',
+  'flag:recording_stopped': 'Screen recording stopped at the end of the exam',
+};
+
 export class IntegrityService {
   async getTransparencyReport(attemptId: string): Promise<TransparencyEvent[]> {
     const data = this.repo.getTransparencyEvents(attemptId);
@@ -136,6 +149,21 @@ export class IntegrityService {
           type: 'HARDWARE',
           severity: 'low',
           description: 'Screen brightness was lowered and the app restored it to maximum',
+        });
+      } else if (TRANSPARENCY_NOTES[app.foreground_app] !== undefined) {
+        events.push({
+          timestamp: app.created_at,
+          type: 'HARDWARE',
+          severity: 'low',
+          description: TRANSPARENCY_NOTES[app.foreground_app]!,
+        });
+      } else if (app.foreground_app === 'flag:liveness_unverified') {
+        events.push({
+          timestamp: app.created_at,
+          type: 'HARDWARE',
+          severity: 'low',
+          description:
+            'The presence check could not be completed after several tries; the student continued and an instructor may review',
         });
       } else if (app.foreground_app.startsWith('flag:')) {
         events.push({
@@ -222,13 +250,22 @@ export class IntegrityService {
 
   // ── Liveness ─────────────────────────────────────────────────────────────────
 
-  issueLivenessChallenge(attemptId: string, preferred?: unknown): GeneratedChallenge {
+  /**
+   * `purpose: 'spot_check'` issues the mid-exam colour-reflection pulse (always colour, signed
+   * `mode: 'pulse'`); otherwise the setup check (colour, or spoken words on request).
+   */
+  issueLivenessChallenge(
+    attemptId: string,
+    preferred?: unknown,
+    purpose?: unknown,
+  ): GeneratedChallenge {
     const since = new Date(Date.now() - LIVENESS_CHALLENGE_WINDOW_MS).toISOString();
     if (this.repo.countLivenessChallengesSince(attemptId, since) >= LIVENESS_CHALLENGE_LIMIT) {
       throw new LivenessRateLimitError();
     }
-    const type: ChallengeType = selectChallengeType(preferred);
-    const challenge = generateChallenge(type);
+    const spotCheck = purpose === 'spot_check';
+    const type: ChallengeType = spotCheck ? 'colour_flash' : selectChallengeType(preferred);
+    const challenge = generateChallenge(type, { pulse: spotCheck });
     const data = JSON.stringify(challenge.data);
     this.repo.insertLivenessChallenge(challenge.nonce, attemptId, type, data, challenge.expiresAt);
     const signature = signNonce({ attemptId, ...challenge, data }, this.livenessSecret);
@@ -247,6 +284,7 @@ export class IntegrityService {
         payload.baseline,
         payload.frames,
         payload.faces,
+        data.mode === 'pulse' ? PULSE_THRESHOLDS : FLASH_THRESHOLDS,
       );
     }
     if (kind === 'head_turn') {
@@ -319,6 +357,13 @@ export class IntegrityService {
       result = { passed: false, detail: 'Unknown challenge type' };
     }
 
+    if (this.isPulse(row.challenge_data)) {
+      // Mid-exam spot check: a server-verified pass is logged as such; a miss is retried by the
+      // client and only reported (non-accusatory) after the retry also missed.
+      if (result.passed) this.recordAppEvent(attemptId, 'flag:presence_check_passed', 1);
+      return { passed: result.passed, layer, detail: result.detail };
+    }
+
     this.repo.insertLivenessEvent(
       attemptId,
       layer,
@@ -332,6 +377,14 @@ export class IntegrityService {
     );
 
     return { passed: result.passed, layer, detail: result.detail };
+  }
+
+  private isPulse(challengeData: string): boolean {
+    try {
+      return (JSON.parse(challengeData) as { mode?: unknown }).mode === 'pulse';
+    } catch {
+      return false;
+    }
   }
 
   private kindOf(challengeData: string, storedType: string): string {

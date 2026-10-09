@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import type { ExamApi } from '../exam/api.js';
-import { HEAD_TURN_TIMEOUT_MS, LivenessModal, NOT_VERIFIED_COPY } from './LivenessModal.js';
+import { LivenessModal, NOT_VERIFIED_COPY, VISUAL_CHECK_TIMEOUT_MS } from './LivenessModal.js';
 
 const mocks = vi.hoisted(() => ({ flash: vi.fn() }));
 vi.mock('./livenessCapture.js', async (original) => ({
@@ -17,10 +17,13 @@ const container = document.createElement('div');
 document.body.append(container);
 let root = createRoot(container);
 
-const challenge = (type: 'colour_flash' | 'head_turn') => ({
+const challenge = (type: 'colour_flash' | 'spoken_words') => ({
   nonce: 'n',
   type,
-  data: { sequence: type === 'head_turn' ? ['left', 'right'] : ['red', 'green', 'blue'] },
+  data:
+    type === 'spoken_words'
+      ? { words: ['apple', 'river', 'table'] }
+      : { sequence: ['red', 'green', 'blue'] },
   expiresAt: 'x',
   signature: 's',
 });
@@ -56,7 +59,7 @@ it('moves to an error state with Close available when the capture hangs', async 
   await act(async () => buttons('Start')!.click());
   expect(container.textContent).toContain('Warning');
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(HEAD_TURN_TIMEOUT_MS + 10);
+    await vi.advanceTimersByTimeAsync(VISUAL_CHECK_TIMEOUT_MS + 10);
   });
   expect(container.textContent).toContain(NOT_VERIFIED_COPY);
   expect(container.textContent).toContain('took too long');
@@ -78,13 +81,27 @@ it('closes as not verified on Escape, and always shows Close', async () => {
   expect(onComplete).toHaveBeenCalledWith(false);
 });
 
-it('defaults to the head turn when reduced motion is preferred', async () => {
+it('starts with spoken words (no flashing) when reduced motion is preferred', async () => {
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduce') }));
   const examApi = api();
   await act(async () =>
     root.render(<LivenessModal attemptId="a" examApi={examApi} onComplete={vi.fn()} />),
   );
-  expect(examApi.postLivenessChallenge).toHaveBeenCalledWith('a', 'head_turn');
+  expect(examApi.postLivenessChallenge).toHaveBeenCalledWith('a', 'spoken_words');
+});
+
+it('offers colour reflection and spoken words only, never a head turn', async () => {
+  const examApi = api();
+  await act(async () =>
+    root.render(<LivenessModal attemptId="a" examApi={examApi} onComplete={vi.fn()} />),
+  );
+  expect(container.textContent).not.toMatch(/head/i);
+  expect(buttons("I can't do the visual check")).toBeDefined();
+  examApi.postLivenessChallenge.mockResolvedValueOnce(challenge('spoken_words'));
+  await act(async () => buttons("I can't do the visual check")!.click());
+  expect(examApi.postLivenessChallenge).toHaveBeenLastCalledWith('a', 'spoken_words');
+  expect(container.textContent).not.toMatch(/head/i);
+  expect(buttons('Use the colour check instead')).toBeDefined();
 });
 
 it('requests the default flash challenge without reduced motion', async () => {

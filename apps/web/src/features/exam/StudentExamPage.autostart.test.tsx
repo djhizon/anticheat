@@ -5,6 +5,10 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { ExamDeliveryProjection } from '@examguard/contracts/exam';
 import type { ExamApi } from './api.js';
 import { StudentExamPage } from './StudentExamPage.js';
+import { holdSensorStreams, releaseSensorStreams } from '../integrity/sensorHub.js';
+
+const liveStream = () =>
+  ({ getTracks: () => [{ readyState: 'live', stop() {} }] }) as unknown as MediaStream;
 
 const seen = vi.hoisted(() => ({ camera: [] as unknown[], audio: [] as unknown[], liveness: 0 }));
 vi.mock('../integrity/CameraIntegrityPanel.js', () => ({
@@ -35,6 +39,7 @@ afterEach(async () => {
   seen.camera.length = 0;
   seen.audio.length = 0;
   seen.liveness = 0;
+  releaseSensorStreams();
 });
 
 function delivery(status: string): ExamDeliveryProjection {
@@ -69,12 +74,14 @@ const render = (status: string, consented: boolean) =>
   );
 const last = (list: unknown[]) => list.at(-1) as Record<string, unknown>;
 
-it('passes autoStart to both panels for a consented in-progress attempt', async () => {
+it('passes autoStart to both panels when setup handed its streams over', async () => {
+  holdSensorStreams({ camera: liveStream(), microphone: liveStream() });
   await render('in_progress', true);
   expect(last(seen.camera)).toMatchObject({ autoStart: true });
   expect(last(seen.audio)).toMatchObject({ autoStart: true, active: true });
 });
 it('does not auto-start without consent and leaves submitted attempts inactive', async () => {
+  holdSensorStreams({ camera: liveStream(), microphone: liveStream() });
   await render('in_progress', false);
   expect(last(seen.camera)).toMatchObject({ autoStart: false });
   expect(last(seen.audio)).toMatchObject({ autoStart: false });
@@ -83,9 +90,26 @@ it('does not auto-start without consent and leaves submitted attempts inactive',
   await render('submitted', true);
   expect(last(seen.audio)).toMatchObject({ active: false });
 });
-it('never opens the liveness check automatically', async () => {
+const buttonLabels = () =>
+  [...container.querySelectorAll('button')].map((b) => b.textContent?.trim() ?? '');
+
+it('shows read-only status chips and no setup buttons during the exam', async () => {
+  holdSensorStreams({ camera: liveStream(), microphone: liveStream() });
   await render('in_progress', true);
-  expect(seen.liveness).toBe(0);
   expect(container.querySelector('[role="dialog"]')).toBeNull();
-  expect(container.textContent).toContain("Verify I'm here");
+  const status = container.querySelector('[aria-label="Monitoring status"]')!;
+  expect(status.textContent).toContain('Camera');
+  expect(status.textContent).toContain('Mic');
+  expect(status.textContent).toContain('iPhone');
+  expect(status.textContent).toContain('Verified');
+  expect(status.querySelector('button')).toBeNull();
+  const labels = buttonLabels().join('|');
+  expect(labels).not.toMatch(/Verify I|iPhone|Start|Stop|Pair|Require/);
+  expect(labels).not.toContain('Resume monitoring');
+});
+it('offers a single Resume monitoring button when streams cannot be restored silently', async () => {
+  await render('in_progress', true);
+  const resume = buttonLabels().filter((label) => label === 'Resume monitoring');
+  expect(resume).toHaveLength(1);
+  expect(last(seen.camera)).toMatchObject({ autoStart: false });
 });

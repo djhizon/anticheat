@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createAudioSession, type AudioSnapshot } from './audioSession.js';
 import { createAudioRecorder } from './audioRecorder.js';
 import { acquireBuiltInMicrophone } from './builtInMicrophone.js';
+import { heldMicrophoneStream } from './sensorHub.js';
 import { createLevelMeter, METER_BARS, type LevelReading } from './audioLevel.js';
 import { appendLine, formatClock, type LogLine } from './transcriptLog.js';
 import { registerSubmitFlush } from './submitFlush.js';
@@ -10,18 +11,27 @@ import { createVoiceReporter } from './voiceReporter.js';
 import type { ExamApi } from '../exam/api.js';
 
 export const AUTO_START_DELAY_MS = 1000;
+/** After the microphone drops, audio restarts by itself this often before asking for a resume. */
+export const AUTO_RETRY_DELAY_MS = 3000;
+export const MAX_AUTO_RETRIES = 5;
 
 export function AudioPanel({
   attemptId,
   active,
   examApi,
   autoStart = false,
+  onLiveChange,
+  onUnavailable,
 }: {
   readonly attemptId: string;
   readonly active: boolean;
   readonly examApi?: ExamApi;
   /** Start once, shortly after the camera, when consent was given. Never retried. */
   readonly autoStart?: boolean;
+  /** Read-only status for the exam top bar: true while the microphone is recording. */
+  readonly onLiveChange?: (live: boolean) => void;
+  /** Called when automatic restarts keep failing; the page offers "Resume monitoring". */
+  readonly onUnavailable?: (reason: string) => void;
 }) {
   const [enabled, setEnabled] = useState(false);
   const [snapshot, setSnapshot] = useState<AudioSnapshot | null>(null);
@@ -117,7 +127,8 @@ export function AudioPanel({
     };
     void (async () => {
       try {
-        const acquired = await acquireBuiltInMicrophone();
+        // Reuse the stream the pre-exam setup verified; fall back to a fresh acquire.
+        const acquired = heldMicrophoneStream() ?? (await acquireBuiltInMicrophone());
         if (cancelled) {
           acquired.getTracks().forEach((track) => track.stop());
           return;
@@ -163,6 +174,29 @@ export function AudioPanel({
     };
   }, [active, enabled, attemptId, examApi]);
   const live = active && enabled && snapshot?.phase === 'recording';
+  const retries = useRef(0);
+  const liveRef = useRef(onLiveChange);
+  liveRef.current = onLiveChange;
+  const unavailableRef = useRef(onUnavailable);
+  unavailableRef.current = onUnavailable;
+  useEffect(() => {
+    if (live) retries.current = 0;
+    liveRef.current?.(live);
+  }, [live]);
+  // No Start/Stop control during the exam: a dropped microphone restarts by itself a few times,
+  // then the page asks the student to resume monitoring.
+  useEffect(() => {
+    if (!autoStart || !active || enabled || !error) return;
+    if (retries.current >= MAX_AUTO_RETRIES) {
+      unavailableRef.current?.(error);
+      return;
+    }
+    const timer = setTimeout(() => {
+      retries.current += 1;
+      setEnabled(true);
+    }, AUTO_RETRY_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [autoStart, active, enabled, error]);
   return (
     <section className="audio-panel-compact" aria-label="Audio checks">
       <p role="status">
@@ -170,11 +204,12 @@ export function AudioPanel({
           ? `Microphone active: ${device}`
           : enabled && active
             ? 'Starting audio…'
-            : 'Audio off'}
+            : error
+              ? 'Audio interrupted — reconnecting…'
+              : autoStart && active
+                ? 'Starting audio…'
+                : 'Audio off'}
       </p>
-      <button type="button" disabled={!active} onClick={() => setEnabled((value) => !value)}>
-        {enabled ? 'Stop audio' : error ? 'Retry audio' : 'Start audio'}
-      </button>
       {error && <p role="alert">{error}</p>}
       {monitorNote && enabled && <p className="muted">{monitorNote}</p>}
       {live && (

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   generateChallenge,
+  PULSE_THRESHOLDS,
   normaliseSpeech,
   scoreColourResponse,
   selectChallengeType,
@@ -58,13 +59,14 @@ describe('scoreColourResponse', () => {
   it('fails when the colours arrive in the wrong order', () => {
     const result = score(baseline, [lit.blue, lit.red, lit.green]);
     expect(result.passed).toBe(false);
-    expect(result.detail).toContain('head-turn');
+    expect(result.detail).toContain('spoken-words');
+    expect(result.detail).not.toContain('head');
   });
 
   it('fails on a flat feed', () => {
     const result = score(baseline, [baseline, baseline, baseline]);
     expect(result.passed).toBe(false);
-    expect(result.detail).toContain('head-turn');
+    expect(result.detail).toContain('spoken-words');
   });
 
   it('fails in a too-bright room where the sensor is saturated', () => {
@@ -139,11 +141,29 @@ describe('verifySpokenWords', () => {
 });
 
 describe('challenge generation', () => {
-  it('defaults to colour_flash and honours alternatives', () => {
+  it('issues colour reflection, spoken words on request, and never head turn', () => {
     expect(selectChallengeType()).toBe('colour_flash');
     expect(selectChallengeType('gesture')).toBe('colour_flash');
-    expect(selectChallengeType('head_turn')).toBe('head_turn');
+    expect(selectChallengeType('head_turn')).toBe('colour_flash');
     expect(selectChallengeType('spoken_words')).toBe('spoken_words');
+  });
+  it('marks the mid-exam edge pulse in the signed data and scores it with lower rises', () => {
+    expect(generateChallenge('colour_flash', { pulse: true }).data.mode).toBe('pulse');
+    expect(generateChallenge('colour_flash').data.mode).toBeUndefined();
+    // A dim edge pulse: about a 2% rise of the flashed channel.
+    const base = { r: 100, g: 100, b: 100 };
+    const dim = [
+      { r: 102.2, g: 100, b: 100 },
+      { r: 100, g: 102.2, b: 100 },
+      { r: 100, g: 100, b: 102.2 },
+    ];
+    const faces = [true, true, true];
+    const sequence = ['red', 'green', 'blue'] as const;
+    expect(scoreColourResponse(sequence, base, dim, faces).passed).toBe(false);
+    expect(scoreColourResponse(sequence, base, dim, faces, PULSE_THRESHOLDS).passed).toBe(true);
+    expect(
+      scoreColourResponse(sequence, base, [base, base, base], faces, PULSE_THRESHOLDS).passed,
+    ).toBe(false);
   });
   it('generates random sequences of the right shape', () => {
     for (let i = 0; i < 30; i += 1) {

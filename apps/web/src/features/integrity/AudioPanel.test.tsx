@@ -76,10 +76,11 @@ afterEach(async () => {
 });
 
 async function startAudio(examApi: ExamApi = api) {
-  await act(async () => root.render(<AudioPanel attemptId="a" active examApi={examApi} />));
-  await act(async () => container.querySelector('button')!.click());
+  await act(async () =>
+    root.render(<AudioPanel attemptId="a" active autoStart examApi={examApi} />),
+  );
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1000);
   });
 }
 const lines = () => [...container.querySelectorAll('.transcript-line')].map((l) => l.textContent);
@@ -92,22 +93,14 @@ it('still starts transcription and shows a note when the sound monitor fails', a
   expect(container.querySelector('[role="alert"]')).toBeNull();
 });
 
-it('shows a labelled REC indicator with a meter that is released on stop and unmount', async () => {
+it('shows a labelled REC indicator with a meter that is released on unmount', async () => {
   await startAudio();
   expect(container.querySelector('.rec-indicator')?.textContent).toContain('REC');
   expect(container.querySelector('.rec-dot')?.getAttribute('aria-hidden')).toBe('true');
   expect(container.querySelector('svg.level-meter rect')).not.toBeNull();
   expect(mocks.meter).toHaveBeenCalledOnce();
-  await act(async () => container.querySelector('button')!.click()); // Stop audio
-  expect(mocks.stopMeter).toHaveBeenCalledOnce();
-  expect(container.querySelector('.rec-indicator')).toBeNull();
-  await act(async () => container.querySelector('button')!.click()); // Start again
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0);
-  });
-  expect(mocks.meter).toHaveBeenCalledTimes(2);
   await act(async () => root.unmount());
-  expect(mocks.stopMeter).toHaveBeenCalledTimes(2);
+  expect(mocks.stopMeter).toHaveBeenCalledOnce();
 });
 
 it('appends transcripts in order, ignores empty text, shows skips and a shimmer', async () => {
@@ -153,4 +146,9 @@ it('restores the saved transcript after a reload', async () => {
   );
   expect(getTranscript).toHaveBeenCalledWith('a');
   expect(lines()).toEqual(['08:00:01 — earlier words']);
+});
+
+it('has no start or stop control: audio is fully automatic', async () => {
+  await startAudio();
+  expect(container.querySelector('button')).toBeNull();
 });

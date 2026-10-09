@@ -18,6 +18,8 @@ export interface DesktopAppsBridge {
   getDemoInfo?(): Promise<unknown>;
   /** Opens the on-demand LAN listener for iPhone pairing and returns its origin. */
   startPhoneLan?(): Promise<unknown>;
+  /** Native check of the selected camera (by label); may be absent in older builds. */
+  getCameraAttestation?(label: string): Promise<unknown>;
   getDisplayCount(): Promise<number>;
   getEnvironmentRisk?(): Promise<{ virtualMachine: string | null; captureDisplays: string[] }>;
   listAppTargets(): Promise<unknown>;
@@ -94,4 +96,39 @@ export function demoExemptionText(info: DesktopDemoInfo | null): string {
         : 'No apps are exempt from the app check.';
   const tail = info?.packaged === false ? ' Keep the local server terminal running.' : '';
   return `Demo mode: ${apps} Strict mode has no exemptions.${tail}`;
+}
+
+export type CameraAttestation = 'virtual' | 'ok' | 'unknown';
+
+/** Reads the desktop camera attestation; absent bridge or unreadable answers are 'unknown'. */
+export async function readCameraAttestation(
+  label: string,
+  bridge: DesktopAppsBridge | undefined = desktopAppsBridge(),
+): Promise<CameraAttestation> {
+  if (typeof bridge?.getCameraAttestation !== 'function') return 'unknown';
+  try {
+    const value = (await bridge.getCameraAttestation(label)) as Record<string, unknown> | null;
+    if (value === null || typeof value !== 'object') return 'unknown';
+    // The Mac app answers { verdict: 'hardware' | 'virtual' | 'unknown', … }.
+    if (
+      value.verdict === 'virtual' ||
+      value.virtual === true ||
+      value.isVirtual === true ||
+      value.kind === 'virtual' ||
+      value.status === 'virtual'
+    )
+      return 'virtual';
+    if (
+      value.verdict === 'hardware' ||
+      value.virtual === false ||
+      value.isVirtual === false ||
+      value.kind === 'native' ||
+      value.kind === 'physical' ||
+      value.status === 'ok'
+    )
+      return 'ok';
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }

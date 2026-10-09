@@ -18,15 +18,6 @@ afterEach(async () => {
   vi.clearAllMocks();
   vi.restoreAllMocks();
 });
-it('does not acquire audio on mount and displays real start errors', async () => {
-  mocks.acquire.mockRejectedValueOnce(new Error('Native microphone unavailable'));
-  await act(async () => root.render(<AudioPanel attemptId="a" active />));
-  expect(mocks.acquire).not.toHaveBeenCalled();
-  expect(container.textContent).not.toContain('Listening');
-  await act(async () => container.querySelector('button')!.click());
-  expect(container.textContent).toContain('Native microphone unavailable');
-  expect(container.textContent).toContain('Retry audio');
-});
 it('keeps an inactive camera off without false readings or a CPU checkbox', async () => {
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
   await act(async () =>
@@ -93,22 +84,28 @@ it('does not auto-start the camera without consent or for a submitted attempt', 
   await act(async () => root.render(<CameraIntegrityPanel attempt={attempt(false)} autoStart />));
   expect(camera.start).not.toHaveBeenCalled();
 });
-it('auto-starts audio about one second after mount and does not retry a failure', async () => {
+it('auto-starts audio after one second, retries a failure a bounded number of times, then reports it', async () => {
   vi.useFakeTimers();
   try {
     mocks.acquire.mockRejectedValue(new Error('Microphone busy'));
-    await act(async () => root.render(<AudioPanel attemptId="a" active autoStart />));
+    const unavailable = vi.fn();
+    await act(async () =>
+      root.render(<AudioPanel attemptId="a" active autoStart onUnavailable={unavailable} />),
+    );
     expect(mocks.acquire).not.toHaveBeenCalled();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
     });
     expect(mocks.acquire).toHaveBeenCalledOnce();
     expect(container.textContent).toContain('Microphone busy');
-    expect(container.textContent).toContain('Retry audio');
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(30000);
-    });
-    expect(mocks.acquire).toHaveBeenCalledOnce();
+    expect(container.querySelector('button')).toBeNull();
+    for (let i = 0; i < 8; i++)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+    // One initial attempt plus MAX_AUTO_RETRIES restarts, then the page is told.
+    expect(mocks.acquire).toHaveBeenCalledTimes(6);
+    expect(unavailable).toHaveBeenCalledWith('Microphone busy');
   } finally {
     vi.useRealTimers();
   }
@@ -129,7 +126,7 @@ it('does not auto-start audio for a submitted attempt or without consent', async
     vi.useRealTimers();
   }
 });
-it('explains why consent alone cannot enable a QR and never sends invalid enrollment', async () => {
+it('needs a valid Wi-Fi address before a QR and never sends invalid enrollment', async () => {
   const requirePhonePresence = vi.fn();
   await act(async () =>
     root.render(
@@ -140,12 +137,9 @@ it('explains why consent alone cannot enable a QR and never sends invalid enroll
       />,
     ),
   );
-  await act(async () =>
-    (container.querySelector('input[type=checkbox]') as HTMLInputElement).click(),
-  );
   expect(container.textContent).toContain("Enter this computer's Wi-Fi address first");
   const create = [...container.querySelectorAll('button')].find((button) =>
-    button.textContent?.includes('create QR'),
+    button.textContent?.includes('Show QR code'),
   )!;
   expect(create.disabled).toBe(true);
   expect(requirePhonePresence).not.toHaveBeenCalled();
@@ -169,11 +163,8 @@ it('in the desktop app uses the LAN origin from the main process and shows no or
     );
     expect(container.querySelector('input[type=text], input:not([type])')).toBeNull();
     expect(container.textContent).not.toContain('EXAM_LAN');
-    await act(async () =>
-      (container.querySelector('input[type=checkbox]') as HTMLInputElement).click(),
-    );
     const create = [...container.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('create QR'),
+      button.textContent?.includes('Show QR code'),
     )!;
     expect(create.disabled).toBe(false);
     expect(startPhoneLan).not.toHaveBeenCalled(); // Nothing opens before pairing is requested.
@@ -207,11 +198,8 @@ it('in the desktop app shows the reason when the LAN listener cannot open', asyn
       ),
     );
     await act(async () =>
-      (container.querySelector('input[type=checkbox]') as HTMLInputElement).click(),
-    );
-    await act(async () =>
       [...container.querySelectorAll('button')]
-        .find((button) => button.textContent?.includes('create QR'))!
+        .find((button) => button.textContent?.includes('Show QR code'))!
         .click(),
     );
     expect(container.textContent).toContain('No Wi-Fi found.');
@@ -220,7 +208,7 @@ it('in the desktop app shows the reason when the LAN listener cannot open', asyn
     Reflect.deleteProperty(window, 'electronExam');
   }
 });
-it('creates a QR after valid origin and consent', async () => {
+it('creates a QR after a valid origin, with the link as a fallback', async () => {
   const requirePhonePresence = vi.fn(async () => ({
     code: 'a'.repeat(43),
     expiresAt: new Date(Date.now() + 120000).toISOString(),
@@ -235,16 +223,15 @@ it('creates a QR after valid origin and consent', async () => {
     ),
   );
   await act(async () => {
-    const input = container.querySelector('input:not([type=checkbox])') as HTMLInputElement;
+    const input = container.querySelector('input') as HTMLInputElement;
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
       input,
       'http://192.168.1.10:5173',
     );
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    (container.querySelector('input[type=checkbox]') as HTMLInputElement).click();
   });
   const create = [...container.querySelectorAll('button')].find((button) =>
-    button.textContent?.includes('create QR'),
+    button.textContent?.includes('Show QR code'),
   )!;
   expect(create.disabled).toBe(false);
   await act(async () => create.click());

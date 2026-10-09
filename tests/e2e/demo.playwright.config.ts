@@ -26,7 +26,13 @@ export default defineConfig({
         ...devices['Desktop Chrome'],
         permissions: ['camera', 'microphone'],
         launchOptions: {
-          args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
+          args: [
+            '--use-fake-ui-for-media-stream',
+            '--use-fake-device-for-media-stream',
+            // Screen recording is mandatory: auto-accept getDisplayMedia with the whole screen.
+            '--auto-select-desktop-capture-source=Entire screen',
+            '--enable-usermedia-screen-capturing',
+          ],
           ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
             ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE }
             : {}),

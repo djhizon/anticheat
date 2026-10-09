@@ -253,6 +253,18 @@ const FLAG_MAP: Record<string, AppMapping> = {
     severity: 'info',
     summary: 'An iPhone was paired as a desk camera',
   },
+  iphone_disconnected: {
+    source: 'phone',
+    kind: 'iphone_disconnected',
+    severity: 'notice',
+    summary: 'The paired iPhone stopped checking in (answering was not blocked)',
+  },
+  iphone_reconnected: {
+    source: 'phone',
+    kind: 'iphone_reconnected',
+    severity: 'info',
+    summary: 'The paired iPhone checked in again',
+  },
   desktop_demo_mode: {
     source: 'desktop',
     kind: 'demo_mode',
@@ -277,6 +289,13 @@ const FLAG_MAP: Record<string, AppMapping> = {
     severity: 'info',
     summary: 'The camera lighting was poor for a while, which can make face tracking less reliable',
   },
+  liveness_unverified: {
+    source: 'liveness',
+    kind: 'liveness_unverified',
+    severity: 'notice',
+    summary:
+      'The presence check could not be completed after several tries and the student continued; an instructor may want to review (this is not a conduct finding)',
+  },
   recording_started: {
     source: 'system',
     kind: 'recording_started',
@@ -288,6 +307,32 @@ const FLAG_MAP: Record<string, AppMapping> = {
     kind: 'recording_stopped',
     severity: 'info',
     summary: 'Screen recording stopped',
+  },
+  screen_recording_stopped: {
+    source: 'system',
+    kind: 'screen_recording_stopped',
+    severity: 'notice',
+    summary:
+      'Screen recording was not running during the exam (sharing ended or the page reloaded); answering paused until it was resumed',
+  },
+  screen_recording_resumed: {
+    source: 'system',
+    kind: 'screen_recording_resumed',
+    severity: 'info',
+    summary: 'Screen recording resumed and answering continued',
+  },
+  presence_check_passed: {
+    source: 'liveness',
+    kind: 'presence_check_passed',
+    severity: 'info',
+    summary: 'A quick presence spot check passed',
+  },
+  presence_check_failed: {
+    source: 'liveness',
+    kind: 'presence_check_failed',
+    severity: 'notice',
+    summary:
+      'A quick presence spot check could not confirm the student after a retry (lighting, camera angle or looking away can cause this; not a conduct finding)',
   },
 };
 

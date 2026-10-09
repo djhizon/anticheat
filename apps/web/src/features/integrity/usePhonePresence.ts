@@ -64,6 +64,5 @@ export function usePhonePresence(
     connected,
     required,
     checking: current === null,
-    deskCamera: current?.status.deskCamera ?? null,
   };
 }

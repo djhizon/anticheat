@@ -54,6 +54,7 @@ const corsRequestMethods = new Set(['GET', 'POST', 'PUT', 'PATCH']);
 const corsRequestHeaders = new Set(['content-type', 'x-csrf-token']);
 const assignmentStartPattern = /^\/exam\/assignments\/([^/]+)\/start$/u;
 const attemptPattern = /^\/exam\/attempts\/([^/]+)$/u;
+const beginPattern = /^\/exam\/attempts\/([^/]+)\/begin$/u;
 const answersPattern = /^\/exam\/attempts\/([^/]+)\/answers$/u;
 const submitPattern = /^\/exam\/attempts\/([^/]+)\/submit$/u;
 // integrity routes
@@ -189,6 +190,7 @@ function isExamPath(path: string): boolean {
     path === '/exam/generate' ||
     assignmentStartPattern.test(path) ||
     attemptPattern.test(path) ||
+    beginPattern.test(path) ||
     answersPattern.test(path) ||
     submitPattern.test(path) ||
     audioPattern.test(path) ||
@@ -435,10 +437,27 @@ export class ExamRoutes {
         const result = await this.service.startAttempt(
           parsePathId<'AssignmentId'>(startMatch[1] ?? '', 'Assignment ID') as AssignmentId,
           principal.user.id,
+          {
+            setup:
+              typeof request.body === 'object' &&
+              request.body !== null &&
+              (request.body as { setup?: unknown }).setup === true,
+          },
         );
         return jsonResponse(request, this.config.allowedOrigins, result.created ? 201 : 200, {
           delivery: result.delivery,
         });
+      }
+
+      const beginMatch = beginPattern.exec(path);
+      if (method === 'POST' && beginMatch !== null) {
+        const principal = this.requireStudent(request);
+        this.boundary.validateUnsafe(request, principal);
+        const delivery = await this.service.beginAttempt(
+          parsePathId<'AttemptId'>(beginMatch[1] ?? '', 'Attempt ID') as AttemptId,
+          principal.user.id,
+        );
+        return jsonResponse(request, this.config.allowedOrigins, 200, { delivery });
       }
 
       const answersMatch = answersPattern.exec(path);
@@ -505,6 +524,7 @@ export class ExamRoutes {
           challenge = this.integrity.issueLivenessChallenge(
             delivery.attempt.id,
             isRecord(request.body) ? request.body.preferred : undefined,
+            isRecord(request.body) ? request.body.purpose : undefined,
           );
         } catch (error) {
           if (error instanceof LivenessRateLimitError) {

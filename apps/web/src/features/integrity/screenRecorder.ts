@@ -30,13 +30,75 @@ export interface ScreenRecorderOptions {
   /** Blob to base64 for upload; defaults to FileReader. */
   readonly encode?: (blob: Blob) => Promise<string>;
   readonly now?: () => number;
+  /** First segment index (continues the numbering after a resumed recording). */
+  readonly firstIndex?: number;
+  /** Called with the next unused segment index each time a segment is closed. */
+  readonly onSegmentIndex?: (next: number) => void;
+  /** Called once when recording ends by itself (share stopped, device lost, recorder error). */
+  readonly onEnded?: (reason: string) => void;
+  /** Running inside the Electron desktop app (default: detected from the user agent). */
+  readonly desktop?: boolean;
+}
+
+function isDesktopApp(): boolean {
+  return typeof navigator !== 'undefined' && /Electron/iu.test(navigator.userAgent ?? '');
+}
+
+/**
+ * The getDisplayMedia request. The desktop app auto-selects the primary screen and rejects any
+ * size or frame-rate constraint, so it gets a plain `video: true`. Browsers get only hints that
+ * steer the picker to "Entire screen" (no width/height/frameRate: those are applied afterwards,
+ * best effort, so an unsupported value can never fail the capture).
+ */
+export function displayMediaRequest(desktop: boolean): DisplayMediaStreamOptions {
+  if (desktop) return { video: true, audio: false };
+  return {
+    video: { displaySurface: 'monitor' },
+    audio: false,
+    monitorTypeSurfaces: 'include',
+    selfBrowserSurface: 'exclude',
+    surfaceSwitching: 'exclude',
+  } as DisplayMediaStreamOptions;
+}
+
+/** Thrown when the student shared a window or a browser tab instead of a whole screen. */
+export class WholeScreenRequiredError extends Error {
+  constructor() {
+    super(
+      'You shared a window or a browser tab. The exam records your entire screen: press Start screen recording again and choose “Entire screen” (or your screen under “Screen”), then Share.',
+    );
+    this.name = 'WholeScreenRequiredError';
+  }
+}
+
+/**
+ * True when the captured surface is a whole monitor. Browsers that do not report the surface
+ * (older Safari only offers whole screens) are accepted; any other reported surface is refused.
+ */
+export function isWholeScreen(track: MediaStreamTrack | undefined): boolean {
+  if (track === undefined) return false;
+  const settings = (typeof track.getSettings === 'function' ? track.getSettings() : {}) as {
+    displaySurface?: string;
+  };
+  return settings.displaySurface === undefined || settings.displaySurface === 'monitor';
+}
+
+/**
+ * Strips the data-URL header. The MIME type itself can contain commas
+ * ("video/webm;codecs=vp8,opus"), so cut at ";base64," rather than at the first comma.
+ */
+export function dataUrlToBase64(dataUrl: string): string {
+  const marker = dataUrl.indexOf(';base64,');
+  return marker >= 0
+    ? dataUrl.slice(marker + ';base64,'.length)
+    : dataUrl.replace(/^data:[^,]*,/u, '');
 }
 
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(reader.error ?? new Error('Could not read segment.'));
-    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/u, ''));
+    reader.onload = () => resolve(dataUrlToBase64(String(reader.result)));
     reader.readAsDataURL(blob);
   });
 }
@@ -53,6 +115,7 @@ export function createScreenRecorder(
   options: ScreenRecorderOptions = {},
 ) {
   const now = options.now ?? Date.now;
+  const desktop = options.desktop ?? isDesktopApp();
   const encode = options.encode ?? blobToBase64;
   let stopped = false;
   let started = false;
@@ -62,7 +125,9 @@ export function createScreenRecorder(
   let recorder: MediaRecorder | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
-  let segmentIndex = 0;
+  let segmentIndex = options.firstIndex ?? 0;
+  /** The last segment after stop() was handed to the queue or saved locally. */
+  let finalSegmentDone = false;
   let mode: 'cloud' | 'local' = 'local';
   let profile: RecordingProfile = PROFILES.low;
   let lastStepAt = now();
@@ -186,15 +251,22 @@ export function createScreenRecorder(
   }
 
   function applyProfileToTrack(target: { width: number; height: number; frameRate: number }) {
+    // The desktop app's screen-capture tracks reject size constraints ("invalid capture
+    // constraints"); there the encoder bitrate alone protects the uplink.
+    if (desktop) return;
     for (const track of screen?.getVideoTracks() ?? []) {
       // Resolution changes are best effort; the encoder bitrate is what protects the uplink.
-      void track
-        .applyConstraints?.({
-          width: { ideal: target.width, max: target.width },
-          height: { ideal: target.height, max: target.height },
-          frameRate: { ideal: target.frameRate, max: target.frameRate },
-        })
-        ?.catch(() => {});
+      try {
+        void track
+          .applyConstraints?.({
+            width: { ideal: target.width, max: target.width },
+            height: { ideal: target.height, max: target.height },
+            frameRate: { ideal: target.frameRate, max: target.frameRate },
+          })
+          ?.catch(() => {});
+      } catch {
+        // OverconstrainedError or an unsupported constraint: keep the current size.
+      }
     }
   }
 
@@ -232,6 +304,7 @@ export function createScreenRecorder(
 
   function handleSegment(blob: Blob) {
     const index = segmentIndex++;
+    options.onSegmentIndex?.(segmentIndex);
     if (!blob.size) return;
     if (mode === 'cloud' && queue && !queue.isDead) {
       if (queue.waiting > 0) lastBusyAt = now();
@@ -307,8 +380,7 @@ export function createScreenRecorder(
     current.onerror = () => {
       // Keep onstop attached: MediaRecorder may still deliver a final salvageable
       // blob after an error. Never restart, but keep that partial segment.
-      stop();
-      status(
+      end(
         'Screen recording stopped unexpectedly. Earlier segments were kept; the last one may be incomplete.',
       );
     };
@@ -317,17 +389,16 @@ export function createScreenRecorder(
       try {
         handleSegment(new Blob(chunks, { type: current.mimeType }));
       } catch {
-        stop();
-        status('A recording segment could not be saved. Check download permissions.');
+        end('A recording segment could not be saved. Check download permissions.');
       }
       chunks.length = 0;
+      if (stopped) finalSegmentDone = true;
       if (!stopped) {
         try {
           capture();
           void maybeStepUp().catch(() => {});
         } catch {
-          stop();
-          status('Screen recording could not continue. You can retry recording.');
+          end('Screen recording could not continue.');
         }
       }
     };
@@ -351,15 +422,7 @@ export function createScreenRecorder(
         );
       try {
         // Ask for the screen first (needs the student's click), then adapt to the network.
-        const initial = PROFILES.standard;
-        screen = await navigator.mediaDevices.getDisplayMedia({
-          video: {
-            width: { ideal: initial.width, max: initial.width },
-            height: { ideal: initial.height, max: initial.height },
-            frameRate: { ideal: initial.frameRate, max: initial.frameRate },
-          },
-          audio: false,
-        });
+        screen = await navigator.mediaDevices.getDisplayMedia(displayMediaRequest(desktop));
       } catch (error) {
         const name = error instanceof Error ? error.name : '';
         if (name === 'NotSupportedError')
@@ -371,25 +434,29 @@ export function createScreenRecorder(
             'Screen sharing was cancelled or denied. Choose a screen and allow this app in macOS Privacy & Security → Screen Recording, then reopen it if requested.',
           );
         if (name === 'InvalidStateError')
-          throw new Error('Click Start recording again with the exam window focused.');
+          throw new Error('Click Start screen recording again with the exam window focused.');
         throw error;
       }
       if (stopped) {
         release();
         return;
       }
+      if (!isWholeScreen(screen.getVideoTracks()[0])) {
+        release();
+        screen = null;
+        throw new WholeScreenRequiredError();
+      }
       // Observe display loss BEFORE waiting for microphone permission. A stopped
       // share must not become a microphone-only recording after the dialog closes.
-      screen.getVideoTracks().forEach((track) =>
-        track.addEventListener(
-          'ended',
-          () => {
-            stop();
-            status('Screen sharing ended. Segments captured so far were kept.');
-          },
-          { once: true },
-        ),
-      );
+      screen
+        .getVideoTracks()
+        .forEach((track) =>
+          track.addEventListener(
+            'ended',
+            () => end('Screen sharing ended. Segments captured so far were kept.'),
+            { once: true },
+          ),
+        );
       if (
         !screen.getVideoTracks().length ||
         screen.getVideoTracks().some((track) => track.readyState === 'ended')
@@ -403,16 +470,15 @@ export function createScreenRecorder(
         return;
       }
       stream = new MediaStream([...screen.getVideoTracks(), ...microphone.getAudioTracks()]);
-      microphone.getAudioTracks().forEach((track) =>
-        track.addEventListener(
-          'ended',
-          () => {
-            stop();
-            status('Microphone disconnected. Segments captured so far were kept.');
-          },
-          { once: true },
-        ),
-      );
+      microphone
+        .getAudioTracks()
+        .forEach((track) =>
+          track.addEventListener(
+            'ended',
+            () => end('Microphone disconnected. Segments captured so far were kept.'),
+            { once: true },
+          ),
+        );
 
       // Choose quality from measured upload speed; any failure means local-only.
       if (examApi) {
@@ -443,6 +509,14 @@ export function createScreenRecorder(
     }
   }
 
+  /** Recording ended by itself: stop, report, and tell the owner once. */
+  function end(reason: string) {
+    if (stopped) return;
+    stop();
+    status(reason);
+    options.onEnded?.(reason);
+  }
+
   function stop() {
     if (stopped) return;
     stopped = true;
@@ -454,5 +528,21 @@ export function createScreenRecorder(
     armFlush();
     if (recorder) report();
   }
-  return { start, stop };
+  /**
+   * Stops on purpose and waits (at most `maxMs`) until the last segment was handed over and
+   * queued uploads finished, so they land while the attempt still accepts them (before submit).
+   */
+  async function finish(maxMs = 3000): Promise<void> {
+    const hadRecorder = recorder !== null && recorder.state !== 'inactive';
+    stop();
+    const deadline = now() + maxMs;
+    const settled = () =>
+      (!hadRecorder || finalSegmentDone) &&
+      (mode !== 'cloud' || queue === null || queue.isDead || queue.waiting === 0);
+    while (!settled() && now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
+  return { start, stop, finish };
 }

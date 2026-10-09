@@ -2707,22 +2707,132 @@ button.timeline-chip[aria-pressed='false'] {
   border: 1px solid #dbe3ef;
 }
 
-.lighting-banner {
-  margin: 8px 0;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: #3a2f10;
-  border: 1px solid #b8892a;
-  font-size: 0.85rem;
-  line-height: 1.4;
-}
-.lighting-banner button {
-  margin-top: 6px;
-  display: block;
-}
 .lighting-check ul {
   margin: 6px 0 10px 18px;
   padding: 0;
+}
+
+/* ── Pre-exam setup stepper ─────────────────────────────────────────────── */
+.setup-page {
+  max-width: 760px;
+  margin: 1.5rem auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.setup-eyebrow,
+.setup-count {
+  margin: 0;
+  color: #6b7280;
+  font-size: 0.85rem;
+}
+.setup-dots {
+  display: flex;
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+}
+.setup-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #d1d5db;
+}
+.setup-dot--done {
+  background: #34d399;
+}
+.setup-dot--current {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
+}
+.setup-body h2:focus {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 4px;
+}
+.setup-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.setup-strong {
+  font-weight: 600;
+}
+.setup-ok {
+  color: #047857;
+  font-weight: 600;
+}
+.setup-meter {
+  width: 100%;
+  height: 14px;
+}
+.setup-fix {
+  background: #fef2f2;
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.4rem;
+}
+.setup-permissions,
+.setup-summary {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.setup-phone .phone-setup {
+  background: #18181b;
+  color: #fff;
+  padding: 1rem;
+  border-radius: 12px;
+}
+.setup-nav {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+.setup-nav-spacer {
+  flex: 1;
+}
+
+/* ── Exam page: read-only status chips and banners ──────────────────────── */
+.topbar-statuses {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+.topbar-statuses .topbar-chip {
+  background: #f3f4f6;
+  color: #4b5563;
+  font-size: 0.72rem;
+  padding: 0.15rem 0.5rem;
+}
+.topbar-statuses .topbar-chip--ok {
+  background: #ecfdf5;
+  color: #047857;
+}
+.exam-topbar .topbar-title {
+  flex-basis: 12rem;
+  min-width: 8rem;
+}
+.exam-topbar .topbar-meta {
+  flex-wrap: wrap;
+  flex-shrink: 1;
+  justify-content: flex-end;
+}
+.phone-lost-banner,
+.monitor-resume-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 1rem;
+  transform: translateX(-50%);
+  z-index: 900;
+  max-width: 640px;
+  background: #fffbeb;
+  border: 1px solid #f59e0b;
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
 }
 /* ── Camera panel after the exam ends ─────────────────────────────────── */
 .cam-ended {
@@ -2822,4 +2932,56 @@ button.timeline-chip[aria-pressed='false'] {
 }
 .preflight-list button + button {
   margin-left: 8px;
+}
+
+/* ── Pre-exam setup: face check and screen-sharing tips ───────────────── */
+.setup-tips {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+.setup-face {
+  margin-top: 0.75rem;
+}
+
+/* ── Mid-exam presence spot check: a small corner card, never a modal ──── */
+.presence-card {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 800;
+  max-width: 280px;
+  padding: 0.6rem 0.85rem;
+  border-radius: 10px;
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  font-size: 0.85rem;
+  transition: opacity 1.2s ease;
+}
+.presence-card p {
+  margin: 0.2rem 0;
+}
+.presence-card-title {
+  font-weight: 600;
+}
+.presence-card--done {
+  opacity: 0.35;
+}
+@media (prefers-reduced-motion: reduce) {
+  .presence-card {
+    transition: none;
+  }
+}
+
+/* ── iPhone pairing: one big QR ───────────────────────────────────────── */
+.phone-qr {
+  background: white;
+  padding: 16px;
+  margin: 16px auto;
+  width: fit-content;
+  border-radius: 8px;
+}
+.phone-pair-instruction {
+  font-size: 1.1rem;
+  font-weight: 600;
 }

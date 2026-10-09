@@ -78,6 +78,9 @@ export interface SeedPublishedExamResult {
   readonly versionNumber: number;
 }
 
+/** Placeholder deadline window for an attempt still in pre-exam setup. */
+const SETUP_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 export interface StartAttemptResult {
   readonly delivery: ExamDeliveryProjection;
   readonly created: boolean;
@@ -587,7 +590,11 @@ export class ExamService {
     });
   }
 
-  async startAttempt(assignmentId: AssignmentId, studentId: UserId): Promise<StartAttemptResult> {
+  async startAttempt(
+    assignmentId: AssignmentId,
+    studentId: UserId,
+    options: { readonly setup?: boolean } = {},
+  ): Promise<StartAttemptResult> {
     let created = false;
     const delivery = await this.dependencies.repository.withTransaction(async () => {
       const assignment = this.dependencies.repository.findAssignmentForStudent(
@@ -609,20 +616,27 @@ export class ExamService {
       );
       if (attempt === null) {
         const startedAt = now.toISOString();
-        const baseDeadlineMillis = now.getTime() + assignment.examVersion.durationSeconds * 1000;
+        // A setup attempt gets a generous placeholder window; the real timer starts at beginAttempt.
+        const placeholder = options.setup === true ? SETUP_WINDOW_MS : 0;
+        const baseDeadlineMillis =
+          now.getTime() + assignment.examVersion.durationSeconds * 1000 + placeholder;
         const baseDeadline = new Date(baseDeadlineMillis).toISOString();
         // The persisted effective deadline is derived from the persisted base policy and bounded accommodation.
         const effectiveDeadline = new Date(
           baseDeadlineMillis + assignment.extraTimeSeconds * 1000,
         ).toISOString();
+        const attemptId = asExamOpaque<'AttemptId'>(this.dependencies.idGenerator.generate(16));
         this.dependencies.repository.insertAttempt({
-          id: asExamOpaque<'AttemptId'>(this.dependencies.idGenerator.generate(16)),
+          id: attemptId,
           assignmentId,
           attemptSeed: this.dependencies.idGenerator.generate(32),
           startedAt,
           baseDeadline,
           effectiveDeadline,
         });
+        if (options.setup === true) {
+          this.dependencies.repository.markAttemptAwaitingStart(attemptId, startedAt);
+        }
         created = true;
       } else if (attempt.status === 'in_progress' && isDue(attempt.effectiveDeadline, now)) {
         this.dependencies.repository.expireAttemptIfDue(attempt.id, now.toISOString());
@@ -643,6 +657,41 @@ export class ExamService {
     });
 
     return { delivery, created };
+  }
+
+  /**
+   * Ends pre-exam setup: starts the real timer (duration + accommodation from now) and releases
+   * the questions. Idempotent: an attempt that already began is returned unchanged.
+   */
+  async beginAttempt(attemptId: AttemptId, studentId: UserId): Promise<ExamDeliveryProjection> {
+    return this.dependencies.repository.withTransaction(async () => {
+      const attempt = this.dependencies.repository.findAttemptForStudent(attemptId, studentId);
+      if (attempt === null) {
+        throw new DomainError('not_found', 'The exam attempt was not found.');
+      }
+      const now = this.dependencies.clock.now();
+      if (attempt.status === 'in_progress' && isDue(attempt.effectiveDeadline, now)) {
+        this.dependencies.repository.expireAttemptIfDue(attempt.id, now.toISOString());
+      } else if (
+        attempt.status === 'in_progress' &&
+        this.dependencies.repository.isAttemptAwaitingStart(attempt.id)
+      ) {
+        const baseDeadlineMillis =
+          now.getTime() + attempt.assignment.examVersion.durationSeconds * 1000;
+        this.dependencies.repository.beginAttempt(attempt.id, {
+          startedAt: now.toISOString(),
+          baseDeadline: new Date(baseDeadlineMillis).toISOString(),
+          effectiveDeadline: new Date(
+            baseDeadlineMillis + attempt.assignment.extraTimeSeconds * 1000,
+          ).toISOString(),
+        });
+      }
+      const record = this.dependencies.repository.findDeliveryForStudent(attemptId, studentId);
+      if (record === null) {
+        throw new DomainError('invalid_state', 'The exam delivery could not be loaded.');
+      }
+      return this.toDeliveryProjection(record);
+    });
   }
 
   async getAttemptDelivery(
@@ -702,6 +751,9 @@ export class ExamService {
       }
       if (attempt.status !== 'in_progress') {
         throw new DomainError('conflict', 'The exam is no longer accepting answers.');
+      }
+      if (this.dependencies.repository.isAttemptAwaitingStart(attempt.id)) {
+        throw new DomainError('conflict', 'The exam has not begun yet.');
       }
 
       const questions = this.dependencies.repository.findQuestionsForVersion(
@@ -764,6 +816,9 @@ export class ExamService {
       if (attempt.status === 'in_progress' && isDue(attempt.effectiveDeadline, now)) {
         this.dependencies.repository.expireAttemptIfDue(attempt.id, now.toISOString());
       } else if (attempt.status === 'in_progress') {
+        if (this.dependencies.repository.isAttemptAwaitingStart(attempt.id)) {
+          throw new DomainError('conflict', 'The exam has not begun yet.');
+        }
         if (request.expectedRevision !== current.revision) {
           throw new DomainError('conflict', 'The answer revision is stale.');
         }
@@ -809,6 +864,8 @@ export class ExamService {
       if (attempt.status === 'in_progress') {
         if (isDue(attempt.effectiveDeadline, now)) {
           this.dependencies.repository.expireAttemptIfDue(attempt.id, now.toISOString());
+        } else if (this.dependencies.repository.isAttemptAwaitingStart(attempt.id)) {
+          throw new DomainError('conflict', 'The exam has not begun yet.');
         } else {
           this.dependencies.repository.submitAttemptIfActive(attempt.id, now.toISOString());
         }
@@ -838,7 +895,13 @@ export class ExamService {
   private toDeliveryProjection(record: ExamDeliveryRecord): ExamDeliveryProjection {
     const attempt = record.attempt;
     const examVersion = attempt.assignment.examVersion;
-    const orderedQuestions = stableOrder(attempt.attemptSeed, 'questions', record.questions);
+    const awaitingStart =
+      attempt.status === 'in_progress' &&
+      this.dependencies.repository.isAttemptAwaitingStart(attempt.id);
+    // Questions are withheld until the student finishes setup and begins.
+    const orderedQuestions = awaitingStart
+      ? []
+      : stableOrder(attempt.attemptSeed, 'questions', record.questions);
 
     return {
       exam: {
@@ -866,6 +929,7 @@ export class ExamService {
         effectiveDeadline: attempt.effectiveDeadline,
         submittedAt: attempt.submittedAt,
         expiredAt: attempt.expiredAt,
+        ...(awaitingStart ? { awaitingStart: true } : {}),
       },
       answers: record.answers,
       questions: orderedQuestions.map((question) =>

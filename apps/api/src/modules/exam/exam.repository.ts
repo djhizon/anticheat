@@ -470,6 +470,35 @@ export class ExamRepository {
       );
   }
 
+  markAttemptAwaitingStart(id: AttemptId, createdAt: string): void {
+    this.database
+      .prepare('INSERT OR IGNORE INTO attempt_setup (attempt_id, created_at) VALUES (?, ?)')
+      .run(id, createdAt);
+  }
+
+  isAttemptAwaitingStart(id: AttemptId): boolean {
+    return (
+      this.database.prepare('SELECT 1 AS found FROM attempt_setup WHERE attempt_id = ?').get(id) !==
+      undefined
+    );
+  }
+
+  /** Starts the real timer for an attempt still in setup; false when it was already begun. */
+  beginAttempt(
+    id: AttemptId,
+    times: { startedAt: string; baseDeadline: string; effectiveDeadline: string },
+  ): boolean {
+    const removed = this.database.prepare('DELETE FROM attempt_setup WHERE attempt_id = ?').run(id);
+    if (Number(removed.changes) !== 1) return false;
+    this.database
+      .prepare(
+        `UPDATE exam_attempts SET started_at = ?, base_deadline = ?, effective_deadline = ?
+         WHERE id = ? AND status = 'in_progress'`,
+      )
+      .run(times.startedAt, times.baseDeadline, times.effectiveDeadline, id);
+    return true;
+  }
+
   findAttemptByAssignmentForStudent(
     assignmentId: AssignmentId,
     studentId: UserId,

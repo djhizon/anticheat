@@ -349,6 +349,49 @@ describe('exam delivery boundary', () => {
     );
   });
 
+  it('keeps a setup attempt untimed and question-free until it begins', async () => {
+    const student = await registerStudent('setup@example.test');
+    const seeded = await seedExam();
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: student.userId,
+      extraTimeSeconds: 30,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(student, 'POST', `/exam/assignments/${assignmentId}/start`, { setup: true }),
+    );
+    const setup = (started.body as ExamDeliveryResponse).delivery;
+    expect(setup.attempt.awaitingStart).toBe(true);
+    expect(setup.questions).toEqual([]);
+    expect(Date.parse(setup.attempt.effectiveDeadline) - clock.now().getTime()).toBeGreaterThan(
+      60 * 60 * 1000,
+    );
+    await expect(
+      exam.service.saveAnswers(setup.attempt.id, student.userId, {
+        revision: 0,
+        idempotencyKey: 'save-before-begin',
+        answers: {},
+      }),
+    ).rejects.toThrow(/not begun/);
+
+    // Time spent in setup does not count against the exam.
+    clock.advance(600);
+    const begun = await exam.routes.handle(
+      studentRequest(student, 'POST', `/exam/attempts/${setup.attempt.id}/begin`),
+    );
+    expect(begun.status).toBe(200);
+    const delivery = (begun.body as ExamDeliveryResponse).delivery;
+    expect(delivery.attempt.awaitingStart).toBeUndefined();
+    expect(delivery.attempt.startedAt).toBe(clock.now().toISOString());
+    expect(delivery.attempt.effectiveDeadline).toBe('2026-09-15T00:11:30.000Z');
+    expect(delivery.questions.length).toBeGreaterThan(0);
+
+    // Beginning twice never restarts the clock.
+    clock.advance(30);
+    const again = await exam.service.beginAttempt(setup.attempt.id, student.userId);
+    expect(again.attempt.effectiveDeadline).toBe(delivery.attempt.effectiveDeadline);
+  });
+
   it('persists a validated answer snapshot and submits it idempotently', async () => {
     const student = await registerStudent('answers@example.test');
     const seeded = await seedExam();
@@ -608,6 +651,41 @@ describe('exam delivery boundary', () => {
     expect(integrity.recordAppEvent).toHaveBeenCalledWith(attemptId, 'Discord', 2);
   });
 
+  it('records events for a setup attempt that has not begun yet', async () => {
+    const student = await registerStudent('setup-events@example.test');
+    const seeded = await seedExam();
+    const assignmentId = await exam.service.assignExam({
+      examVersionId: seeded.examVersionId,
+      studentId: student.userId,
+    });
+    const started = await exam.routes.handle(
+      studentRequest(student, 'POST', `/exam/assignments/${assignmentId}/start`, { setup: true }),
+    );
+    const setup = (started.body as ExamDeliveryResponse).delivery;
+    expect(setup.attempt.awaitingStart).toBe(true);
+    const integrity = { recordAppEvent: vi.fn() };
+    const routes = new ExamRoutes(
+      exam.service,
+      auth.boundary,
+      config,
+      integrity as unknown as IntegrityService,
+    );
+    for (const event of ['liveness_unverified', 'recording_started', 'iphone_paired']) {
+      const response = await routes.handle(
+        studentRequest(student, 'PATCH', `/exam/attempts/${setup.attempt.id}/events`, { event }),
+      );
+      expect(response.status).toBe(200);
+      expect(integrity.recordAppEvent).toHaveBeenLastCalledWith(
+        setup.attempt.id,
+        `flag:${event}`,
+        1,
+      );
+    }
+    // Recording events during setup never begin the exam.
+    const after = await exam.service.getAttemptDelivery(setup.attempt.id, student.userId);
+    expect(after.attempt.awaitingStart).toBe(true);
+  });
+
   it('runs instructor-only AI checks across every saved answer to a question', async () => {
     const seeded = await seedExam();
     const instructor = await registerStudent('ai-teacher@example.test');
@@ -865,7 +943,7 @@ describe('exam delivery boundary', () => {
     );
     const attemptId = (started.body as ExamDeliveryResponse).delivery.attempt.id;
     const integrity = {
-      issueLivenessChallenge: vi.fn(() => ({ nonce: 'n', type: 'head_turn' })),
+      issueLivenessChallenge: vi.fn(() => ({ nonce: 'n', type: 'spoken_words' })),
       verifyLiveness: vi.fn(async () => ({ passed: true, layer: 3, detail: 'ok' })),
     };
     const routes = new ExamRoutes(
@@ -876,11 +954,27 @@ describe('exam delivery boundary', () => {
     );
     const base = `/exam/attempts/${attemptId}`;
     await routes.handle(
-      studentRequest(owner, 'POST', `${base}/liveness-challenge`, { preferred: 'head_turn' }),
+      studentRequest(owner, 'POST', `${base}/liveness-challenge`, { preferred: 'spoken_words' }),
     );
-    expect(integrity.issueLivenessChallenge).toHaveBeenLastCalledWith(attemptId, 'head_turn');
+    expect(integrity.issueLivenessChallenge).toHaveBeenLastCalledWith(
+      attemptId,
+      'spoken_words',
+      undefined,
+    );
+    await routes.handle(
+      studentRequest(owner, 'POST', `${base}/liveness-challenge`, { purpose: 'spot_check' }),
+    );
+    expect(integrity.issueLivenessChallenge).toHaveBeenLastCalledWith(
+      attemptId,
+      undefined,
+      'spot_check',
+    );
     await routes.handle(studentRequest(owner, 'POST', `${base}/liveness-challenge`));
-    expect(integrity.issueLivenessChallenge).toHaveBeenLastCalledWith(attemptId, undefined);
+    expect(integrity.issueLivenessChallenge).toHaveBeenLastCalledWith(
+      attemptId,
+      undefined,
+      undefined,
+    );
     await routes.handle(
       studentRequest(owner, 'POST', `${base}/liveness-verify`, {
         nonce: 'n',
@@ -1793,32 +1887,31 @@ describe('exam delivery boundary', () => {
     expect(flags).not.toContain('flag:desk_camera_extra_person');
   });
 
-  it('gates real answer writes and preserves acknowledged idempotent replay and finalization', async () => {
+  it('does not block answer writes on phone loss and preserves idempotent replay and finalization', async () => {
     const { student, attemptId, delivery } = await phoneFixture();
     const { credential } = exam.phonePresence.claim(exam.phonePresence.enroll(attemptId).code);
     const answers = Object.fromEntries(delivery.questions.map((q) => [q.id, null]));
     const request = { revision: 0, idempotencyKey: 'phone-save-fixture-0001', answers };
-    await expect(exam.service.saveAnswers(attemptId, student.userId, request)).rejects.toThrow(
-      'Phone connection lost',
-    );
+    // The paired phone has not sent a heartbeat (lost): answering is still accepted.
+    expect(exam.phonePresence.status(attemptId)).toMatchObject({ required: true, active: false });
+    const saved = await exam.service.saveAnswers(attemptId, student.userId, request);
     const challenge = exam.phonePresence.challenge(credential);
     exam.phonePresence.heartbeat(credential, challenge.challenge, challenge.sequence, true);
-    const saved = await exam.service.saveAnswers(attemptId, student.userId, request);
     clock.advance(8);
     expect(await exam.service.saveAnswers(attemptId, student.userId, request)).toEqual(saved);
-    const blocked = await exam.routes.handle(
+    const lateSave = await exam.routes.handle(
       studentRequest(student, 'PUT', `/exam/attempts/${attemptId}/answers`, {
         ...request,
         revision: 1,
-        idempotencyKey: 'phone-blocked-fixture-0002',
+        idempotencyKey: 'phone-late-fixture-0002',
       }),
     );
-    expect(blocked.status).toBe(409);
+    expect(lateSave.status).toBe(200);
     expect(
       (await exam.service.getAttemptDelivery(attemptId, student.userId)).answers.revision,
-    ).toBe(1);
+    ).toBe(2);
     const submitted = await exam.service.submitAttemptWithAnswers(attemptId, student.userId, {
-      expectedRevision: 1,
+      expectedRevision: 2,
       idempotencyKey: 'phone-submit-fixture-0003',
     });
     expect(submitted.receipt.status).toBe('submitted');

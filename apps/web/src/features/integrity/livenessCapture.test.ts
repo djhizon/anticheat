@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 
 import { centreMeanRgb, meanLuminance } from './livenessCapture.js';
-import { median, turnYaw } from './headTurn.js';
+import { median } from './faceModelSource.js';
 
 it('averages only the centre 50% region of a frame', () => {
   // 4x4 image: outer ring is red 200, centre 2x2 is rgb(10, 20, 30).
@@ -16,11 +16,9 @@ it('averages only the centre 50% region of a frame', () => {
   expect(centreMeanRgb(new Uint8ClampedArray(0), 0, 0)).toEqual({ r: 0, g: 0, b: 0 });
 });
 
-it('computes head-turn yaw relative to the starting pose', () => {
+it('takes the median of face-model readings', () => {
   expect(median([3, 1, 2])).toBe(2);
   expect(median([1, 2, 3, 10])).toBe(2.5);
-  expect(turnYaw({ yaw: 30, pitch: 0 }, { yaw: 5, pitch: 0 })).toBe(25);
-  expect(turnYaw({ yaw: -170, pitch: 0 }, { yaw: 175, pitch: 0 })).toBe(15);
 });
 import { selectCamera } from './physicalCamera.js';
 

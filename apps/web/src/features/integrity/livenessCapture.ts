@@ -42,7 +42,7 @@ export const FLASH_MS = 350;
 /** Neutral gap between colours keeps the sequence under ~2 flashes per second. */
 export const GAP_MS = 150;
 
-const FLASH_CSS: Record<LivenessColour, string> = {
+export const FLASH_CSS: Record<LivenessColour, string> = {
   red: '#ff0000',
   green: '#00ff00',
   blue: '#0000ff',
@@ -99,7 +99,8 @@ export function centreMeanRgb(
   return { r: round(r), g: round(g), b: round(b) };
 }
 
-function grab(video: HTMLVideoElement, box?: Box | null): LivenessRgb {
+/** Mean RGB of the face region (or frame centre) of the current video frame. */
+export function grab(video: HTMLVideoElement, box?: Box | null): LivenessRgb {
   const canvas = document.createElement('canvas');
   canvas.width = video.videoWidth || 640;
   canvas.height = video.videoHeight || 480;
@@ -110,9 +111,9 @@ function grab(video: HTMLVideoElement, box?: Box | null): LivenessRgb {
   return centreMeanRgb(data, canvas.width, canvas.height, box);
 }
 
-/** Opens the app's MediaPipe face model (imported lazily: headTurn imports this module). */
+/** Opens the app's MediaPipe face model (imported lazily). */
 async function openFaceSource(video: HTMLVideoElement): Promise<FaceSource> {
-  const { createWorkerPoseSource } = await import('./headTurn.js');
+  const { createWorkerPoseSource } = await import('./faceModelSource.js');
   const source = await createWorkerPoseSource(video);
   return {
     face: async () => (await source.observe())?.faceBox ?? null,

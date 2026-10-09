@@ -11,6 +11,7 @@ import { useImplicitGazeCalibration } from './interactionCalibration.js';
 import { GazePanel, gazeDebugEnabled } from './GazePanel.js';
 import type { ExamApi } from '../exam/api.js';
 import type { Box } from './gazeEstimator.js';
+import type { VisionObservation } from './visionSignals.js';
 import { brightnessTip, useBrightnessState } from './desktopBrightness.js';
 import { tuneCameraTrack } from './cameraTuning.js';
 import { isLightBoostOn, setLightBoost, useLightBoost } from './lightBoost.js';
@@ -26,6 +27,9 @@ import {
 
 /** An eye-gaze sample older than this no longer counts as current. */
 const GAZE_FRESH_MS = 1500;
+/** If camera checks stop on their own, restart this soon (and give up after MAX_AUTO_RESTARTS). */
+export const AUTO_RESTART_DELAY_MS = 2000;
+export const MAX_AUTO_RESTARTS = 5;
 
 export function CameraIntegrityPanel({
   attempt,
@@ -33,8 +37,17 @@ export function CameraIntegrityPanel({
   api,
   onGazeSample,
   paused = false,
+  onLiveChange,
+  onUnavailable,
+  onVisionSample,
 }: {
   readonly attempt: AttemptContext;
+  /** Read-only status for the exam top bar: true while camera checks are live. */
+  readonly onLiveChange?: (live: boolean) => void;
+  /** Called when automatic restarts keep failing; the page offers "Resume monitoring". */
+  readonly onUnavailable?: (reason: string) => void;
+  /** Every on-device face-model observation (presence spot checks). Never receives images. */
+  readonly onVisionSample?: (observation: VisionObservation) => void;
   /**
    * Eye-gaze hook: called for every smoothed, calibrated gaze sample (about 2-4 per second while
    * one face is visible). Debounce before logging. Never receives images.
@@ -59,6 +72,8 @@ export function CameraIntegrityPanel({
   const controller = useRef<ReturnType<typeof createCameraSession> | null>(null);
   const onGaze = useRef(onGazeSample);
   onGaze.current = onGazeSample;
+  const onVision = useRef(onVisionSample);
+  onVision.current = onVisionSample;
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
   /** Latest eye-gaze sample; ignored once older than GAZE_FRESH_MS (tracking lost). */
@@ -105,6 +120,43 @@ export function CameraIntegrityPanel({
   // Plug-and-play gaze: clicks, focus and typing calibrate it implicitly (no calibration step).
   useImplicitGazeCalibration(gazeTracker, live && !paused);
   const running = snapshot.phase !== 'off';
+  const restarts = useRef(0);
+  const liveCallback = useRef(onLiveChange);
+  liveCallback.current = onLiveChange;
+  const unavailableCallback = useRef(onUnavailable);
+  unavailableCallback.current = onUnavailable;
+  useEffect(() => {
+    if (live) restarts.current = 0;
+    liveCallback.current?.(live);
+  }, [live]);
+  // There is no Start/Stop control during the exam: if the checks stop by themselves (page was
+  // hidden, a model hiccup) they restart automatically, then fall back to "Resume monitoring".
+  useEffect(() => {
+    if (!autoStart || !attempt.active || snapshot.phase !== 'off') return;
+    if (snapshot.reason === 'Not started') return;
+    if (restarts.current >= MAX_AUTO_RESTARTS) {
+      unavailableCallback.current?.(snapshot.reason);
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = () => {
+      timer = setTimeout(() => {
+        timer = undefined;
+        if (document.hidden || Date.now() >= current.current.deadline) return;
+        restarts.current += 1;
+        void controller.current?.start(true).catch(() => {});
+      }, AUTO_RESTART_DELAY_MS);
+    };
+    schedule();
+    const onVisible = () => {
+      if (!document.hidden && timer === undefined) schedule();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      if (timer !== undefined) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [autoStart, attempt.active, snapshot.phase, snapshot.reason]);
   const readings = live && snapshot.faces !== null;
 
   useEffect(() => {
@@ -117,6 +169,11 @@ export function CameraIntegrityPanel({
         const box = sample.observation.faceBox;
         latestFaceBox.current = box ? { box, at: performance.now() } : null;
         gazeTracker.push(sample);
+        try {
+          onVision.current?.(sample.observation);
+        } catch {
+          // A consumer error must never stop camera checks.
+        }
       },
     );
     controller.current = session;
@@ -246,20 +303,9 @@ export function CameraIntegrityPanel({
       {ended ? null : (
         <>
           <p role="status">{snapshot.reason}</p>
-          <div className="cam-controls">
-            <button
-              type="button"
-              onClick={() =>
-                running ? controller.current?.stop() : void controller.current?.start(true)
-              }
-            >
-              {running ? 'Stop camera checks' : 'Start camera checks'}
-            </button>
-          </div>
           <p className="muted">
-            Camera checks start automatically when the exam opens (you can stop and restart them)
-            and run a few times per second on this device. Missing models are not treated as clear
-            results.
+            Camera checks run automatically for the whole exam, a few times per second on this
+            device. Missing models are not treated as clear results.
           </p>
         </>
       )}

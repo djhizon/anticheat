@@ -61,6 +61,7 @@ describe('database migrations', () => {
         { version: 9, name: 'gaze_direction' },
         { version: 10, name: 'evidence_snapshots' },
         { version: 11, name: 'input_behaviour' },
+        { version: 12, name: 'attempt_setup' },
       ]);
     } finally {
       database.close();
