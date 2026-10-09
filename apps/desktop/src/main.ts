@@ -15,6 +15,7 @@ import { execSync } from 'child_process';
 import * as path from 'path';
 import { appendFileSync, existsSync, statSync, writeFileSync } from 'fs';
 import { createAppController, createHelperCall } from './appControl';
+import { classifyDisplays, detectVirtualMachine } from './environment';
 
 const WEB_URL = 'http://127.0.0.1:5173/';
 const APP_WATCH_INTERVAL_MS = 2000;
@@ -61,6 +62,28 @@ function getDisplayCount(): number {
   return screen.getAllDisplays().length;
 }
 
+function getCaptureDisplays(): string[] {
+  try {
+    return classifyDisplays(
+      screen.getAllDisplays() as unknown as Parameters<typeof classifyDisplays>[0],
+    ).captureLike;
+  } catch {
+    return [];
+  }
+}
+
+function getEnvironmentRisk(): { virtualMachine: string | null; captureDisplays: string[] } {
+  let virtualMachine: string | null = null;
+  try {
+    virtualMachine = detectVirtualMachine((cmd) =>
+      execSync(cmd, { timeout: 1000, stdio: ['ignore', 'pipe', 'ignore'] }).toString(),
+    ).reason;
+  } catch {
+    virtualMachine = null;
+  }
+  return { virtualMachine, captureDisplays: getCaptureDisplays() };
+}
+
 function startWatcher(attemptId: string): void {
   if (watcherInterval) clearInterval(watcherInterval);
   watcherInterval = setInterval(() => {
@@ -72,6 +95,7 @@ function startWatcher(attemptId: string): void {
       attemptId,
       foregroundApp: app,
       displayCount: displays,
+      captureDisplays: getCaptureDisplays(),
     });
   }, APP_WATCH_INTERVAL_MS);
 }
@@ -344,6 +368,7 @@ ipcMain.on('stop-watcher', () => {
 });
 
 ipcMain.handle('get-display-count', () => getDisplayCount());
+ipcMain.handle('get-environment-risk', () => getEnvironmentRisk());
 ipcMain.handle('get-foreground-app', () => getForegroundApp());
 
 app.whenReady().then(async () => {

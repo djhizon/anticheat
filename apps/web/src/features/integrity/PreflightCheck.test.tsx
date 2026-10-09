@@ -38,11 +38,13 @@ describe('desktop preflight recovery', () => {
   async function render(
     listAppTargets: () => Promise<unknown>,
     getDisplayCount = () => Promise.resolve(1),
+    extra: Record<string, unknown> = {},
   ) {
     Object.assign(window, {
       electronExam: {
         listAppTargets,
         getDisplayCount,
+        ...extra,
         closeAppTarget: vi.fn(async () => ({ status: 'cancelled', message: 'Cancelled' })),
       },
     });
@@ -151,5 +153,35 @@ describe('desktop preflight recovery', () => {
         .closeAppTarget,
     ).toHaveBeenCalledWith('Notes', 'force');
     expect(container.textContent).toContain('Cancelled');
+  });
+  it('blocks inside a virtual machine', async () => {
+    await render(async () => [target('Exam', true)], undefined, {
+      getEnvironmentRisk: async () => ({
+        virtualMachine: 'Hypervisor detected',
+        captureDisplays: [],
+      }),
+    });
+    expect(container.textContent).toContain("This exam can't run inside a virtual machine.");
+    expect(container.textContent).toContain('Hypervisor detected');
+    expect(passed).not.toHaveBeenCalled();
+  });
+  it('blocks capture displays', async () => {
+    await render(async () => [target('Exam', true)], undefined, {
+      getEnvironmentRisk: async () => ({ virtualMachine: null, captureDisplays: ['Cam Link'] }),
+    });
+    expect(container.textContent).toContain('disconnect capture or mirroring');
+    expect(passed).not.toHaveBeenCalled();
+  });
+  it('does not block when risk data is missing or throws', async () => {
+    await render(async () => [target('Exam', true)]);
+    expect(passed).toHaveBeenCalledTimes(1);
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render(async () => [target('Exam', true)], undefined, {
+      getEnvironmentRisk: async () => {
+        throw new Error('x');
+      },
+    });
+    expect(passed).toHaveBeenCalledTimes(2);
   });
 });

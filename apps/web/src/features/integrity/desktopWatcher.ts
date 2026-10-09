@@ -2,6 +2,8 @@ export interface AppSnapshot {
   readonly attemptId: string;
   readonly foregroundApp: string;
   readonly displayCount: number;
+  /** Labels of displays that look like capture cards or mirroring hardware. */
+  readonly captureDisplays?: readonly string[];
 }
 
 export interface DesktopWatcherBridge {
@@ -28,11 +30,17 @@ export function desktopWatcherBridge(): DesktopWatcherBridge | undefined {
 export function startDesktopWatcher(
   bridge: DesktopWatcherBridge,
   attemptId: string,
-  send: (event: { foregroundApp: string; displayCount: number }) => Promise<unknown>,
+  send: (event: Record<string, unknown>) => Promise<unknown>,
 ): () => void {
   let last = '';
+  const reportedCapture = new Set<string>();
   const unsubscribe = bridge.onAppSnapshot((snapshot) => {
     if (snapshot.attemptId !== attemptId) return;
+    for (const label of snapshot.captureDisplays ?? []) {
+      if (reportedCapture.has(label)) continue;
+      reportedCapture.add(label);
+      send({ event: 'capture_display_connected' }).catch(() => {});
+    }
     const suspicious = snapshot.displayCount > 1 || !OWN_APPS.has(snapshot.foregroundApp);
     const key = `${snapshot.foregroundApp}|${snapshot.displayCount}`;
     if (key === last) return;

@@ -5,6 +5,11 @@ contextBridge.exposeInMainWorld('electronExam', {
   stopWatcher: () => ipcRenderer.send('stop-watcher'),
   getDisplayCount: () => ipcRenderer.invoke('get-display-count') as Promise<number>,
   getForegroundApp: () => ipcRenderer.invoke('get-foreground-app') as Promise<string>,
+  getEnvironmentRisk: () =>
+    ipcRenderer.invoke('get-environment-risk') as Promise<{
+      virtualMachine: string | null;
+      captureDisplays: string[];
+    }>,
   listAppTargets: () => ipcRenderer.invoke('list-app-targets'),
   closeAppTarget: (id: string, mode: 'quit' | 'force') =>
     ipcRenderer.invoke('close-app-target', { id, mode }),
@@ -14,11 +19,17 @@ contextBridge.exposeInMainWorld('electronExam', {
       attemptId: string;
       foregroundApp: string;
       displayCount: number;
+      captureDisplays?: string[];
     }) => void,
   ) => {
     const listener = (
       _event: unknown,
-      snapshot: { attemptId: string; foregroundApp: string; displayCount: number },
+      snapshot: {
+        attemptId: string;
+        foregroundApp: string;
+        displayCount: number;
+        captureDisplays?: string[];
+      },
     ) => callback(snapshot);
     ipcRenderer.on('app-snapshot', listener);
     return () => ipcRenderer.removeListener('app-snapshot', listener);

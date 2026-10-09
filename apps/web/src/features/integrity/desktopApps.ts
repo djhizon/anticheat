@@ -8,6 +8,7 @@ export interface DesktopAppTarget {
 }
 export interface DesktopAppsBridge {
   getDisplayCount(): Promise<number>;
+  getEnvironmentRisk?(): Promise<{ virtualMachine: string | null; captureDisplays: string[] }>;
   listAppTargets(): Promise<unknown>;
   closeAppTarget(id: string, mode: 'quit' | 'force'): Promise<{ status: string; message: string }>;
 }

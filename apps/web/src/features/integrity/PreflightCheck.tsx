@@ -25,6 +25,8 @@ export function PreflightCheck({
 }) {
   const [runningApps, setRunningApps] = useState<DesktopAppTarget[]>([]);
   const [extraDisplays, setExtraDisplays] = useState(false);
+  const [vmReason, setVmReason] = useState<string | null>(null);
+  const [captureDisplays, setCaptureDisplays] = useState<string[]>([]);
   const [closing, setClosing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -66,9 +68,32 @@ export function PreflightCheck({
       setLoading(true);
       setError(null);
       setExtraDisplays(false);
+      setVmReason(null);
+      setCaptureDisplays([]);
       try {
         if (typeof electronAPI?.listAppTargets !== 'function')
           throw new Error('Restart the rebuilt desktop app.');
+        if (typeof electronAPI.getEnvironmentRisk === 'function') {
+          let risk: Awaited<ReturnType<NonNullable<typeof electronAPI.getEnvironmentRisk>>> | null =
+            null;
+          try {
+            risk = await electronAPI.getEnvironmentRisk();
+          } catch {
+            risk = null; // Unavailable risk data never blocks the student.
+          }
+          if (cancelled) return;
+          const vm = typeof risk?.virtualMachine === 'string' ? risk.virtualMachine : null;
+          const captures = Array.isArray(risk?.captureDisplays)
+            ? risk.captureDisplays.filter((d): d is string => typeof d === 'string')
+            : [];
+          if (vm !== null || captures.length > 0) {
+            setVmReason(vm);
+            setCaptureDisplays(captures);
+            setRunningApps([]);
+            setLoading(false);
+            return;
+          }
+        }
         const displays = await electronAPI.getDisplayCount();
         if (cancelled) return;
         if (!Number.isInteger(displays) || displays < 1)
@@ -187,6 +212,18 @@ export function PreflightCheck({
           cannot be closed here.
         </p>
         {notice !== null && <p role="status">{notice}</p>}
+        {vmReason !== null && (
+          <p role="alert">
+            This exam can't run inside a virtual machine. Please open the exam app directly on your
+            computer. ({vmReason})
+          </p>
+        )}
+        {captureDisplays.length > 0 && (
+          <p role="alert">
+            A capture or mirroring display was detected ({captureDisplays.join(', ')}). Please
+            disconnect capture or mirroring devices, then re-check.
+          </p>
+        )}
         {extraDisplays && <p role="alert">{RISK_MAP.EXTERNAL_MONITOR}</p>}
 
         <ul

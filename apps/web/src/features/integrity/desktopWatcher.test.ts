@@ -42,3 +42,22 @@ it('forwards only changed, suspicious snapshots for the current attempt', () => 
   emit({ attemptId: 'a1', foregroundApp: 'Zoom', displayCount: 1 });
   expect(send).toHaveBeenCalledTimes(2);
 });
+
+it('reports each capture-like display once', () => {
+  const { bridge, emit } = fakeBridge();
+  const send = vi.fn(async (_body: Record<string, unknown>) => ({}));
+  startDesktopWatcher(bridge, 'a1', send);
+  const snap = {
+    attemptId: 'a1',
+    foregroundApp: 'Exam Anti-Cheat',
+    displayCount: 2,
+    captureDisplays: ['Elgato HD60'],
+  };
+  emit(snap);
+  emit({ ...snap, foregroundApp: 'Electron' });
+  expect(
+    send.mock.calls.filter(
+      ([body]) => (body as { event?: string }).event === 'capture_display_connected',
+    ),
+  ).toHaveLength(1);
+});
