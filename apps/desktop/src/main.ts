@@ -577,7 +577,11 @@ async function startLocalServer(): Promise<boolean> {
 }
 
 export async function startApp(): Promise<void> {
-  judgeBuild = readJudgeBuild(app.getAppPath(), app.isPackaged);
+  // Test-only: lets the unpackaged dev build behave like the judge build (demo mode + seeding).
+  // Ignored in packaged apps, so it cannot change an installed build.
+  judgeBuild =
+    readJudgeBuild(app.getAppPath(), app.isPackaged) ||
+    (!app.isPackaged && process.env.EAC_TEST_JUDGE_BUILD === '1');
   runMode = readRunMode(app.getPath('userData'), defaultRunMode(judgeBuild));
   if (!(await startLocalServer())) {
     app.quit();
