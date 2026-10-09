@@ -3,6 +3,16 @@
 Exam Anti-Cheat ships as an unsigned macOS disk image. Everything runs locally on your Mac; no
 account with us and no internet connection is needed to try it.
 
+## What you'll see
+
+1. Opening the disk image shows a window titled **Install Exam Anti-Cheat** with the app icon (a
+   blue shield with a check mark) next to an **Applications** shortcut. Drag the icon onto it.
+2. The first time you open the app, macOS shows a Gatekeeper warning because the app is not
+   notarized. Follow the [First launch](#first-launch-gatekeeper-the-app-is-not-notarized) steps
+   once; later launches open normally.
+3. The app opens with a **Demo mode** banner, confirming that nothing will be closed, blocked, or
+   quit while you explore. See [Demo mode](#demo-mode).
+
 ## Requirements
 
 - macOS 13 (Ventura) or newer.

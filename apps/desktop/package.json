@@ -2,6 +2,9 @@
   "name": "@exam-anti-cheat/desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "Exam Anti-Cheat: a local-first proctored exam app with transparent integrity monitoring.",
+  "author": "Dustin Hizon",
+  "homepage": "https://github.com/djhizon/anticheat",
   "main": "dist/main.js",
   "scripts": {
     "dev": "npm run build && electron dist/main.js --use-dev-servers",
@@ -67,7 +70,8 @@
       "identity": null,
       "entitlementsInherit": "assets/entitlements.mac.plist",
       "minimumSystemVersion": "13.0",
-      "gatekeeperAssess": false
+      "gatekeeperAssess": false,
+      "icon": "assets/icon.icns"
     },
     "directories": {
       "output": "release"
@@ -77,8 +81,28 @@
     ],
     "afterPack": "scripts/adhoc-sign.cjs",
     "dmg": {
-      "title": "Exam Anti-Cheat"
-    }
+      "title": "Install Exam Anti-Cheat",
+      "icon": "assets/icon.icns",
+      "iconSize": 112,
+      "window": {
+        "width": 540,
+        "height": 380
+      },
+      "contents": [
+        {
+          "x": 140,
+          "y": 190,
+          "type": "file"
+        },
+        {
+          "x": 400,
+          "y": 190,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "copyright": "Copyright © 2026 Dustin Hizon"
   },
   "allowScripts": {
     "electron@44.4.1": true
