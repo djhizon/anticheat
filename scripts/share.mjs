@@ -20,6 +20,8 @@ const env = {
   ...process.env,
   SHARE_HOST: host,
   ALLOWED_ORIGINS: ['http://localhost:5173', 'http://127.0.0.1:5173', origin].join(','),
+  // Email links (confirm sign-up, reset password) must open the public address.
+  SITE_URL: origin,
 };
 const children = [
   spawn(process.execPath, ['scripts/dev.mjs'], { env, stdio: 'inherit' }),
