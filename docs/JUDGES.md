@@ -53,10 +53,17 @@ build. The app launches normally and shows transcription as unavailable.
 
 ## Demo mode
 
-The app starts in **Demo mode**: nothing is closed, blocked, or quit, so you can look around
-safely. The mode can be changed from the app menu.
+This judge build starts in **Demo mode**: nothing is closed, blocked, or quit, so you can look
+around safely. Demo mode is specific to the judge build; regular builds of the app start in
+**Strict mode** instead. You can change the mode from the app menu (**Mode**); switching in either
+direction asks for confirmation, and an attempt taken in Demo mode is marked as such in its
+transparency report.
 
 ## Demo accounts
+
+The judge build seeds these demo accounts on its first launch (a few seconds after the window
+opens, sign-in works once seeding finishes). Regular builds start Strict and seed no demo or
+instructor accounts at all.
 
 | Role       | Email                          | Password                         |
 | ---------- | ------------------------------ | -------------------------------- |
@@ -64,7 +71,7 @@ safely. The mode can be changed from the app menu.
 | Instructor | `demo.instructor@example.test` | `Demo instructor password 2026!` |
 | Classmates | `classmate1..4@example.test`   | `Demo classmate password 2026!`  |
 
-These are the defaults from `apps/api/src/demoSeed.ts`; the app seeds them on its first launch.
+These are the defaults from `apps/api/src/demoSeed.ts`.
 
 ## Troubleshooting
 

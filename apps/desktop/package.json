@@ -9,6 +9,7 @@
     "build:server": "cd ../.. && npm run build --workspace @exam-anti-cheat/web && npm run build:bundle --workspace @exam-anti-cheat/api",
     "build": "tsc && node scripts/build-native.cjs",
     "pack:builder": "electron-builder --mac --x64",
+    "pack:judge": "electron-builder --mac --x64 -c.extraMetadata.examJudgeBuild=true",
     "pack": "npm run build && npm run pack:builder"
   },
   "devDependencies": {

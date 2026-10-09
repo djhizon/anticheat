@@ -35,6 +35,19 @@ describe('seedDemoOnce', () => {
     await expect(seedDemoOnce(marker, seed)).rejects.toThrow('boom');
     expect(existsSync(marker)).toBe(false);
   });
+
+  it('wipes only on the first attempt; a retry after a partial seed never wipes again', async () => {
+    const marker = join(tempDir(), 'seeded');
+    const seed = vi
+      .fn<(options: { readonly wipe: boolean }) => Promise<void>>()
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValue(undefined);
+
+    await expect(seedDemoOnce(marker, seed)).rejects.toThrow('boom');
+    expect(await seedDemoOnce(marker, seed)).toBe(true);
+    expect(seed.mock.calls.map(([options]) => options.wipe)).toEqual([true, false]);
+    expect(await seedDemoOnce(marker, seed)).toBe(false);
+  });
 });
 
 describe('seedDemo', () => {

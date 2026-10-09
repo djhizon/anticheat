@@ -38,6 +38,8 @@ export interface RuntimeDeps {
   /** Repository root, used for source paths when not packaged. */
   readonly repoRoot: string;
   readonly userDataPath: string;
+  /** True only for the packaged judge build: the server then seeds the demo accounts. */
+  readonly judgeBuild?: boolean;
   /** Starts the bundle in an Electron utility process. */
   forkUtility(entry: string, options: { cwd: string; env: NodeJS.ProcessEnv }): ServerProcess;
   /** Starts the bundle with the Electron binary acting as plain Node. */
@@ -81,13 +83,19 @@ export function resolveRuntimePaths(
 
 /** NODE_ENV is intentionally never set: production would demand HTTPS origins. */
 export function buildServerEnv(
-  deps: Pick<RuntimeDeps, 'isPackaged' | 'resourcesPath' | 'repoRoot' | 'userDataPath'>,
+  deps: Pick<
+    RuntimeDeps,
+    'isPackaged' | 'resourcesPath' | 'repoRoot' | 'userDataPath' | 'judgeBuild'
+  >,
   base: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
   const paths = resolveRuntimePaths(deps);
   const env: NodeJS.ProcessEnv = { ...base };
   delete env.NODE_ENV;
   delete env.ELECTRON_RUN_AS_NODE;
+  // Never inherited: only the build flag decides whether demo accounts are seeded.
+  delete env.EAC_SEED_DEMO;
+  if (deps.judgeBuild === true) env.EAC_SEED_DEMO = '1';
   env.API_PORT = String(API_PORT);
   env.PORT = String(API_PORT);
   env.WEB_PORT = String(WEB_PORT);

@@ -7,27 +7,42 @@ const mocks = vi.hoisted(() => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- loose Electron BrowserWindow test doubles
   windows: [] as any[],
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
+  listeners: new Map<string, (...args: unknown[]) => unknown>(),
   execSync: vi.fn(),
+  execFile: vi.fn(),
+  writeRunMode: vi.fn(),
+  showErrorBox: vi.fn(),
+  quit: vi.fn(),
+  permissionRequest: vi.fn(),
+  permissionCheck: vi.fn(),
   displayHandler: vi.fn(),
   getSources: vi.fn(),
 }));
-vi.mock('child_process', () => ({ execSync: mocks.execSync }));
+vi.mock('child_process', () => ({ execSync: mocks.execSync, execFile: mocks.execFile }));
 vi.mock('fs', () => ({
   appendFileSync: vi.fn(),
   existsSync: () => false,
   statSync: vi.fn(),
   writeFileSync: vi.fn(),
 }));
-vi.mock('./settings.js', () => ({ readRunMode: () => 'demo', writeRunMode: vi.fn() }));
+vi.mock('./settings.js', () => ({
+  readRunMode: (_dir: string, fallback: string) => fallback,
+  readJudgeBuild: () => false,
+  writeRunMode: mocks.writeRunMode,
+}));
 vi.mock('electron', () => ({
   app: {
     whenReady: () => new Promise(() => {}),
     on: vi.fn(),
     getPath: () => '/tmp',
-    quit: vi.fn(),
+    getAppPath: () => '/app',
+    isPackaged: false,
+    quit: mocks.quit,
   },
   BrowserWindow: class extends EventEmitter {
-    webContents = new EventEmitter();
+    webContents = Object.assign(new EventEmitter(), {
+      setWindowOpenHandler: vi.fn(),
+    });
     destroyed = false;
     loadURL = vi.fn(async (_url: string) => {});
     maximize() {}
@@ -46,7 +61,8 @@ vi.mock('electron', () => ({
   },
   screen: {},
   ipcMain: {
-    on: vi.fn(),
+    on: (name: string, handler: (...args: unknown[]) => unknown) =>
+      mocks.listeners.set(name, handler),
     handle: (name: string, handler: (...args: unknown[]) => unknown) =>
       mocks.handlers.set(name, handler),
   },
@@ -55,19 +71,19 @@ vi.mock('electron', () => ({
   session: {
     defaultSession: {
       clearCache: mocks.clearCache,
-      setPermissionRequestHandler: vi.fn(),
-      setPermissionCheckHandler: vi.fn(),
+      setPermissionRequestHandler: mocks.permissionRequest,
+      setPermissionCheckHandler: mocks.permissionCheck,
       setDisplayMediaRequestHandler: mocks.displayHandler,
     },
   },
   desktopCapturer: { getSources: mocks.getSources },
   shell: { openPath: vi.fn() },
   systemPreferences: {},
-  dialog: { showMessageBox: mocks.showMessageBox },
+  dialog: { showMessageBox: mocks.showMessageBox, showErrorBox: mocks.showErrorBox },
 }));
 
 import { screen } from 'electron';
-import { createWindow, switchRunMode } from './main.js';
+import { createWindow, isAppUrl, reportStartupFailure, switchRunMode } from './main.js';
 const flush = async () => {
   for (let i = 0; i < 8; i++) await Promise.resolve();
 };
@@ -88,6 +104,7 @@ describe('native window recovery', () => {
     mocks.windows.length = 0;
     mocks.clearCache.mockReset().mockResolvedValue(undefined);
     mocks.showMessageBox.mockReset().mockResolvedValue({ response: 1 });
+    mocks.writeRunMode.mockClear();
   });
   function displayRequest() {
     const frame = { url: 'http://127.0.0.1:5173/' };
@@ -264,6 +281,154 @@ describe('native window recovery', () => {
     await flush();
     expect(window.isDestroyed()).toBe(true);
   });
+  describe('window hardening', () => {
+    it('denies every window.open request', async () => {
+      await createWindow();
+      const handler = mocks.windows.at(-1).webContents.setWindowOpenHandler.mock.calls[0][0];
+      expect(handler({ url: 'https://example.test' })).toEqual({ action: 'deny' });
+    });
+    it('grants only media and display-capture to the app origin in the app window', async () => {
+      mocks.permissionRequest.mockClear();
+      mocks.permissionCheck.mockClear();
+      await createWindow();
+      const webContents = mocks.windows.at(-1).webContents;
+      const request = mocks.permissionRequest.mock.calls.at(-1)![0];
+      const decide = (contents: unknown, permission: string, url: string) => {
+        const callback = vi.fn();
+        request(contents, permission, callback, { requestingUrl: url });
+        return callback.mock.calls[0]![0];
+      };
+      expect(decide(webContents, 'media', 'http://127.0.0.1:5173/')).toBe(true);
+      expect(decide(webContents, 'display-capture', 'http://127.0.0.1:5173/x')).toBe(true);
+      for (const permission of ['geolocation', 'notifications', 'clipboard-read', 'openExternal'])
+        expect(decide(webContents, permission, 'http://127.0.0.1:5173/')).toBe(false);
+      expect(decide(webContents, 'media', 'https://evil.test/')).toBe(false);
+      expect(decide({}, 'media', 'http://127.0.0.1:5173/')).toBe(false);
+      const check = mocks.permissionCheck.mock.calls.at(-1)![0];
+      expect(check(webContents, 'media', 'http://127.0.0.1:5173')).toBe(true);
+      expect(check(webContents, 'media', 'https://evil.test')).toBe(false);
+      expect(check(webContents, 'geolocation', 'http://127.0.0.1:5173')).toBe(false);
+    });
+  });
+  describe('ipc trust', () => {
+    async function trusted() {
+      await createWindow();
+      const webContents = mocks.windows.at(-1).webContents;
+      const frame = { url: 'http://127.0.0.1:5173/' };
+      webContents.mainFrame = frame;
+      return { sender: webContents, senderFrame: frame, webContents };
+    }
+    it('compares frame URLs by origin and pathname', () => {
+      expect(isAppUrl('http://127.0.0.1:5173/')).toBe(true);
+      expect(isAppUrl('http://127.0.0.1:5173/?x=1#y')).toBe(true);
+      expect(isAppUrl('http://127.0.0.1:5173/other')).toBe(false);
+      expect(isAppUrl('http://localhost:5173/')).toBe(false);
+      expect(isAppUrl('http://127.0.0.1:5174/')).toBe(false);
+      expect(isAppUrl('not a url')).toBe(false);
+      expect(isAppUrl(undefined)).toBe(false);
+    });
+    it('rejects untrusted callers on every get-* handler', async () => {
+      const event = await trusted();
+      (screen as unknown as Record<string, unknown>).getAllDisplays = () => [{}];
+      try {
+        for (const name of ['get-display-count', 'get-environment-risk', 'get-foreground-app']) {
+          const handler = mocks.handlers.get(name)!;
+          expect(() => handler({ ...event, sender: {} })).toThrow('Untrusted');
+          expect(() =>
+            handler({ sender: event.sender, senderFrame: { url: event.senderFrame.url } }),
+          ).toThrow('Untrusted');
+          expect(() => handler(event)).not.toThrow();
+        }
+        expect(mocks.handlers.get('get-display-count')!(event)).toBe(1);
+        // A query string on the same page is still the trusted app page.
+        event.senderFrame.url = 'http://127.0.0.1:5173/?q=1';
+        expect(mocks.handlers.get('get-display-count')!(event)).toBe(1);
+        event.senderFrame.url = 'http://127.0.0.1:5173/elsewhere';
+        expect(() => mocks.handlers.get('get-display-count')!(event)).toThrow('Untrusted');
+      } finally {
+        delete (screen as unknown as Record<string, unknown>).getAllDisplays;
+      }
+    });
+    it('ignores watcher requests from untrusted callers or with a bad attempt id', async () => {
+      vi.useFakeTimers();
+      try {
+        mocks.execFile.mockClear();
+        mocks.execFile.mockImplementation(
+          (
+            _file: string,
+            _args: string[],
+            _options: unknown,
+            callback: (...a: unknown[]) => void,
+          ) => callback(new Error('unavailable'), ''),
+        );
+        const event = await trusted();
+        const start = mocks.listeners.get('start-watcher')!;
+        const stop = mocks.listeners.get('stop-watcher')!;
+        start({ ...event, sender: {} }, 'a1');
+        for (const bad of [undefined, 42, '', 'x'.repeat(201), { id: 1 }]) start(event, bad);
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(mocks.execFile).not.toHaveBeenCalled();
+
+        start(event, 'a1');
+        await vi.advanceTimersByTimeAsync(2100);
+        expect(mocks.execFile).toHaveBeenCalled(); // async execFile, never execSync, per tick
+        stop({ ...event, sender: {} }); // Untrusted stop is ignored.
+        mocks.execFile.mockClear();
+        await vi.advanceTimersByTimeAsync(2100);
+        expect(mocks.execFile).toHaveBeenCalled();
+        stop(event);
+        mocks.execFile.mockClear();
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(mocks.execFile).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+    it('sends the run mode with each snapshot', async () => {
+      vi.useFakeTimers();
+      try {
+        mocks.execFile.mockImplementation(
+          (
+            _file: string,
+            _args: string[],
+            _options: unknown,
+            callback: (...a: unknown[]) => void,
+          ) => callback(null, '"Notes" ASN:1-2'),
+        );
+        const event = await trusted();
+        const send = vi.fn();
+        event.webContents.send = send;
+        (screen as unknown as Record<string, unknown>).getAllDisplays = () => [{}];
+        mocks.listeners.get('start-watcher')!(event, 'a1');
+        await vi.advanceTimersByTimeAsync(2100);
+        mocks.listeners.get('stop-watcher')!(event);
+        delete (screen as unknown as Record<string, unknown>).getAllDisplays;
+        expect(send).toHaveBeenCalledWith(
+          'app-snapshot',
+          expect.objectContaining({ attemptId: 'a1', runMode: 'strict', displayCount: 1 }),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+  describe('startup failure', () => {
+    it('logs, shows an error dialog and quits', () => {
+      mocks.showErrorBox.mockClear();
+      mocks.quit.mockClear();
+      reportStartupFailure(new Error('boom'));
+      expect(mocks.showErrorBox).toHaveBeenCalledTimes(1);
+      expect(mocks.quit).toHaveBeenCalledTimes(1);
+    });
+    it('still quits if the dialog itself fails', () => {
+      mocks.quit.mockClear();
+      mocks.showErrorBox.mockImplementationOnce(() => {
+        throw new Error('no ui');
+      });
+      reportStartupFailure('x');
+      expect(mocks.quit).toHaveBeenCalledTimes(1);
+    });
+  });
   describe('run mode', () => {
     async function trustedEvent() {
       await createWindow();
@@ -272,16 +437,10 @@ describe('native window recovery', () => {
       webContents.mainFrame = frame;
       return { sender: webContents, senderFrame: frame };
     }
-    it('defaults to demo and refuses close-app-target without quitting anything', async () => {
+    it('defaults to strict in a non-judge build and does not refuse close requests as demo', async () => {
       const event = await trustedEvent();
-      expect(await mocks.handlers.get('get-run-mode')!(event)).toBe('demo');
-      const result = (await mocks.handlers.get('close-app-target')!(event, {
-        id: 'x',
-        mode: 'quit',
-      })) as { status: string; message: string };
-      expect(result.status).toBe('refused');
-      expect(result.message).toContain('Demo mode');
-      expect(mocks.showMessageBox).not.toHaveBeenCalled();
+      expect(await mocks.handlers.get('get-run-mode')!(event)).toBe('strict');
+      expect(mocks.writeRunMode).not.toHaveBeenCalled();
     });
     it('exposes the mode only to the trusted frame', async () => {
       const event = await trustedEvent();
@@ -289,22 +448,50 @@ describe('native window recovery', () => {
         'Untrusted',
       );
     });
-    it('asks for confirmation before strict, and strict keeps the existing behaviour', async () => {
+    it('confirms both directions, persists only after confirmation, and demo never closes apps', async () => {
       const event = await trustedEvent();
+      // Strict -> Demo, cancelled.
+      mocks.showMessageBox.mockResolvedValueOnce({ response: 0 });
+      await switchRunMode('demo');
+      expect(mocks.showMessageBox).toHaveBeenCalledTimes(1);
+      expect(mocks.showMessageBox.mock.calls[0]?.[1]).toMatchObject({
+        title: 'Switch to Demo mode?',
+        defaultId: 0,
+        cancelId: 0,
+      });
+      expect(await mocks.handlers.get('get-run-mode')!(event)).toBe('strict');
+      expect(mocks.writeRunMode).not.toHaveBeenCalled();
+      // Strict -> Demo, confirmed.
+      await switchRunMode('demo');
+      expect(mocks.showMessageBox).toHaveBeenCalledTimes(2);
+      expect(await mocks.handlers.get('get-run-mode')!(event)).toBe('demo');
+      expect(mocks.writeRunMode).toHaveBeenLastCalledWith('/tmp', 'demo');
+      const refused = (await mocks.handlers.get('close-app-target')!(event, {
+        id: 'x',
+        mode: 'quit',
+      })) as { status: string; message: string };
+      expect(refused.status).toBe('refused');
+      expect(refused.message).toContain('Demo mode');
+      // Demo -> Strict, cancelled then confirmed.
       mocks.showMessageBox.mockResolvedValueOnce({ response: 0 });
       await switchRunMode('strict');
-      expect(mocks.showMessageBox).toHaveBeenCalledTimes(1);
+      expect(mocks.showMessageBox.mock.calls[2]?.[1]).toMatchObject({
+        title: 'Switch to Strict mode?',
+      });
       expect(await mocks.handlers.get('get-run-mode')!(event)).toBe('demo');
       await switchRunMode('strict');
       expect(await mocks.handlers.get('get-run-mode')!(event)).toBe('strict');
+      expect(mocks.writeRunMode).toHaveBeenLastCalledWith('/tmp', 'strict');
       const result = (await mocks.handlers.get('close-app-target')!(event, {
         id: 'unknown',
         mode: 'quit',
       })) as { status: string; message: string };
       expect(result.message).not.toContain('Demo mode');
       expect(() => mocks.handlers.get('close-app-target')!(event, { id: 'x' })).toThrow('Invalid');
-      await switchRunMode('demo'); // Back to demo needs no confirmation.
-      expect(await mocks.handlers.get('get-run-mode')!(event)).toBe('demo');
+      // Switching to the current mode does nothing.
+      mocks.showMessageBox.mockClear();
+      await switchRunMode('strict');
+      expect(mocks.showMessageBox).not.toHaveBeenCalled();
     });
   });
 });

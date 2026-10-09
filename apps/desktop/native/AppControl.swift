@@ -31,11 +31,19 @@ struct Reply: Encodable {
 enum Failure: Error { case unavailable }
 
 // Development exemptions apply in demo mode only; strict mode never honours them.
-let temporaryExemptions: Set<String> = ["com.apple.Terminal", "com.openai.chat", "com.openai.codex"]
+// Every AI assistant / IDE belongs here (never in the baseline), so Strict can close it.
+let temporaryExemptions: Set<String> = [
+    "com.apple.Terminal", "com.openai.chat", "com.openai.codex", "com.google.antigravity"
+]
+// System UI only; exempt in every mode.
 let baselineExemptions: Set<String> = [
     "com.apple.finder", "com.apple.dock", "com.apple.systemuiserver",
-    "com.apple.controlcenter", "com.apple.loginwindow", "com.google.antigravity"
+    "com.apple.controlcenter", "com.apple.loginwindow"
 ]
+// Strict (demo == false) honours no development exemption at all.
+func isTemporaryExempt(_ bundleId: String, demo: Bool) -> Bool {
+    return demo && temporaryExemptions.contains(bundleId)
+}
 let protectedIds = baselineExemptions.union([
     "com.googlecode.iterm2", "com.exam-anti-cheat.desktop"
 ])
@@ -130,7 +138,7 @@ func inventory(_ request: Request) throws -> [Entry] {
         guard let value = identity(app), let name = app.localizedName else { throw Failure.unavailable }
         let ownBundle = value.bundlePath == hostIdentity.bundlePath || value.bundlePath.hasPrefix(hostIdentity.bundlePath + "/")
         let runtime = dependencies.contains(value.pid) || ownBundle
-        let temporary = request.demo == true && temporaryExemptions.contains(value.bundleId)
+        let temporary = isTemporaryExempt(value.bundleId, demo: request.demo == true)
         return Entry(identity: value, name: name,
                      protected: runtime || temporary || protectedIds.contains(value.bundleId),
                      exempt: ownBundle || value.pid == request.hostPid || temporary || baselineExemptions.contains(value.bundleId),
@@ -164,7 +172,16 @@ if CommandLine.arguments.dropFirst().elementsEqual(["--self-test"]) {
     precondition(temporaryExemptions.contains("com.openai.codex"))
     precondition(!protectedIds.contains("com.apple.Terminal"))
     precondition(protectedIds.contains("com.googlecode.iterm2"))
-    print("7 native policy checks passed (fixtures only)")
+    // Strict mode exempts no development/AI/IDE app; demo exempts all of them.
+    for id in temporaryExemptions {
+        precondition(!isTemporaryExempt(id, demo: false))
+        precondition(isTemporaryExempt(id, demo: true))
+    }
+    precondition(temporaryExemptions.contains("com.google.antigravity"))
+    precondition(!baselineExemptions.contains("com.google.antigravity"))
+    precondition(!protectedIds.contains("com.google.antigravity"))
+    precondition(baselineExemptions.allSatisfy { $0.hasPrefix("com.apple.") })
+    print("native policy checks passed (fixtures only)")
     exit(0)
 }
 

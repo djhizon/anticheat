@@ -1,7 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('electronExam', {
-  startWatcher: (attemptId: string) => ipcRenderer.send('start-watcher', attemptId),
+  startWatcher: (attemptId: string) => {
+    if (typeof attemptId === 'string' && attemptId.length > 0 && attemptId.length <= 200)
+      ipcRenderer.send('start-watcher', attemptId);
+  },
   stopWatcher: () => ipcRenderer.send('stop-watcher'),
   getDisplayCount: () => ipcRenderer.invoke('get-display-count') as Promise<number>,
   getForegroundApp: () => ipcRenderer.invoke('get-foreground-app') as Promise<string>,
@@ -21,6 +24,7 @@ contextBridge.exposeInMainWorld('electronExam', {
       foregroundApp: string;
       displayCount: number;
       captureDisplays?: string[];
+      runMode?: 'demo' | 'strict';
     }) => void,
   ) => {
     const listener = (
@@ -30,6 +34,7 @@ contextBridge.exposeInMainWorld('electronExam', {
         foregroundApp: string;
         displayCount: number;
         captureDisplays?: string[];
+        runMode?: 'demo' | 'strict';
       },
     ) => callback(snapshot);
     ipcRenderer.on('app-snapshot', listener);

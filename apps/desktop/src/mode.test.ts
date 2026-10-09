@@ -1,41 +1,84 @@
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { mayCloseApps, parseRunMode, planModeSwitch } from './mode';
-import { readRunMode, writeRunMode } from './settings';
+import {
+  defaultRunMode,
+  isJudgeBuildMetadata,
+  mayCloseApps,
+  parseRunMode,
+  planModeSwitch,
+} from './mode';
+import { readJudgeBuild, readRunMode, writeRunMode } from './settings';
 
 describe('run mode', () => {
-  it('defaults to demo for missing or corrupt settings', () => {
-    for (const raw of [undefined, '', 'nope', '{}', '{"mode":"x"}', '[]', 'null'])
-      expect(parseRunMode(raw)).toBe('demo');
-    expect(parseRunMode('{"mode":"strict"}')).toBe('strict');
+  it('build default is demo for the judge build and strict everywhere else', () => {
+    expect(defaultRunMode(true)).toBe('demo');
+    expect(defaultRunMode(false)).toBe('strict');
+  });
+  it('missing or corrupt settings fall back to the build default, never to demo in strict', () => {
+    for (const raw of [undefined, '', 'nope', '{}', '{"mode":"x"}', '[]', 'null']) {
+      expect(parseRunMode(raw, 'strict')).toBe('strict');
+      expect(parseRunMode(raw, 'demo')).toBe('demo');
+    }
+    expect(parseRunMode('{"mode":"strict"}', 'demo')).toBe('strict');
+    expect(parseRunMode('{"mode":"demo"}', 'strict')).toBe('demo');
   });
   it('only strict mode may close apps', () => {
     expect(mayCloseApps('demo')).toBe(false);
     expect(mayCloseApps('strict')).toBe(true);
   });
-  it('asks for confirmation only when switching to strict', () => {
+  it('asks for confirmation in both directions', () => {
     expect(planModeSwitch('demo', 'strict')).toEqual({ change: true, confirm: true });
-    expect(planModeSwitch('strict', 'demo')).toEqual({ change: true, confirm: false });
+    expect(planModeSwitch('strict', 'demo')).toEqual({ change: true, confirm: true });
     expect(planModeSwitch('demo', 'demo')).toEqual({ change: false, confirm: false });
     expect(planModeSwitch('strict', 'strict')).toEqual({ change: false, confirm: false });
+  });
+  it('detects the judge flag only when explicitly true', () => {
+    expect(isJudgeBuildMetadata('{"examJudgeBuild":true}')).toBe(true);
+    for (const raw of [undefined, '', '{', '{}', '{"examJudgeBuild":"true"}', 'null', '[]'])
+      expect(isJudgeBuildMetadata(raw)).toBe(false);
   });
 });
 
 describe('settings file', () => {
-  it('round-trips and is owner-only, even when a looser file already exists', () => {
+  function withDir(run: (dir: string) => void) {
     const dir = mkdtempSync(path.join(tmpdir(), 'settings-'));
     try {
-      expect(readRunMode(dir)).toBe('demo');
-      writeFileSync(path.join(dir, 'settings.json'), '{}', { mode: 0o644 });
-      writeRunMode(dir, 'strict');
-      expect(readRunMode(dir)).toBe('strict');
-      expect(statSync(path.join(dir, 'settings.json')).mode & 0o777).toBe(0o600);
-      writeRunMode(dir, 'demo');
-      expect(readRunMode(dir)).toBe('demo');
+      run(dir);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }
+  it('round-trips, is owner-only, and leaves no temp file behind', () =>
+    withDir((dir) => {
+      expect(readRunMode(dir, 'strict')).toBe('strict');
+      expect(readRunMode(dir, 'demo')).toBe('demo');
+      writeFileSync(path.join(dir, 'settings.json'), '{}', { mode: 0o644 });
+      writeRunMode(dir, 'demo');
+      expect(readRunMode(dir, 'strict')).toBe('demo');
+      expect(statSync(path.join(dir, 'settings.json')).mode & 0o777).toBe(0o600);
+      writeRunMode(dir, 'strict');
+      expect(readRunMode(dir, 'demo')).toBe('strict');
+      expect(readdirSync(dir)).toEqual(['settings.json']);
+    }));
+  it('a corrupt file falls back to the build default', () =>
+    withDir((dir) => {
+      writeFileSync(path.join(dir, 'settings.json'), '{"mode":');
+      expect(readRunMode(dir, 'strict')).toBe('strict');
+    }));
+  it('removes the temp file when the write cannot complete', () =>
+    withDir((dir) => {
+      // A directory squatting on the target makes the final rename fail.
+      mkdirSync(path.join(dir, 'settings.json'));
+      expect(() => writeRunMode(dir, 'demo')).toThrow();
+      expect(readdirSync(dir)).toEqual(['settings.json']);
+    }));
+  it('reads the judge flag only from a packaged app', () =>
+    withDir((dir) => {
+      writeFileSync(path.join(dir, 'package.json'), '{"examJudgeBuild":true}');
+      expect(readJudgeBuild(dir, true)).toBe(true);
+      expect(readJudgeBuild(dir, false)).toBe(false);
+      expect(readJudgeBuild(path.join(dir, 'missing'), true)).toBe(false);
+    }));
 });

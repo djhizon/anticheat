@@ -61,3 +61,15 @@ it('reports each capture-like display once', () => {
     ),
   ).toHaveLength(1);
 });
+
+it('flags a Demo-mode attempt once, and never flags Strict', () => {
+  const { bridge, emit } = fakeBridge();
+  const send = vi.fn(async (_body: Record<string, unknown>) => ({}));
+  startDesktopWatcher(bridge, 'a1', send);
+  const snap = { attemptId: 'a1', foregroundApp: 'Exam Anti-Cheat', displayCount: 1 };
+  emit({ ...snap, runMode: 'strict' });
+  expect(send).not.toHaveBeenCalled();
+  emit({ ...snap, runMode: 'demo' });
+  emit({ ...snap, runMode: 'demo' });
+  expect(send.mock.calls).toEqual([[{ event: 'desktop_demo_mode' }]]);
+});

@@ -104,6 +104,20 @@ describe('runtime paths and environment', () => {
     expect(env.NODE_ENV).toBeUndefined();
     expect(env.ELECTRON_RUN_AS_NODE).toBeUndefined();
   });
+
+  it('sets the seed flag only for the judge build and never inherits it', () => {
+    const paths = {
+      isPackaged: true,
+      resourcesPath: '/res',
+      repoRoot: '/repo',
+      userDataPath: '/ud',
+    };
+    expect(buildServerEnv({ ...paths, judgeBuild: true }, {}).EAC_SEED_DEMO).toBe('1');
+    expect(buildServerEnv(paths, { EAC_SEED_DEMO: '1' }).EAC_SEED_DEMO).toBeUndefined();
+    expect(
+      buildServerEnv({ ...paths, judgeBuild: false }, { EAC_SEED_DEMO: '1' }).EAC_SEED_DEMO,
+    ).toBeUndefined();
+  });
 });
 
 describe('startRuntime', () => {

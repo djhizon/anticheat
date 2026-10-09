@@ -13,13 +13,13 @@ import {
   utilityProcess,
 } from 'electron';
 
-import { execSync } from 'child_process';
+import { execFile, execSync } from 'child_process';
 import * as path from 'path';
 import { appendFileSync, existsSync, statSync, writeFileSync } from 'fs';
 import { createAppController, createHelperCall } from './appControl';
 import { classifyDisplays, detectVirtualMachine } from './environment';
-import { mayCloseApps, planModeSwitch, type RunMode } from './mode';
-import { readRunMode, writeRunMode } from './settings';
+import { defaultRunMode, mayCloseApps, planModeSwitch, type RunMode } from './mode';
+import { readJudgeBuild, readRunMode, writeRunMode } from './settings';
 import {
   checkCanConnect,
   checkPortFree,
@@ -33,8 +33,10 @@ const APP_WATCH_INTERVAL_MS = 2000;
 
 let mainWindow: BrowserWindow | null = null;
 let watcherInterval: ReturnType<typeof setInterval> | null = null;
-// Demo is the safe default; the persisted choice is loaded once the app is ready.
-let runMode: RunMode = 'demo';
+// Strict is the default everywhere except the packaged judge build; the build default and the
+// persisted choice are resolved once the app is ready.
+let judgeBuild = false;
+let runMode: RunMode = defaultRunMode(false);
 let appController: ReturnType<typeof createAppController> | null = null;
 let runtime: RuntimeHandle | null = null;
 
@@ -42,14 +44,54 @@ let runtime: RuntimeHandle | null = null;
 const useDevServers =
   process.argv.includes('--use-dev-servers') || process.env.EAC_USE_DEV_SERVERS === '1';
 
-function trustedAppFrame(event: Electron.IpcMainInvokeEvent): boolean {
+/** Same origin and path as the app page; query/hash differences (e.g. SPA state) are tolerated. */
+export function isAppUrl(url: unknown): boolean {
+  if (typeof url !== 'string') return false;
+  try {
+    const candidate = new URL(url);
+    const expected = new URL(WEB_URL);
+    return candidate.origin === expected.origin && candidate.pathname === expected.pathname;
+  } catch {
+    return false;
+  }
+}
+
+function isAppOrigin(origin: unknown): boolean {
+  if (typeof origin !== 'string') return false;
+  try {
+    return new URL(origin).origin === new URL(WEB_URL).origin;
+  } catch {
+    return false;
+  }
+}
+
+interface FrameEvent {
+  sender: unknown;
+  senderFrame?: { url: string } | null;
+}
+
+function trustedAppFrame(event: FrameEvent): boolean {
   return (
     mainWindow !== null &&
     !mainWindow.isDestroyed() &&
     event.sender === mainWindow.webContents &&
+    event.senderFrame !== undefined &&
+    event.senderFrame !== null &&
     event.senderFrame === mainWindow.webContents.mainFrame &&
-    event.senderFrame?.url === WEB_URL
+    isAppUrl(event.senderFrame.url)
   );
+}
+
+function validAttemptId(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 200;
+}
+
+function run(file: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { timeout: 1000, encoding: 'utf8' }, (error, stdout) =>
+      error ? reject(error) : resolve(String(stdout)),
+    );
+  });
 }
 
 // Store only fixed lifecycle categories/codes, never URLs, answers, credentials,
@@ -64,11 +106,11 @@ function diagnostic(event: string, detail: string | number = ''): void {
   }
 }
 
-function getForegroundApp(): string {
+async function getForegroundApp(): Promise<string> {
   try {
-    const asn = execSync('lsappinfo front', { timeout: 1000 }).toString().trim();
-    if (!asn) return 'unknown';
-    const output = execSync(`lsappinfo info ${asn}`, { timeout: 1000 }).toString();
+    const asn = (await run('lsappinfo', ['front'])).trim();
+    if (!/^[A-Za-z0-9:-]+$/.test(asn)) return 'unknown';
+    const output = await run('lsappinfo', ['info', asn]);
     const match = output.match(/"([^"]+)" ASN/);
     return match ? match[1] : 'unknown';
   } catch {
@@ -104,18 +146,32 @@ function getEnvironmentRisk(): { virtualMachine: string | null; captureDisplays:
 
 function startWatcher(attemptId: string): void {
   if (watcherInterval) clearInterval(watcherInterval);
-  watcherInterval = setInterval(() => {
-    const app = getForegroundApp();
-    const displays = getDisplayCount();
-    // Hand the snapshot to the renderer, which posts it with the student's
-    // session cookie and CSRF token. The main process holds no credentials.
-    mainWindow?.webContents.send('app-snapshot', {
-      attemptId,
-      foregroundApp: app,
-      displayCount: displays,
-      captureDisplays: getCaptureDisplays(),
-    });
+  let busy = false;
+  const timer = setInterval(() => {
+    if (busy) return; // Never stack slow helper calls.
+    busy = true;
+    void (async () => {
+      try {
+        const foreground = await getForegroundApp();
+        if (watcherInterval !== timer) return; // Stopped or replaced while waiting.
+        // Hand the snapshot to the renderer, which posts it with the student's
+        // session cookie and CSRF token. The main process holds no credentials.
+        // The run mode travels along so it is recorded with the attempt.
+        mainWindow?.webContents.send('app-snapshot', {
+          attemptId,
+          foregroundApp: foreground,
+          displayCount: getDisplayCount(),
+          captureDisplays: getCaptureDisplays(),
+          runMode,
+        });
+      } catch {
+        /* A failed tick is skipped. */
+      } finally {
+        busy = false;
+      }
+    })();
   }, APP_WATCH_INTERVAL_MS);
+  watcherInterval = timer;
 }
 
 function stopWatcher(): void {
@@ -158,13 +214,17 @@ export async function switchRunMode(target: RunMode): Promise<void> {
   const plan = planModeSwitch(runMode, target);
   if (!plan.change) return;
   if (plan.confirm) {
+    const toStrict = target === 'strict';
     const options: Electron.MessageBoxOptions = {
       type: 'warning',
-      title: 'Switch to Strict mode?',
-      message: 'Strict mode can ask other applications to quit.',
-      detail:
-        'The pre-flight check will block until other apps are closed. Save your work first. Demo mode never closes or blocks anything.',
-      buttons: ['Cancel', 'Switch to Strict'],
+      title: toStrict ? 'Switch to Strict mode?' : 'Switch to Demo mode?',
+      message: toStrict
+        ? 'Strict mode can ask other applications to quit.'
+        : 'Demo mode turns off the exam environment checks.',
+      detail: toStrict
+        ? 'The pre-flight check will block until other apps are closed. Save your work first. Demo mode never closes or blocks anything.'
+        : 'Nothing will be closed or blocked, and the attempt is marked as taken in Demo mode in the transparency report. Use it only for trying the app, not for a real exam.',
+      buttons: ['Cancel', toStrict ? 'Switch to Strict' : 'Switch to Demo'],
       defaultId: 0,
       cancelId: 0,
       noLink: true,
@@ -257,6 +317,9 @@ export async function createWindow(): Promise<void> {
 
   mainWindow.setContentProtection(true);
 
+  // Never open extra windows (target=_blank, window.open); they would escape the exam shell.
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (new URL(url).origin !== new URL(WEB_URL).origin) {
       event.preventDefault();
@@ -348,17 +411,23 @@ export async function createWindow(): Promise<void> {
   });
   diagnostic('window-created');
 
-  // Grant all permissions
-  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    // Automatically approve camera, mic, and screen sharing
-    if (permission === 'media' || permission === 'display-capture') {
-      callback(true);
-    } else {
-      callback(true);
-    }
-  });
-
-  session.defaultSession.setPermissionCheckHandler(() => true);
+  // Only the app page may use the camera, microphone and (via the handler below) screen capture.
+  const allowedPermissions = new Set(['media', 'display-capture']);
+  session.defaultSession.setPermissionRequestHandler(
+    (webContents, permission, callback, details) => {
+      callback(
+        webContents === window.webContents &&
+          allowedPermissions.has(permission) &&
+          isAppOrigin(details?.requestingUrl),
+      );
+    },
+  );
+  session.defaultSession.setPermissionCheckHandler(
+    (webContents, permission, requestingOrigin) =>
+      webContents === window.webContents &&
+      allowedPermissions.has(permission) &&
+      isAppOrigin(requestingOrigin),
+  );
 
   // Electron needs a source-selection handler; granting generic media permission
   // alone does not implement getDisplayMedia. The request is only honoured for a
@@ -390,7 +459,7 @@ export async function createWindow(): Promise<void> {
       generation === navigationGeneration &&
       request.frame !== null &&
       request.frame === window.webContents.mainFrame &&
-      request.frame.url === WEB_URL &&
+      isAppUrl(request.frame.url) &&
       request.securityOrigin === new URL(WEB_URL).origin &&
       request.userGesture &&
       request.videoRequested &&
@@ -458,17 +527,28 @@ export async function createWindow(): Promise<void> {
   });
 }
 
-ipcMain.on('start-watcher', (_event, attemptId: string) => {
+ipcMain.on('start-watcher', (event, attemptId: unknown) => {
+  if (!trustedAppFrame(event) || !validAttemptId(attemptId)) return;
   startWatcher(attemptId);
 });
 
-ipcMain.on('stop-watcher', () => {
+ipcMain.on('stop-watcher', (event) => {
+  if (!trustedAppFrame(event)) return;
   stopWatcher();
 });
 
-ipcMain.handle('get-display-count', () => getDisplayCount());
-ipcMain.handle('get-environment-risk', () => getEnvironmentRisk());
-ipcMain.handle('get-foreground-app', () => getForegroundApp());
+ipcMain.handle('get-display-count', (event) => {
+  if (!trustedAppFrame(event)) throw new Error('Untrusted application request.');
+  return getDisplayCount();
+});
+ipcMain.handle('get-environment-risk', (event) => {
+  if (!trustedAppFrame(event)) throw new Error('Untrusted application request.');
+  return getEnvironmentRisk();
+});
+ipcMain.handle('get-foreground-app', (event) => {
+  if (!trustedAppFrame(event)) throw new Error('Untrusted application request.');
+  return getForegroundApp();
+});
 
 async function startLocalServer(): Promise<boolean> {
   if (useDevServers) return true;
@@ -477,6 +557,7 @@ async function startLocalServer(): Promise<boolean> {
     resourcesPath: process.resourcesPath,
     repoRoot: path.join(__dirname, '../../..'),
     userDataPath: app.getPath('userData'),
+    judgeBuild,
     forkUtility: (entry, options) =>
       utilityProcess.fork(entry, [], {
         cwd: options.cwd,
@@ -495,8 +576,9 @@ async function startLocalServer(): Promise<boolean> {
   return runtime !== null;
 }
 
-app.whenReady().then(async () => {
-  runMode = readRunMode(app.getPath('userData'));
+export async function startApp(): Promise<void> {
+  judgeBuild = readJudgeBuild(app.getAppPath(), app.isPackaged);
+  runMode = readRunMode(app.getPath('userData'), defaultRunMode(judgeBuild));
   if (!(await startLocalServer())) {
     app.quit();
     return;
@@ -505,8 +587,23 @@ app.whenReady().then(async () => {
     await systemPreferences.askForMediaAccess('camera');
     await systemPreferences.askForMediaAccess('microphone');
   }
-  void createWindow();
-});
+  await createWindow();
+}
+
+export function reportStartupFailure(error: unknown): void {
+  diagnostic('startup-failed', error instanceof Error ? error.name : 'unknown');
+  try {
+    dialog.showErrorBox(
+      'Exam Anti-Cheat could not start',
+      'The application failed to start. Diagnostics were written to the logs folder. The application will now quit.',
+    );
+  } catch {
+    /* Quit regardless. */
+  }
+  app.quit();
+}
+
+void app.whenReady().then(startApp).catch(reportStartupFailure);
 
 let stoppingRuntime = false;
 app.on('before-quit', (event) => {

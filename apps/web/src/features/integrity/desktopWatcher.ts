@@ -4,6 +4,8 @@ export interface AppSnapshot {
   readonly displayCount: number;
   /** Labels of displays that look like capture cards or mirroring hardware. */
   readonly captureDisplays?: readonly string[];
+  /** Run mode of the desktop shell; Demo disables the environment checks. */
+  readonly runMode?: 'demo' | 'strict';
 }
 
 export interface DesktopWatcherBridge {
@@ -34,8 +36,16 @@ export function startDesktopWatcher(
 ): () => void {
   let last = '';
   const reportedCapture = new Set<string>();
+  let reportedDemo = false;
   const unsubscribe = bridge.onAppSnapshot((snapshot) => {
     if (snapshot.attemptId !== attemptId) return;
+    // Record that this attempt ran in Demo mode (shown in the transparency report).
+    if (snapshot.runMode === 'demo' && !reportedDemo) {
+      reportedDemo = true;
+      send({ event: 'desktop_demo_mode' }).catch(() => {
+        reportedDemo = false; // Retry on the next snapshot.
+      });
+    }
     for (const label of snapshot.captureDisplays ?? []) {
       if (reportedCapture.has(label)) continue;
       reportedCapture.add(label);

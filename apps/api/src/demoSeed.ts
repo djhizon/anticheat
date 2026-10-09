@@ -104,6 +104,11 @@ let adminClient: SupabaseAuthClient | undefined;
 export interface SeedDemoOptions {
   /** Environment to read configuration and demo credentials from. Defaults to `process.env`. */
   readonly env?: NodeJS.ProcessEnv;
+  /**
+   * Wipe old exam data before seeding (default true, for the explicit `seed:demo` script). The
+   * rest of the seed is idempotent, so a retry after a partial seed passes `false`.
+   */
+  readonly wipe?: boolean;
 }
 
 export async function seedDemo(options: SeedDemoOptions = {}): Promise<void> {
@@ -123,7 +128,6 @@ export async function seedDemo(options: SeedDemoOptions = {}): Promise<void> {
   // ── Wipe old data so the browser shows fresh content ──────────────────────
   const auth = createAuthPlugin(config);
   adminClient = createAdminClient(config, env);
-  console.log('🗑  Wiping old exam data…');
   const wipeStatements = [
     // Reset only in-progress attempts first (e.g. the demo student's); terminal attempts are immutable.
     `DELETE FROM attempt_mutations WHERE attempt_id IN (SELECT id FROM exam_attempts WHERE status = 'in_progress')`,
@@ -149,7 +153,8 @@ export async function seedDemo(options: SeedDemoOptions = {}): Promise<void> {
     `DELETE FROM exam_questions`,
     `DELETE FROM exams`,
   ];
-  for (const sql of wipeStatements) {
+  if (options.wipe !== false) console.log('🗑  Wiping old exam data…');
+  for (const sql of options.wipe === false ? [] : wipeStatements) {
     try {
       auth.database.prepare(sql).run();
     } catch {
@@ -392,15 +397,25 @@ const FALLBACK_QUESTIONS = [
 /**
  * Seeds the demo data only when `markerPath` does not exist yet, then writes the marker.
  * The marker is written after a successful seed, so a failed first run is retried.
+ *
+ * A `<marker>.partial` file is written before the first attempt. When it exists without the
+ * final marker, an earlier seed was interrupted: the retry must NOT wipe again (data may already
+ * be in use), and the rest of the seed is idempotent, so it simply completes the missing parts.
  */
 export async function seedDemoOnce(
   markerPath: string,
-  seed: () => Promise<void> = seedDemo,
+  seed: (options: { readonly wipe: boolean }) => Promise<void> = (options) => seedDemo(options),
 ): Promise<boolean> {
   if (existsSync(markerPath)) {
     return false;
   }
-  await seed();
+  const partialPath = `${markerPath}.partial`;
+  const wipe = !existsSync(partialPath);
+  if (wipe) {
+    mkdirSync(dirname(partialPath), { recursive: true });
+    writeFileSync(partialPath, `${new Date().toISOString()}\n`);
+  }
+  await seed({ wipe });
   mkdirSync(dirname(markerPath), { recursive: true });
   writeFileSync(markerPath, `${new Date().toISOString()}\n`);
   return true;

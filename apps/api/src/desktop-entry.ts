@@ -27,6 +27,8 @@ export interface DesktopServerOptions {
 export interface DesktopServer {
   readonly apiPort: number;
   readonly webPort: number;
+  /** Resolves when background demo seeding has finished (never rejects). */
+  readonly seeding: Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -42,6 +44,24 @@ function port(value: string | undefined, fallback: number, name: string): number
   return parsed;
 }
 
+/** The demo accounts are created only when the judge-build flag is passed in explicitly. */
+export function shouldSeedDemo(env: NodeJS.ProcessEnv): boolean {
+  return env.EAC_SEED_DEMO === '1';
+}
+
+/** The local proxy is reached only as the app's own origin; other Host values (DNS rebinding) are refused. */
+const ALLOWED_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1:5173', 'localhost:5173']);
+/** Upstream API calls must answer within this time (transcription uploads stay well below it). */
+export const UPSTREAM_TIMEOUT_MS = 120_000;
+
+export function isAllowedHost(host: string | undefined, webPort: number): boolean {
+  if (host === undefined) return false;
+  const value = host.toLowerCase();
+  return webPort === 5173
+    ? ALLOWED_HOSTS.has(value)
+    : value === `127.0.0.1:${webPort}` || value === `localhost:${webPort}`;
+}
+
 function tooLarge(response: ServerResponse): void {
   if (response.headersSent) return;
   response.statusCode = 413;
@@ -50,7 +70,12 @@ function tooLarge(response: ServerResponse): void {
 }
 
 /** Streams the request to the API and the response back; bodies are never buffered. */
-function forward(request: IncomingMessage, response: ServerResponse, apiPort: number): void {
+function forward(
+  request: IncomingMessage,
+  response: ServerResponse,
+  apiPort: number,
+  timeoutMs: number,
+): void {
   const declared = Number(request.headers['content-length'] ?? 0);
   if (declared > MAX_REQUEST_BODY_BYTES) {
     tooLarge(response);
@@ -70,6 +95,11 @@ function forward(request: IncomingMessage, response: ServerResponse, apiPort: nu
       upstreamResponse.pipe(response);
     },
   );
+  let timedOut = false;
+  upstream.setTimeout(timeoutMs, () => {
+    timedOut = true;
+    upstream.destroy();
+  });
   let received = 0;
   request.on('data', (chunk: Buffer) => {
     received += chunk.length;
@@ -84,16 +114,28 @@ function forward(request: IncomingMessage, response: ServerResponse, apiPort: nu
       response.destroy();
       return;
     }
-    response.statusCode = 502;
+    response.statusCode = timedOut ? 504 : 502;
     response.setHeader('content-type', 'text/plain; charset=utf-8');
-    response.end('The API is not reachable.');
+    response.end(timedOut ? 'The API did not respond in time.' : 'The API is not reachable.');
   });
   request.pipe(upstream);
 }
 
-function createWebServer(webRoot: string, apiPort: number): Server {
+export function createWebServer(
+  webRoot: string,
+  apiPort: number,
+  webPort = 5173,
+  upstreamTimeoutMs = UPSTREAM_TIMEOUT_MS,
+): Server {
   const staticWeb = createStaticWebHandler(webRoot);
   return createServer((request, response) => {
+    if (!isAllowedHost(request.headers.host, webPort)) {
+      response.statusCode = 421;
+      response.setHeader('content-type', 'text/plain; charset=utf-8');
+      response.setHeader('connection', 'close');
+      response.end('Misdirected request.');
+      return;
+    }
     void (async () => {
       if (await staticWeb(request, response)) return;
       const pathname = (request.url ?? '/').split('?')[0] ?? '/';
@@ -103,7 +145,7 @@ function createWebServer(webRoot: string, apiPort: number): Server {
         response.end('Not found');
         return;
       }
-      forward(request, response, apiPort);
+      forward(request, response, apiPort, upstreamTimeoutMs);
     })().catch(() => {
       if (!response.headersSent) response.statusCode = 502;
       response.end();
@@ -143,12 +185,8 @@ export async function startDesktopServer(options: DesktopServerOptions): Promise
   env.PORT = String(apiPort);
   const dataDir = dirname(env.DATABASE_PATH);
 
-  // Opening the database (by the seed and by the API) applies pending migrations.
-  const seeded = await seedDemoOnce(join(dataDir, 'seeded'), () => seedDemo({ env }));
-  console.log(seeded ? 'Demo data seeded.' : 'Demo data already seeded.');
-
   const application = createApiServer(loadConfig(env));
-  const web = createWebServer(resolve(webRoot), apiPort);
+  const web = createWebServer(resolve(webRoot), apiPort, webPort);
   try {
     await application.start(apiPort, '127.0.0.1');
     await listen(web, webPort);
@@ -157,9 +195,28 @@ export async function startDesktopServer(options: DesktopServerOptions): Promise
     await application.stop().catch(() => undefined);
     throw error;
   }
+  // Only the judge build seeds demo/instructor accounts (flag set by the Electron runtime).
+  // Seeding runs after both servers listen, so a slow first seed (it can call out for question
+  // generation) never delays readiness. A failure is logged and retried on the next launch.
+  let seeding: Promise<void> = Promise.resolve();
+  if (shouldSeedDemo(env)) {
+    seeding = seedDemoOnce(join(dataDir, 'seeded'), (seedOptions) =>
+      seedDemo({ env, wipe: seedOptions.wipe }),
+    ).then(
+      (seeded) => console.log(seeded ? 'Demo data seeded.' : 'Demo data already seeded.'),
+      (error: unknown) =>
+        console.error(
+          'Demo data seeding failed; it will be retried on the next launch:',
+          error instanceof Error ? error.message : error,
+        ),
+    );
+  } else {
+    console.log('Demo seeding is disabled for this build.');
+  }
   return {
     apiPort,
     webPort,
+    seeding,
     stop: async () => {
       await close(web);
       await application.stop();
