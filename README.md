@@ -58,19 +58,19 @@ npm run dev            # API on :3000, web on :5173
 
 Open http://127.0.0.1:5173 and sign in:
 
-| Role | Email | Password |
-| --- | --- | --- |
-| Student | `demo.student@example.test` | `Demo exam password 2026!` |
+| Role       | Email                          | Password                         |
+| ---------- | ------------------------------ | -------------------------------- |
+| Student    | `demo.student@example.test`    | `Demo exam password 2026!`       |
 | Instructor | `demo.instructor@example.test` | `Demo instructor password 2026!` |
 
 Copy `.env.example` to `.env.local` to configure the optional features:
 
-| Variable | Enables |
-| --- | --- |
-| `GEMINI_API_KEYS` | AI exam generation, AI-text check, similarity check. Monitoring works without it. |
-| `WHISPER_BIN`, `WHISPER_MODEL_PATH` | Local speech transcription (build [whisper.cpp](https://github.com/ggml-org/whisper.cpp) into `apps/api/vendor/whisper.cpp`) |
-| `WHISPER_CONCURRENCY`, `WHISPER_MAX_QUEUE` | Transcription worker pool size and backlog |
-| `ENABLE_BACKEND_VISION=true` | Server OWL-ViT check (`pip install transformers Pillow torch`) |
+| Variable                                   | Enables                                                                                                                      |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `GEMINI_API_KEYS`                          | AI exam generation, AI-text check, similarity check. Monitoring works without it.                                            |
+| `WHISPER_BIN`, `WHISPER_MODEL_PATH`        | Local speech transcription (build [whisper.cpp](https://github.com/ggml-org/whisper.cpp) into `apps/api/vendor/whisper.cpp`) |
+| `WHISPER_CONCURRENCY`, `WHISPER_MAX_QUEUE` | Transcription worker pool size and backlog                                                                                   |
+| `ENABLE_BACKEND_VISION=true`               | Server OWL-ViT check (`pip install transformers Pillow torch`)                                                               |
 
 More guides: [demo performance](docs/demo-performance.md) ·
 [media & phone demo](docs/media-and-phone-demo.md) ·
