@@ -25,6 +25,12 @@ export interface ApiConfig {
   readonly msClientId: string | undefined;
   readonly msClientSecret: string | undefined;
   readonly msTargetEmail: string | undefined;
+  readonly authProvider: 'local' | 'supabase';
+  readonly supabaseUrl: string | undefined;
+  readonly supabaseAnonKey: string | undefined;
+  readonly supabaseServiceRoleKey: string | undefined;
+  /** Public web origin used for links in Supabase emails (`/account/confirm`). */
+  readonly siteUrl: string;
 }
 
 function parseInteger(value: string | undefined, fallback: number, name: string): number {
@@ -95,6 +101,35 @@ function parseAllowedOrigins(value: string | undefined, environment: string): re
   return rawOrigins.map((origin) => normalizeOrigin(origin, httpsOnly));
 }
 
+/** Blank values and `<placeholder>` template values count as unset. */
+function optionalSecret(value: string | undefined): string | undefined {
+  const trimmed = value?.trim() ?? '';
+  return trimmed === '' || trimmed.includes('<') ? undefined : trimmed;
+}
+
+function parseSupabaseUrl(value: string, httpsOnly: boolean): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error('SUPABASE_URL must be a valid URL.');
+  }
+  if (
+    (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && !httpsOnly)) ||
+    parsed.username !== '' ||
+    parsed.password !== '' ||
+    parsed.search !== '' ||
+    parsed.hash !== ''
+  ) {
+    throw new Error(
+      httpsOnly
+        ? 'SUPABASE_URL must be an https URL in production.'
+        : 'SUPABASE_URL must be an http(s) URL without credentials.',
+    );
+  }
+  return parsed.origin + parsed.pathname.replace(/\/+$/u, '');
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   const environment = env.NODE_ENV ?? 'development';
   const secureCookies = parseBoolean(
@@ -116,10 +151,27 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     throw new Error('ENABLE_FRESH_EXAM_GENERATION must remain false in production.');
   }
 
+  const rawSupabaseUrl = optionalSecret(env.SUPABASE_URL);
+  const supabaseAnonKey = optionalSecret(env.SUPABASE_ANON_KEY);
+  const supabaseServiceRoleKey = optionalSecret(env.SUPABASE_SERVICE_ROLE_KEY);
+  if ((rawSupabaseUrl === undefined) !== (supabaseAnonKey === undefined)) {
+    throw new Error('SUPABASE_URL and SUPABASE_ANON_KEY must be configured together.');
+  }
+  const supabaseUrl =
+    rawSupabaseUrl === undefined
+      ? undefined
+      : parseSupabaseUrl(rawSupabaseUrl, environment === 'production');
+  const allowedOrigins = parseAllowedOrigins(env.ALLOWED_ORIGINS, environment);
+  const rawSiteUrl = optionalSecret(env.SITE_URL);
+  const siteUrl =
+    rawSiteUrl === undefined
+      ? (allowedOrigins[0] as string)
+      : normalizeOrigin(rawSiteUrl, environment === 'production');
+
   return {
     port: parseInteger(env.PORT, DEFAULT_API_PORT, 'PORT'),
     databasePath: env.DATABASE_PATH?.trim() || './data/exam-anti-cheat.sqlite',
-    allowedOrigins: parseAllowedOrigins(env.ALLOWED_ORIGINS, environment),
+    allowedOrigins,
     sessionTtlSeconds: parseInteger(
       env.SESSION_TTL_SECONDS,
       DEFAULT_SESSION_TTL_SECONDS,
@@ -154,5 +206,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     msClientId: env.MS_CLIENT_ID,
     msClientSecret: env.MS_CLIENT_SECRET,
     msTargetEmail: env.MS_RECORDING_TARGET_EMAIL,
+    authProvider: supabaseUrl === undefined ? 'local' : 'supabase',
+    supabaseUrl,
+    supabaseAnonKey,
+    supabaseServiceRoleKey,
+    siteUrl,
   };
 }

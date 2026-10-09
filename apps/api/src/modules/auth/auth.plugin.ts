@@ -1,4 +1,4 @@
-import { DomainError, SystemClock, type UserRole } from '@exam-anti-cheat/contracts';
+import { DomainError, SystemClock, type Clock, type UserRole } from '@exam-anti-cheat/contracts';
 import type { DatabaseSync } from 'node:sqlite';
 
 import { loadConfig, type ApiConfig } from '../../config.js';
@@ -13,6 +13,7 @@ import {
   verifySessionCsrfToken,
 } from './csrf.js';
 import { SecureTokenGenerator, SessionService } from './session.js';
+import { SupabaseAuthClient, type FetchImpl } from './supabaseAuth.js';
 
 export type RequestHeaders = Readonly<Record<string, string | undefined>>;
 
@@ -21,6 +22,8 @@ export interface AuthRequest {
   readonly path: string;
   readonly headers: RequestHeaders;
   readonly body?: unknown;
+  /** Socket peer address; used only for in-memory rate limiting. */
+  readonly remoteAddress?: string;
 }
 
 export function headerValue(headers: RequestHeaders, name: string): string | undefined {
@@ -95,24 +98,47 @@ export interface AuthPlugin {
   readonly repository: SqliteAuthRepository;
   readonly sessions: SessionService;
   readonly service: AuthService;
+  readonly supabase: SupabaseAuthClient | undefined;
   readonly boundary: AuthRequestBoundary;
   readonly routes: AuthRoutes;
   close(): void;
 }
 
-export function createAuthPlugin(config: ApiConfig = loadConfig()): AuthPlugin {
+export interface AuthPluginOptions {
+  /** Injected in tests so no request ever reaches a live Supabase project. */
+  readonly fetchImpl?: FetchImpl;
+  readonly clock?: Clock;
+}
+
+export function createAuthPlugin(
+  config: ApiConfig = loadConfig(),
+  options: AuthPluginOptions = {},
+): AuthPlugin {
   const database = openDatabase(config.databasePath);
   const repository = new SqliteAuthRepository(database);
   const auditSink = new SqliteAuditSink(database);
   const tokenGenerator = new SecureTokenGenerator();
-  const clock = new SystemClock();
+  const clock = options.clock ?? new SystemClock();
   const sessions = new SessionService(repository, clock, config.sessionTtlSeconds, tokenGenerator);
+  const supabase =
+    config.supabaseUrl !== undefined && config.supabaseAnonKey !== undefined
+      ? new SupabaseAuthClient(
+          {
+            url: config.supabaseUrl,
+            anonKey: config.supabaseAnonKey,
+            serviceRoleKey: config.supabaseServiceRoleKey,
+          },
+          options.fetchImpl,
+        )
+      : undefined;
   const service = new AuthService({
     repository,
     sessions,
     clock,
     auditSink,
     idGenerator: tokenGenerator,
+    ...(supabase === undefined ? {} : { supabase }),
+    siteUrl: config.siteUrl,
   });
   const boundary = new AuthRequestBoundary(service, config);
   const routes = new AuthRoutes(service, boundary, tokenGenerator, config);
@@ -122,6 +148,7 @@ export function createAuthPlugin(config: ApiConfig = loadConfig()): AuthPlugin {
     repository,
     sessions,
     service,
+    supabase,
     boundary,
     routes,
     close: () => database.close(),

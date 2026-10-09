@@ -21,6 +21,7 @@ describe('database migrations', () => {
         { version: 3, name: 'exam_answers' },
         { version: 4, name: 'integrity' },
         { version: 5, name: 'phone_presence' },
+        { version: 6, name: 'supabase_identity' },
       ]);
     } finally {
       database.close();

@@ -11,12 +11,19 @@ import type {
 
 import type { SessionId } from './session.js';
 
+export type AuthProvider = 'local' | 'supabase';
+
+/** Stored in password_hash for externally authenticated users; never verifies locally. */
+export const EXTERNAL_PASSWORD_HASH = '!external';
+
 export interface UserRecord {
   readonly id: UserId;
   readonly email: string;
   readonly passwordHash: string;
   readonly role: UserRole;
   readonly createdAt: string;
+  readonly authProvider: AuthProvider;
+  readonly externalId: string | null;
 }
 
 export interface SessionRecord {
@@ -35,6 +42,8 @@ export interface NewUserRecord {
   readonly passwordHash: string;
   readonly role: UserRole;
   readonly createdAt: string;
+  readonly authProvider?: AuthProvider;
+  readonly externalId?: string | null;
 }
 
 export interface NewSessionRecord {
@@ -60,7 +69,9 @@ function readUser(row: Record<string, unknown>): UserRecord {
     typeof row.email !== 'string' ||
     typeof row.password_hash !== 'string' ||
     !isUserRole(row.role) ||
-    typeof row.created_at !== 'string'
+    typeof row.created_at !== 'string' ||
+    (row.auth_provider !== 'local' && row.auth_provider !== 'supabase') ||
+    (row.external_id !== null && typeof row.external_id !== 'string')
   ) {
     throw new Error('The database returned an invalid user record.');
   }
@@ -71,6 +82,8 @@ function readUser(row: Record<string, unknown>): UserRecord {
     passwordHash: row.password_hash,
     role: row.role,
     createdAt: row.created_at,
+    authProvider: row.auth_provider,
+    externalId: row.external_id,
   };
 }
 
@@ -121,7 +134,7 @@ export class SqliteAuthRepository {
   findUserByEmail(email: string): UserRecord | null {
     const row = this.database
       .prepare(
-        `SELECT id, email, password_hash, role, created_at
+        `SELECT id, email, password_hash, role, created_at, auth_provider, external_id
          FROM users
          WHERE email = ?`,
       )
@@ -130,10 +143,22 @@ export class SqliteAuthRepository {
     return row === undefined ? null : readUser(row);
   }
 
+  findUserByExternalId(externalId: string): UserRecord | null {
+    const row = this.database
+      .prepare(
+        `SELECT id, email, password_hash, role, created_at, auth_provider, external_id
+         FROM users
+         WHERE external_id = ?`,
+      )
+      .get(externalId);
+
+    return row === undefined ? null : readUser(row);
+  }
+
   findUserById(id: UserId): UserRecord | null {
     const row = this.database
       .prepare(
-        `SELECT id, email, password_hash, role, created_at
+        `SELECT id, email, password_hash, role, created_at, auth_provider, external_id
          FROM users
          WHERE id = ?`,
       )
@@ -145,10 +170,37 @@ export class SqliteAuthRepository {
   insertUser(user: NewUserRecord): void {
     this.database
       .prepare(
-        `INSERT INTO users (id, email, password_hash, role, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO users (id, email, password_hash, role, created_at, auth_provider, external_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(user.id, user.email, user.passwordHash, user.role, user.createdAt);
+      .run(
+        user.id,
+        user.email,
+        user.passwordHash,
+        user.role,
+        user.createdAt,
+        user.authProvider ?? 'local',
+        user.externalId ?? null,
+      );
+  }
+
+  updatePasswordHash(id: UserId, passwordHash: string): void {
+    this.database.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, id);
+  }
+
+  updateEmail(id: UserId, email: string): void {
+    this.database.prepare('UPDATE users SET email = ? WHERE id = ?').run(email, id);
+  }
+
+  /** Convert an existing user to a Supabase-backed identity (demo seed only). */
+  linkExternalIdentity(id: UserId, externalId: string): void {
+    this.database
+      .prepare(
+        `UPDATE users
+         SET auth_provider = 'supabase', external_id = ?, password_hash = ?
+         WHERE id = ?`,
+      )
+      .run(externalId, EXTERNAL_PASSWORD_HASH, id);
   }
 
   insertSession(session: NewSessionRecord): void {

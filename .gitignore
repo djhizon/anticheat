@@ -25,3 +25,6 @@ test-results/
 /dom.html
 /outputs/
 /work/
+
+# Agent worktrees
+/.claude/worktrees/

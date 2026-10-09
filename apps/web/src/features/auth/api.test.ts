@@ -111,4 +111,31 @@ describe('browser authentication API boundary', () => {
       },
     } satisfies Partial<AuthApiError>);
   });
+
+  it('surfaces only whitelisted problem reasons and posts confirm links with CSRF', async () => {
+    const calls: Array<{ input: RequestInfo | URL; init: RequestInit | undefined }> = [];
+    const fetchImpl: FetchLike = async (input, init) => {
+      calls.push({ input, init });
+      const url = String(input);
+      if (url.endsWith('/auth/csrf')) {
+        return jsonResponse({ csrfToken: 'anonymous-csrf-token' });
+      }
+      if (url.endsWith('/auth/confirm')) {
+        return jsonResponse({ status: 'email_changed' });
+      }
+      return jsonResponse({ code: 'forbidden', message: 'x', reason: 'email_not_confirmed' }, 403);
+    };
+    const api = createAuthApi('', fetchImpl);
+
+    await expect(api.confirm({ tokenHash: 'th', type: 'email_change' })).resolves.toEqual({
+      status: 'email_changed',
+    });
+    expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({
+      token_hash: 'th',
+      type: 'email_change',
+    });
+    await expect(
+      api.changePassword({ currentPassword: 'a', newPassword: 'b' }),
+    ).rejects.toMatchObject({ problem: { code: 'forbidden', reason: 'email_not_confirmed' } });
+  });
 });

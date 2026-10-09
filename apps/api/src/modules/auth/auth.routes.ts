@@ -3,7 +3,12 @@ import { DomainError, problemFromError, type ProblemCode } from '@exam-anti-chea
 import type { ApiConfig } from '../../config.js';
 import { getCookie, isAllowedOrigin, issueCsrfToken } from './csrf.js';
 import type { AuthRequest, AuthRequestBoundary } from './auth.plugin.js';
-import type { AuthSessionResult, AuthService, CredentialsInput } from './auth.service.js';
+import type {
+  AuthSessionResult,
+  AuthService,
+  CredentialsInput,
+  ProblemReason,
+} from './auth.service.js';
 import type { TokenGenerator } from './session.js';
 
 export type ResponseHeaderValue = string | readonly string[];
@@ -25,7 +30,30 @@ const authPaths = new Set([
   '/auth/login',
   '/auth/logout',
   '/auth/me',
+  '/auth/forgot-password',
+  '/auth/confirm',
+  '/auth/reset-password',
+  '/auth/change-password',
+  '/auth/change-email',
 ]);
+
+const problemReasons: ReadonlySet<string> = new Set<ProblemReason>([
+  'email_not_confirmed',
+  'invalid_credentials',
+  'weak_password',
+  'same_password',
+  'link_invalid',
+  'recovery_expired',
+  'rate_limited',
+  'supabase_required',
+  'provider_unavailable',
+]);
+
+const reasonStatus: Partial<Record<ProblemReason, number>> = {
+  supabase_required: 501,
+  provider_unavailable: 502,
+  rate_limited: 429,
+};
 
 const problemStatus: Record<ProblemCode, number> = {
   unauthorized: 401,
@@ -53,6 +81,25 @@ function parseCredentials(body: unknown): CredentialsInput {
   }
 
   return { email: candidate.email, password: candidate.password };
+}
+
+function parseFields<Name extends string>(
+  body: unknown,
+  names: readonly Name[],
+): Record<Name, string> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    throw new DomainError('validation_failed', 'A request object is required.');
+  }
+  const candidate = body as Record<string, unknown>;
+  const result = {} as Record<Name, string>;
+  for (const name of names) {
+    const value = candidate[name];
+    if (typeof value !== 'string') {
+      throw new DomainError('validation_failed', `${name} is required.`);
+    }
+    result[name] = value;
+  }
+  return result;
 }
 
 function jsonResponse(
@@ -102,14 +149,20 @@ function problemResponse(
   allowedOrigins: readonly string[],
 ): AuthResponse {
   const problem = problemFromError(error);
+  const detail = error instanceof DomainError ? error.details?.reason : undefined;
+  const reason =
+    typeof detail === 'string' && problemReasons.has(detail)
+      ? (detail as ProblemReason)
+      : undefined;
   return {
-    status: problemStatus[problem.code],
+    status:
+      (reason !== undefined ? reasonStatus[reason] : undefined) ?? problemStatus[problem.code],
     headers: {
       ...corsHeaders(request, allowedOrigins),
       'cache-control': 'no-store',
       'content-type': 'application/problem+json',
     },
-    body: problem,
+    body: reason === undefined ? problem : { ...problem, reason },
   };
 }
 
@@ -175,7 +228,10 @@ export class AuthRoutes {
 
       if (method === 'POST' && path === '/auth/register') {
         this.boundary.validateUnsafe(request);
-        const result = await this.authService.register(parseCredentials(request.body));
+        const result = await this.authService.signUp(parseCredentials(request.body));
+        if ('status' in result) {
+          return this.respond(request, 202, result);
+        }
         return this.respond(request, 201, publicSession(result), this.sessionCookies(result));
       }
 
@@ -196,6 +252,59 @@ export class AuthRoutes {
           clearedCookie(this.config.sessionCookieName, this.config.secureCookies),
           clearedCookie(this.config.csrfCookieName, this.config.secureCookies),
         ]);
+      }
+
+      if (method === 'POST' && path === '/auth/forgot-password') {
+        this.boundary.validateUnsafe(request);
+        const { email } = parseFields(request.body, ['email']);
+        await this.authService.forgotPassword(email, request.remoteAddress ?? 'unknown');
+        return this.respond(request, 202, { status: 'confirmation_sent' });
+      }
+
+      if (method === 'POST' && path === '/auth/confirm') {
+        this.boundary.validateUnsafe(request);
+        const { token_hash: tokenHash, type } = parseFields(request.body, ['token_hash', 'type']);
+        const result = await this.authService.confirm(
+          { tokenHash, type },
+          getCookie(headerValue(request, 'cookie'), this.config.sessionCookieName),
+        );
+        if ('session' in result) {
+          return this.respond(
+            request,
+            200,
+            { status: result.status, ...publicSession(result.session) },
+            this.sessionCookies(result.session),
+          );
+        }
+        return this.respond(request, 200, { status: result.status });
+      }
+
+      if (method === 'POST' && path === '/auth/reset-password') {
+        const principal = this.boundary.requirePrincipal(request);
+        this.boundary.validateUnsafe(request, principal);
+        const { password } = parseFields(request.body, ['password']);
+        await this.authService.resetPassword(principal, password);
+        return this.respond(request, 200, { status: 'password_updated' });
+      }
+
+      if (method === 'POST' && path === '/auth/change-password') {
+        const principal = this.boundary.requirePrincipal(request);
+        this.boundary.validateUnsafe(request, principal);
+        await this.authService.changePassword(
+          principal,
+          parseFields(request.body, ['currentPassword', 'newPassword']),
+        );
+        return this.respond(request, 200, { status: 'password_updated' });
+      }
+
+      if (method === 'POST' && path === '/auth/change-email') {
+        const principal = this.boundary.requirePrincipal(request);
+        this.boundary.validateUnsafe(request, principal);
+        const result = await this.authService.changeEmail(
+          principal,
+          parseFields(request.body, ['newEmail', 'currentPassword']),
+        );
+        return this.respond(request, 202, result);
       }
 
       if (method === 'GET' && path === '/auth/me') {

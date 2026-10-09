@@ -4,7 +4,8 @@ import type { AssignmentId, ExamVersionId } from '@exam-anti-cheat/contracts/exa
 
 import { loadConfig } from './config.js';
 import { loadLocalEnv } from './env.js';
-import { createAuthPlugin } from './modules/auth/auth.plugin.js';
+import { createAuthPlugin, type AuthPlugin } from './modules/auth/auth.plugin.js';
+import { SupabaseAuthError } from './modules/auth/supabaseAuth.js';
 import { createExamPlugin } from './modules/exam/exam.plugin.js';
 import type { SeedQuestionInput } from './modules/exam/exam.service.js';
 import { generateExamQuestions } from './modules/integrity/questionGenerator.js';
@@ -65,6 +66,37 @@ function readString(value: unknown, message: string): string {
   return value;
 }
 
+/**
+ * Make sure a demo account exists. With Supabase configured and a service key the account is
+ * created (pre-confirmed, no email sent) through the admin API and mapped locally; otherwise it
+ * is a LOCAL account, which keeps working offline even while the Supabase provider is active.
+ */
+async function ensureAccount(auth: AuthPlugin, email: string, password: string): Promise<void> {
+  const supabase = auth.supabase;
+  if (supabase !== undefined && supabase.hasServiceRole) {
+    let external;
+    try {
+      external = await supabase.adminCreateUser(email, password);
+    } catch (error) {
+      if (!(error instanceof SupabaseAuthError) || error.status !== 422) {
+        throw error;
+      }
+      const found = await supabase.adminFindUserByEmail(email);
+      if (found === null) {
+        throw error;
+      }
+      await supabase.adminUpdateUser(found.id, password);
+      external = found;
+    }
+    auth.service.provisionExternalUser(external, { adoptLocalByEmail: true });
+    return;
+  }
+
+  if (auth.repository.findUserByEmail(email) === null) {
+    await auth.service.register({ email, password });
+  }
+}
+
 async function seedDemo(): Promise<void> {
   if ((process.env.NODE_ENV ?? 'development') === 'production') {
     throw new Error('The demo seed is disabled in production.');
@@ -110,20 +142,23 @@ async function seedDemo(): Promise<void> {
   }
 
   try {
-    // ── Ensure demo student account exists ───────────────────────────────────
-    let student = auth.repository.findUserByEmail(demoEmail);
-    if (student === null) {
-      await auth.service.register({ email: demoEmail, password: demoPassword });
-      student = auth.repository.findUserByEmail(demoEmail);
+    if (auth.supabase !== undefined && !auth.supabase.hasServiceRole) {
+      console.warn(
+        '⚠️  Supabase is configured but SUPABASE_SERVICE_ROLE_KEY is missing: creating the demo accounts as LOCAL users (they sign in offline, without email flows).',
+      );
+    } else if (auth.supabase !== undefined) {
+      console.log('ℹ️  Creating demo accounts in Supabase Auth (pre-confirmed, no emails sent)…');
     }
+
+    // ── Ensure demo student account exists ───────────────────────────────────
+    await ensureAccount(auth, demoEmail, demoPassword);
+    const student = auth.repository.findUserByEmail(demoEmail);
     if (student === null || student.role !== 'student') {
       throw new Error('The demo student account could not be prepared.');
     }
 
     // ── Ensure demo instructor account exists (registration only creates students) ──
-    if (auth.repository.findUserByEmail(instructorEmail) === null) {
-      await auth.service.register({ email: instructorEmail, password: instructorPassword });
-    }
+    await ensureAccount(auth, instructorEmail, instructorPassword);
     auth.database
       .prepare(`UPDATE users SET role = 'instructor' WHERE email = ?`)
       .run(instructorEmail);
@@ -199,11 +234,8 @@ async function seedDemo(): Promise<void> {
 
     // ── Synthetic classmates with submitted attempts (similarity / AI-check demo) ──
     for (const [index, email] of classmateEmails.entries()) {
-      let classmate = auth.repository.findUserByEmail(email);
-      if (classmate === null) {
-        await auth.service.register({ email, password: classmatePassword });
-        classmate = auth.repository.findUserByEmail(email);
-      }
+      await ensureAccount(auth, email, classmatePassword);
+      const classmate = auth.repository.findUserByEmail(email);
       if (classmate === null || classmate.role !== 'student') {
         throw new Error('A demo classmate account could not be prepared.');
       }

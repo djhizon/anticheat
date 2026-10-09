@@ -5,6 +5,8 @@ import type {
   ExamDeliveryProjection,
 } from '@exam-anti-cheat/contracts/exam';
 
+import { AccountButton } from './features/account/AccountPanel.js';
+import { ConfirmPage } from './features/account/ConfirmPage.js';
 import { AiCheckDashboard } from './features/admin/AiCheckDashboard.js';
 import { createInstructorApi } from './features/admin/api.js';
 import { SimilarityDashboard } from './features/admin/SimilarityDashboard.js';
@@ -30,8 +32,38 @@ export function App(): React.ReactElement {
   );
 }
 
+const confirmPath = '/account/confirm';
+
+/** Minimal pathname routing; the app has no router and only `/account/confirm` is special. */
+function useLocation(): {
+  readonly pathname: string;
+  readonly search: string;
+  readonly navigate: (path: string) => void;
+} {
+  const [location, setLocation] = useState(() => ({
+    pathname: window.location.pathname,
+    search: window.location.search,
+  }));
+
+  useEffect(() => {
+    const onPop = (): void =>
+      setLocation({ pathname: window.location.pathname, search: window.location.search });
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  const navigate = useCallback((path: string): void => {
+    // replaceState: a consumed one-time email link must not stay in the history.
+    window.history.replaceState(null, '', path);
+    setLocation({ pathname: window.location.pathname, search: window.location.search });
+  }, []);
+
+  return { ...location, navigate };
+}
+
 function AuthenticatedApp(): React.ReactElement {
   const { getCsrfToken, loading, logout, refresh, user } = useAuth();
+  const location = useLocation();
   const examApi = useMemo<ExamApi>(() => createExamApi('', getCsrfToken), [getCsrfToken]);
 
   if (loading) {
@@ -40,6 +72,9 @@ function AuthenticatedApp(): React.ReactElement {
         <p role="status">Checking your session…</p>
       </main>
     );
+  }
+  if (location.pathname === confirmPath) {
+    return <ConfirmPage onNavigate={location.navigate} search={location.search} />;
   }
   if (user === null) {
     return <LoginPage />;
@@ -75,9 +110,12 @@ function InstructorWorkspace({
           <p className="eyebrow">Exam Anti-Cheat</p>
           <p className="signed-in">Signed in as {email}</p>
         </div>
-        <button className="secondary-button" onClick={() => void onLogout()} type="button">
-          Sign out
-        </button>
+        <div className="topbar-actions">
+          <AccountButton />
+          <button className="secondary-button" onClick={() => void onLogout()} type="button">
+            Sign out
+          </button>
+        </div>
       </header>
       <section className="hero">
         <p className="eyebrow">Instructor workspace</p>
@@ -408,9 +446,12 @@ function StudentWorkspace({
             <p className="eyebrow">Exam Anti-Cheat</p>
             <p className="signed-in">Signed in as {email}</p>
           </div>
-          <button className="secondary-button" onClick={() => void onLogout()} type="button">
-            Sign out
-          </button>
+          <div className="topbar-actions">
+            <AccountButton />
+            <button className="secondary-button" onClick={() => void onLogout()} type="button">
+              Sign out
+            </button>
+          </div>
         </header>
 
         <section className="hero">

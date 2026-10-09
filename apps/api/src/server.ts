@@ -230,6 +230,9 @@ async function handleRequest(
       method: request.method ?? 'GET',
       path: request.url ?? '/',
       headers: requestHeaders(request),
+      ...(request.socket.remoteAddress === undefined
+        ? {}
+        : { remoteAddress: request.socket.remoteAddress }),
       ...(body === undefined ? {} : { body }),
     };
 

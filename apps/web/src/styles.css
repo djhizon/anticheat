@@ -2337,3 +2337,42 @@ dd {
 .admin-dashboard + .admin-dashboard {
   margin-top: 1.5rem;
 }
+
+/* ── Account / email flows ─────────────────────────────────────────────── */
+.topbar-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+.auth-notice {
+  background: #eef6ff;
+  border: 1px solid #c9dcf5;
+  border-radius: 10px;
+  color: #244a82;
+  font-size: 0.85rem;
+  margin: 0;
+  padding: 10px 12px;
+}
+.auth-forgot {
+  margin: 14px 0 0;
+}
+.confirm-page .auth-card {
+  display: grid;
+  gap: 16px;
+  max-width: 440px;
+  width: 100%;
+}
+.account-panel {
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.account-form {
+  border-top: 1px solid #e3e9f3;
+  margin-top: 18px;
+  padding-top: 14px;
+}
+.account-form h3 {
+  color: #244a82;
+  font-size: 0.95rem;
+  margin: 0 0 8px;
+}
