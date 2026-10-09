@@ -1,7 +1,7 @@
 # Supabase auth email templates
 
 Branded templates for this app's **own** Supabase project. Every link lands on
-`/auth/confirm` in the web app, which verifies the `token_hash` server-side, so
+`/account/confirm` in the web app, which verifies the `token_hash` server-side, so
 links work even when opened on a different device than the one that asked.
 
 | File                    | Dashboard template (Authentication → Emails) | Subject                          |
