@@ -297,6 +297,12 @@ export interface InstructorExamVersion {
   }[];
 }
 
+/** What this server can do for instructors, so the UI can disable what would only fail. */
+export interface InstructorCapabilities {
+  /** True when GEMINI_API_KEYS is set (similarity and AI-answer checks need it). */
+  readonly gemini: boolean;
+}
+
 export interface InstructorExamVersionsResponse {
   readonly versions: readonly InstructorExamVersion[];
 }

@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { IntegrityTimelineEntry } from '@exam-anti-cheat/contracts/exam';
 
-import { IntegrityTimeline, summarizeSource } from './IntegrityTimeline.js';
+import { AUTO_REFRESH_MS, IntegrityTimeline, summarizeSource } from './IntegrityTimeline.js';
 import { TransparencyReport } from './TransparencyReport.js';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -59,6 +59,13 @@ function makeApi() {
 it('summarises counts per source with total duration', () => {
   expect(summarizeSource('gaze', entries.slice(1, 3))).toBe('Gaze away: 2 times, 10 s total');
   expect(summarizeSource('browser', entries.slice(3))).toBe('Browser: 1 time');
+  const one = (source: IntegrityTimelineEntry['source']) =>
+    summarizeSource(source, [{ ...entries[0]!, source }]);
+  expect(one('transcript')).toBe('Transcript: 1 line');
+  expect(one('answer')).toBe('Answers: 1 save');
+  expect(one('liveness')).toBe('Liveness: 1 check');
+  expect(one('keyboard')).toBe('Keyboard: 1 note');
+  expect(one('camera')).toBe('Camera: 1 camera note');
 });
 
 it('renders a minute-grouped log with counts, and filters by source', async () => {
@@ -171,4 +178,34 @@ it('shows no View photo button without an image loader', async () => {
   };
   await act(async () => root.render(<IntegrityTimeline attemptId="a1" api={api} />));
   expect(container.querySelector('.timeline-evidence-link')).toBeNull();
+});
+
+it('offers a Refresh button and re-reads the log once on its own after a few seconds', async () => {
+  vi.useFakeTimers();
+  try {
+    const later: IntegrityTimelineEntry = {
+      at: '2026-09-15T00:04:00.000Z',
+      source: 'audio',
+      kind: 'voice_activity',
+      severity: 'info',
+      summary: 'Sound that looks like speech for 2 s (not proof of speech)',
+    };
+    const api = makeApi();
+    api.getTimeline.mockResolvedValueOnce(entries);
+    api.getTimeline.mockResolvedValue([...entries, later]);
+    await act(async () => root.render(<IntegrityTimeline attemptId="a1" api={api} />));
+    expect(container.textContent).not.toContain('Sound that looks like speech');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(AUTO_REFRESH_MS + 10);
+    });
+    expect(api.getTimeline).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain('Sound that looks like speech');
+    const refresh = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Refresh',
+    )!;
+    await act(async () => refresh.click());
+    expect(api.getTimeline).toHaveBeenCalledTimes(3);
+  } finally {
+    vi.useRealTimers();
+  }
 });

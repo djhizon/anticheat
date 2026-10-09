@@ -208,6 +208,11 @@ export class IntegrityService {
     private readonly evidenceRetainDays: number = 30,
   ) {}
 
+  /** Whether the Gemini-backed instructor checks can run on this server. */
+  get geminiAvailable(): boolean {
+    return this.gemini !== null;
+  }
+
   private requireGemini(): GeminiRotatingClient {
     if (this.gemini === null) {
       throw new GeminiUnavailableError();
@@ -237,7 +242,12 @@ export class IntegrityService {
     audioBase64?: string,
   ): Promise<VerifyResult> {
     if (kind === 'colour_flash') {
-      return scoreColourResponse(data.sequence as Colour[], payload.baseline, payload.frames);
+      return scoreColourResponse(
+        data.sequence as Colour[],
+        payload.baseline,
+        payload.frames,
+        payload.faces,
+      );
     }
     if (kind === 'head_turn') {
       return verifyHeadTurns(data.sequence as TurnDirection[], payload.samples);

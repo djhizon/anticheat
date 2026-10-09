@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { plural } from '@exam-anti-cheat/contracts';
 import {
   INTEGRITY_TIMELINE_SOURCES,
   type IntegrityTimelineEntry,
@@ -7,19 +8,22 @@ import {
 
 import type { IntegrityTimelineApi, TimelineFormat } from './timelineApi.js';
 
-const sourceMeta: Record<IntegrityTimelineSource, { icon: string; label: string; noun: string }> = {
-  camera: { icon: '📷', label: 'Camera', noun: 'camera notes' },
-  gaze: { icon: '👀', label: 'Gaze away', noun: 'times' },
-  audio: { icon: '🎙️', label: 'Voice activity', noun: 'times' },
-  transcript: { icon: '💬', label: 'Transcript', noun: 'lines' },
-  keyboard: { icon: '⌨️', label: 'Keyboard', noun: 'notes' },
-  pointer: { icon: '🖱️', label: 'Pointer', noun: 'notes' },
-  browser: { icon: '🌐', label: 'Browser', noun: 'times' },
-  desktop: { icon: '🖥️', label: 'Desktop', noun: 'notes' },
-  phone: { icon: '📱', label: 'iPhone', noun: 'notes' },
-  liveness: { icon: '🧑', label: 'Liveness', noun: 'checks' },
-  answer: { icon: '📝', label: 'Answers', noun: 'saves' },
-  system: { icon: '⚙️', label: 'System', noun: 'notes' },
+const sourceMeta: Record<
+  IntegrityTimelineSource,
+  { icon: string; label: string; one: string; many: string }
+> = {
+  camera: { icon: '📷', label: 'Camera', one: 'camera note', many: 'camera notes' },
+  gaze: { icon: '👀', label: 'Gaze away', one: 'time', many: 'times' },
+  audio: { icon: '🎙️', label: 'Voice activity', one: 'time', many: 'times' },
+  transcript: { icon: '💬', label: 'Transcript', one: 'line', many: 'lines' },
+  keyboard: { icon: '⌨️', label: 'Keyboard', one: 'note', many: 'notes' },
+  pointer: { icon: '🖱️', label: 'Pointer', one: 'note', many: 'notes' },
+  browser: { icon: '🌐', label: 'Browser', one: 'time', many: 'times' },
+  desktop: { icon: '🖥️', label: 'Desktop', one: 'note', many: 'notes' },
+  phone: { icon: '📱', label: 'iPhone', one: 'note', many: 'notes' },
+  liveness: { icon: '🧑', label: 'Liveness', one: 'check', many: 'checks' },
+  answer: { icon: '📝', label: 'Answers', one: 'save', many: 'saves' },
+  system: { icon: '⚙️', label: 'System', one: 'note', many: 'notes' },
 };
 
 /**
@@ -74,6 +78,9 @@ function EvidenceLink({
   );
 }
 
+/** One automatic re-read after this long, in case uploads were still arriving at first load. */
+export const AUTO_REFRESH_MS = 5000;
+
 const severityLabel = { info: 'Info', notice: 'Worth a look', flag: 'Review' } as const;
 
 function durationSeconds(entries: readonly IntegrityTimelineEntry[]): number {
@@ -93,8 +100,7 @@ export function summarizeSource(
   const meta = sourceMeta[source];
   const seconds = durationSeconds(entries);
   const count = entries.length;
-  const noun = count === 1 && meta.noun === 'times' ? 'time' : meta.noun;
-  return `${meta.label}: ${count} ${noun}${seconds > 0 ? `, ${seconds} s total` : ''}`;
+  return `${meta.label}: ${plural(count, meta.one, meta.many)}${seconds > 0 ? `, ${seconds} s total` : ''}`;
 }
 
 function minuteKey(at: string): string {
@@ -137,6 +143,7 @@ export function IntegrityTimeline({
   const [failed, setFailed] = useState(false);
   const [hidden, setHidden] = useState<ReadonlySet<IntegrityTimelineSource>>(new Set());
   const [downloadError, setDownloadError] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -151,10 +158,26 @@ export function IntegrityTimeline({
       .catch(() => {
         if (active) setFailed(true);
       });
+    // Late uploads (voice bursts, transcripts) land after the first read: look once more.
+    const later = setTimeout(() => void refresh(), AUTO_REFRESH_MS);
     return () => {
       active = false;
+      clearTimeout(later);
     };
   }, [attemptId, api]);
+
+  /** Re-reads the log in place, keeping what is on screen if the request fails. */
+  function refresh(): Promise<void> {
+    setRefreshing(true);
+    return api
+      .getTimeline(attemptId)
+      .then((loaded) => {
+        setEntries(loaded);
+        setFailed(false);
+      })
+      .catch(() => {})
+      .finally(() => setRefreshing(false));
+  }
 
   const bySource = useMemo(() => {
     const map = new Map<IntegrityTimelineSource, IntegrityTimelineEntry[]>();
@@ -227,6 +250,14 @@ export function IntegrityTimeline({
               ))}
             </div>
             <div className="integrity-timeline__downloads">
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={refreshing}
+                onClick={() => void refresh()}
+              >
+                {refreshing ? 'Refreshing…' : 'Refresh'}
+              </button>
               <button type="button" className="secondary-button" onClick={() => download('csv')}>
                 Download CSV
               </button>

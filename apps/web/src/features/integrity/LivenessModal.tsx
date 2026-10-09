@@ -17,7 +17,7 @@ type Phase = 'loading' | 'ready' | 'running' | 'done';
 
 /** Camera permission, flash, microphone and the verify request each get this long. */
 export const CHECK_TIMEOUT_MS = 30_000;
-/** Head turn also loads a face model and waits for two turns, so it gets a longer budget. */
+/** Head turn and colour flash load a face model on-device, so they get a longer budget. */
 export const HEAD_TURN_TIMEOUT_MS = 60_000;
 export const NOT_VERIFIED_COPY = 'Not verified — you can try again.';
 
@@ -180,7 +180,11 @@ export function LivenessModal({ attemptId, examApi, onComplete }: LivenessModalP
           signal,
         );
         return {
-          payload: { baseline: evidence.baseline, frames: evidence.frames },
+          payload: {
+            baseline: evidence.baseline,
+            frames: evidence.frames,
+            faces: evidence.faces,
+          },
           camera: { label: evidence.cameraLabel },
         };
       }
@@ -210,7 +214,7 @@ export function LivenessModal({ attemptId, examApi, onComplete }: LivenessModalP
       };
     };
     try {
-      const timeoutMs = challenge.type === 'head_turn' ? HEAD_TURN_TIMEOUT_MS : CHECK_TIMEOUT_MS;
+      const timeoutMs = challenge.type === 'spoken_words' ? CHECK_TIMEOUT_MS : HEAD_TURN_TIMEOUT_MS;
       let request: Record<string, unknown>;
       try {
         request = await withTimeout(

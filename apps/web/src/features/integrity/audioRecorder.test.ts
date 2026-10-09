@@ -121,4 +121,49 @@ describe('independent speech clips', () => {
     expect(status.mock.calls.at(-1)?.[0]).toContain('Transcription failed');
     expect(status.mock.calls.at(-1)?.[0]).toContain('Stop and start audio');
   });
+  it('flush() uploads the clip in progress and waits for it, bounded', async () => {
+    let finish!: (body: { transcript: string }) => void;
+    const postAudio = vi.fn(
+      (_id: string, _audio: string, _duration: number) =>
+        new Promise<{ transcript: string }>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const transcript = vi.fn();
+    const session = createAudioRecorder('a', { postAudio } as unknown as ExamApi, transcript);
+    await session.start();
+    await vi.advanceTimersByTimeAsync(2000); // 2 s into the first clip
+    let done = false;
+    const flushing = session.flush(3000).then(() => {
+      done = true;
+    });
+    await vi.waitFor(() => expect(postAudio).toHaveBeenCalledOnce());
+    expect(Recorder.instances).toHaveLength(1); // no new clip is started
+    expect(postAudio.mock.calls[0]![2]).toBe(2000);
+    expect(done).toBe(false);
+    finish({ transcript: 'last words' });
+    await flushing;
+    expect(transcript).toHaveBeenCalledWith('last words', expect.any(Number));
+    session.stop();
+  });
+  it('flush() gives up after the bound when the upload hangs', async () => {
+    const postAudio = vi.fn(() => new Promise<{ transcript: string }>(() => {}));
+    const session = createAudioRecorder('a', { postAudio } as unknown as ExamApi, vi.fn());
+    await session.start();
+    await vi.advanceTimersByTimeAsync(2000);
+    const flushing = session.flush(3000);
+    await vi.advanceTimersByTimeAsync(3001);
+    await flushing;
+    expect(postAudio).toHaveBeenCalledOnce();
+    session.stop();
+  });
+  it('flush() skips a final clip too short to transcribe', async () => {
+    const postAudio = vi.fn(async () => ({ transcript: 'x' }));
+    const session = createAudioRecorder('a', { postAudio } as unknown as ExamApi, vi.fn());
+    await session.start();
+    await vi.advanceTimersByTimeAsync(300);
+    await session.flush(3000);
+    expect(postAudio).not.toHaveBeenCalled();
+    session.stop();
+  });
 });

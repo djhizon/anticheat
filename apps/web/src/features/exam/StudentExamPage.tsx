@@ -1,5 +1,6 @@
 import { createKeystrokeDynamics } from '../integrity/keystrokeDynamics.js';
 import { useInputBehaviour } from '../input/useInputBehaviour.js';
+import { runSubmitFlushes } from '../integrity/submitFlush.js';
 import React, {
   Suspense,
   useCallback,
@@ -40,6 +41,9 @@ function timeLimitOf(question: object): number | undefined {
   const limit = (question as { timeLimitSeconds?: unknown }).timeLimitSeconds;
   return typeof limit === 'number' && limit > 0 ? limit : undefined;
 }
+
+/** Longest submit waits for the last audio clip and pending telemetry. */
+const SUBMIT_FLUSH_MS = 3000;
 
 const AudioPanel = React.lazy(() =>
   import('../integrity/AudioPanel.js').then((m) => ({ default: m.AudioPanel })),
@@ -655,6 +659,9 @@ export function StudentExamPage({
         pendingAnswersRef.current = null;
         await saveChainRef.current;
       }
+      // Hand over the last audio clip and let pending telemetry land while the attempt is open.
+      await runSubmitFlushes(SUBMIT_FLUSH_MS);
+      await examApi.whenIdle?.(SUBMIT_FLUSH_MS);
       const latestDelivery = currentDeliveryRef.current;
       if (latestDelivery === null) {
         throw new Error('The exam delivery is no longer available.');

@@ -1,3 +1,4 @@
+import { plural } from '@exam-anti-cheat/contracts';
 import { SECTORS } from './gazeEstimator.js';
 import { wedgePath } from './GazeDial.js';
 import type { GazeStatsSnapshot } from './gazeStats.js';
@@ -69,8 +70,7 @@ export function GazeStats({ stats }: { readonly stats: GazeStatsSnapshot }) {
         <dd>{pct(stats.facePresentPct)}</dd>
         <dt>More than one face</dt>
         <dd>
-          {stats.multipleFaceEvents} event{stats.multipleFaceEvents === 1 ? '' : 's'} (
-          {secs(stats.multipleFaceMs)})
+          {plural(stats.multipleFaceEvents, 'event')} ({secs(stats.multipleFaceMs)})
         </dd>
         <dt>Tracking quality</dt>
         <dd>{stats.quality === null ? 'n/a' : `${Math.round(stats.quality * 100)}%`}</dd>
@@ -78,9 +78,7 @@ export function GazeStats({ stats }: { readonly stats: GazeStatsSnapshot }) {
         <dd>
           {!stats.phoneAvailable
             ? 'unavailable'
-            : `${stats.phoneCandidateFrames} candidate frame${
-                stats.phoneCandidateFrames === 1 ? '' : 's'
-              } · ${stats.phoneConfirmations} confirmed · last ${
+            : `${plural(stats.phoneCandidateFrames, 'candidate frame')} · ${stats.phoneConfirmations} confirmed · last ${
                 stats.phoneLastScore === null ? 'n/a' : stats.phoneLastScore.toFixed(2)
               } · max ${stats.phoneMaxScore.toFixed(2)}`}
         </dd>

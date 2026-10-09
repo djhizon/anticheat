@@ -2,7 +2,7 @@ import type { LivenessTurnDirection, LivenessYawSample } from '@exam-anti-cheat/
 
 import { acquireUnlessAborted, throwIfAborted } from './livenessCapture.js';
 import { acquirePhysicalCamera } from './physicalCamera.js';
-import type { HeadPose, VisionReply } from './visionSignals.js';
+import type { HeadPose, VisionObservation, VisionReply } from './visionSignals.js';
 import { relativePose } from './visionSignals.js';
 
 /**
@@ -50,6 +50,8 @@ export function turnYaw(current: HeadPose, baseline: HeadPose): number {
 export interface FramePoseSource {
   /** Resolves a head pose for the current video frame, or null when no single face is found. */
   pose(): Promise<HeadPose | null>;
+  /** Full observation for the current frame (face count and box), or null if none came back. */
+  observe(): Promise<VisionObservation | null>;
   close(): void;
 }
 
@@ -73,14 +75,16 @@ export async function createWorkerPoseSource(video: HTMLVideoElement): Promise<F
     worker.terminate();
     throw error;
   }
+  const observe = async (): Promise<VisionObservation | null> => {
+    const bitmap = await createImageBitmap(video);
+    const reply = next();
+    worker.postMessage({ type: 'frame', bitmap }, [bitmap]);
+    const data = await withTimeout(reply, POSE_TIMEOUT_MS, 'Face model stopped responding.');
+    return data.type === 'observation' ? data.observation : null;
+  };
   return {
-    async pose() {
-      const bitmap = await createImageBitmap(video);
-      const reply = next();
-      worker.postMessage({ type: 'frame', bitmap }, [bitmap]);
-      const data = await withTimeout(reply, POSE_TIMEOUT_MS, 'Face model stopped responding.');
-      return data.type === 'observation' ? data.observation.pose : null;
-    },
+    pose: async () => (await observe())?.pose ?? null,
+    observe,
     close: () => worker.terminate(),
   };
 }

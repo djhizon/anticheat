@@ -25,10 +25,6 @@ const benignConsole: readonly RegExp[] = [
   /Failed to load resource.*(409|422|503|501)/i,
   // Same instructor checks: with no keys the API currently answers 500 (reported as a finding).
   /status of 500.*\/exam\/instructor\/.*\/(ai-check|similarity)$/,
-  // Dev-only race: React StrictMode mounts the liveness modal twice, so two concurrent CSRF
-  // fetches rotate the token and the discarded first challenge request gets 403. The second
-  // request (the one the modal uses) succeeds.
-  /status of 403.*\/liveness-challenge$/,
 ];
 const benignRequests: readonly RegExp[] = [
   /\/auth\/me -> 401/,
@@ -37,7 +33,6 @@ const benignRequests: readonly RegExp[] = [
   /\.(task|tflite|wasm|bin)(\?|$)/i,
   /\/exam\/attempts\/[^/]+\/audio/,
   /\/exam\/instructor\/versions\/[^/]+\/questions\/[^/]+\/(ai-check|similarity) -> 503/,
-  /\/liveness-challenge -> 403/,
   /\/exam\/attempts\/[^/]+\/(liveness-verify|vision-check)/,
 ];
 
@@ -204,8 +199,8 @@ test('demo flow: student exam with on-device checks, then instructor review', as
     await shot('4-transparency-report');
   });
 
-  await test.step('instructor sees Integrity review with a clear no-keys message', async () => {
-    currentStep = 'instructor sees Integrity review with a clear no-keys message';
+  await test.step('instructor sees Integrity review with disabled Gemini checks and a clear hint', async () => {
+    currentStep = 'instructor sees Integrity review with disabled Gemini checks and a clear hint';
     await page.getByRole('button', { name: '← Back' }).click();
     await page.getByRole('button', { name: 'Sign out' }).click();
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
@@ -216,13 +211,11 @@ test('demo flow: student exam with on-device checks, then instructor review', as
     await expect(similarity).toBeVisible();
     await expect(ai).toBeVisible();
 
-    await ai.getByRole('button', { name: 'Run AI check' }).click();
-    await expect(ai.getByRole('alert')).toContainText(/GEMINI_API_KEYS|configured|not configured/i);
-
-    await similarity.getByRole('button').last().click();
-    await expect(similarity.getByRole('alert')).toContainText(
-      /GEMINI_API_KEYS|configured|not configured/i,
-    );
+    // Without GEMINI_API_KEYS the server says so up front and the buttons are disabled.
+    await expect(ai.getByRole('button', { name: 'Run AI check' })).toBeDisabled();
+    await expect(ai).toContainText('Needs GEMINI_API_KEYS on the server');
+    await expect(similarity.getByRole('button', { name: 'Run similarity check' })).toBeDisabled();
+    await expect(similarity).toContainText('Needs GEMINI_API_KEYS on the server');
     await shot('5-instructor-no-keys');
   });
 

@@ -3,7 +3,9 @@ import { createAudioSession, type AudioSnapshot } from './audioSession.js';
 import { createAudioRecorder } from './audioRecorder.js';
 import { acquireBuiltInMicrophone } from './builtInMicrophone.js';
 import { createLevelMeter, METER_BARS, type LevelReading } from './audioLevel.js';
-import { appendLine, formatClock, SKIPPED_TEXT, type LogLine } from './transcriptLog.js';
+import { appendLine, formatClock, type LogLine } from './transcriptLog.js';
+import { registerSubmitFlush } from './submitFlush.js';
+import { plural } from '@exam-anti-cheat/contracts';
 import { createVoiceReporter } from './voiceReporter.js';
 import type { ExamApi } from '../exam/api.js';
 
@@ -30,9 +32,11 @@ export function AudioPanel({
   const [device, setDevice] = useState('');
   const [error, setError] = useState('');
   const [monitorNote, setMonitorNote] = useState('');
+  const [skippedClips, setSkippedClips] = useState(0);
   useEffect(() => {
     setEnabled(false);
     setLog([]);
+    setSkippedClips(0);
   }, [attemptId]);
   useEffect(() => {
     // Restore the saved log after a reload. Duplicates of live lines are dropped by key.
@@ -93,11 +97,9 @@ export function AudioPanel({
             if (!cancelled) setStatus(text);
           },
           {
-            onSkipped: (at) => {
-              if (!cancelled)
-                setLog((previous) =>
-                  appendLine(previous, { at, kind: 'skipped', text: SKIPPED_TEXT }),
-                );
+            // One small status instead of a log line per skipped clip.
+            onSkipped: () => {
+              if (!cancelled) setSkippedClips((count) => count + 1);
             },
             onBusy: (value) => {
               if (!cancelled) setBusy(value);
@@ -144,7 +146,12 @@ export function AudioPanel({
         }
       }
     })();
+    const unregisterFlush = registerSubmitFlush(async () => {
+      voiceReporter?.stop();
+      await recorder?.flush?.(3000);
+    });
     return () => {
+      unregisterFlush();
       cancelled = true;
       setMicStream(null);
       setBusy(false);
@@ -183,6 +190,12 @@ export function AudioPanel({
         Three-second clips transcribed on this computer; a clip is skipped while the previous one is
         still being transcribed. Uses only the built-in laptop microphone.
       </p>
+      {skippedClips > 0 && enabled && active && (
+        <p className="muted transcript-skipped">
+          {plural(skippedClips, 'clip')} skipped so far while a previous clip was still being
+          transcribed.
+        </p>
+      )}
       <TranscriptLog lines={log} busy={busy && enabled && active} />
     </section>
   );

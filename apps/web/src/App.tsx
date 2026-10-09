@@ -304,6 +304,8 @@ function StudentWorkspace({
     setSelectedAssignment(null);
     setDelivery(null);
     setError(null);
+    // The attempt may have been submitted: show its real status, not the stale list.
+    void loadAssignments();
   }
 
   if (!preflightPassed) {

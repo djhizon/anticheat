@@ -64,3 +64,18 @@ it('shows each student score, summary and quoted phrases', async () => {
     'Unavailable',
   );
 });
+
+it('disables the check with a hint when the server has no Gemini keys', async () => {
+  const api: InstructorApi = {
+    listVersions: versions,
+    runSimilarity: vi.fn(),
+    runAiCheck: vi.fn(),
+    getCapabilities: async () => ({ gemini: false }),
+  };
+  await act(async () => root.render(<AiCheckDashboard api={api} />));
+  const button = [...container.querySelectorAll('button')].find(
+    (b) => b.textContent === 'Run AI check',
+  )!;
+  expect(button.disabled).toBe(true);
+  expect(container.textContent).toContain('Needs GEMINI_API_KEYS on the server');
+});

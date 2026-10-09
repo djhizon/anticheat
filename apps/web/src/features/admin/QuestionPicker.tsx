@@ -3,6 +3,9 @@ import type { InstructorExamVersion } from '@exam-anti-cheat/contracts/exam';
 
 import type { InstructorApi } from './api.js';
 
+/** Shown next to a check button that cannot run because Gemini is not configured. */
+export const NEEDS_GEMINI_HINT = 'Needs GEMINI_API_KEYS on the server';
+
 export interface PickedQuestion {
   readonly versionId: string;
   readonly questionId: string;
@@ -13,6 +16,21 @@ export function useInstructorQuestions(api: InstructorApi) {
   const [versions, setVersions] = useState<readonly InstructorExamVersion[] | null>(null);
   const [selection, setSelection] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Assume available until the server says otherwise, so a failed lookup never blocks a check.
+  const [geminiAvailable, setGeminiAvailable] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    api
+      .getCapabilities?.()
+      .then((capabilities) => {
+        if (active) setGeminiAvailable(capabilities.gemini);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [api]);
 
   useEffect(() => {
     let active = true;
@@ -35,7 +53,7 @@ export function useInstructorQuestions(api: InstructorApi) {
 
   const [versionId, questionId] = selection.split('|');
   const picked: PickedQuestion | null = versionId && questionId ? { versionId, questionId } : null;
-  return { versions, selection, setSelection, picked, loadError: error };
+  return { versions, selection, setSelection, picked, loadError: error, geminiAvailable };
 }
 
 export function QuestionPicker({

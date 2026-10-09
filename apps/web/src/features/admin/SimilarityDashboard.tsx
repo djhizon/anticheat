@@ -1,8 +1,9 @@
+import { plural } from '@exam-anti-cheat/contracts';
 import { useState } from 'react';
 import type { SimilarityRunResponse } from '@exam-anti-cheat/contracts/exam';
 
 import type { InstructorApi } from './api.js';
-import { QuestionPicker, useInstructorQuestions } from './QuestionPicker.js';
+import { NEEDS_GEMINI_HINT, QuestionPicker, useInstructorQuestions } from './QuestionPicker.js';
 
 /**
  * Instructor review of cross-student answer similarity. Answers are embedded
@@ -10,7 +11,8 @@ import { QuestionPicker, useInstructorQuestions } from './QuestionPicker.js';
  * read side by side — never an automatic penalty.
  */
 export function SimilarityDashboard({ api }: { readonly api: InstructorApi }) {
-  const { versions, selection, setSelection, picked, loadError } = useInstructorQuestions(api);
+  const { versions, selection, setSelection, picked, loadError, geminiAvailable } =
+    useInstructorQuestions(api);
   const [result, setResult] = useState<SimilarityRunResponse | null>(null);
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
@@ -56,11 +58,17 @@ export function SimilarityDashboard({ api }: { readonly api: InstructorApi }) {
           <button
             className="submit-button"
             type="button"
-            disabled={running || selection === ''}
+            disabled={running || selection === '' || !geminiAvailable}
+            aria-describedby={geminiAvailable ? undefined : 'similarity-needs-gemini'}
             onClick={() => void run()}
           >
             {running ? 'Comparing answers…' : 'Run similarity check'}
           </button>
+          {!geminiAvailable && (
+            <p id="similarity-needs-gemini" className="muted">
+              {NEEDS_GEMINI_HINT}
+            </p>
+          )}
         </div>
       )}
 
@@ -73,8 +81,8 @@ export function SimilarityDashboard({ api }: { readonly api: InstructorApi }) {
       {result !== null && (
         <div className="similarity-card" role="status">
           <p className="similarity-meta">
-            {result.report.pairs.length} pair{result.report.pairs.length === 1 ? '' : 's'} compared
-            · threshold {Math.round(result.report.threshold * 100)}% · {flagged.length} flagged ·{' '}
+            {plural(result.report.pairs.length, 'pair')} compared · threshold{' '}
+            {Math.round(result.report.threshold * 100)}% · {flagged.length} flagged ·{' '}
             {new Date(result.report.generatedAt).toLocaleString()}
           </p>
           {result.report.pairs.length === 0 ? (

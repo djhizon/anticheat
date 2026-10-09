@@ -122,12 +122,11 @@ it('appends transcripts in order, ignores empty text, shows skips and a shimmer'
   await act(async () => mocks.recorder!.onTranscript('   ', at + 1000));
   await act(async () => mocks.recorder!.hooks.onSkipped(at + 3000));
   await act(async () => mocks.recorder!.onTranscript('second', at + 6000));
-  expect(lines()).toEqual([
-    '01:02:03 — first',
-    '01:02:06 — (skipped while transcribing)',
-    '01:02:09 — second',
-    'transcribing…',
-  ]);
+  expect(lines()).toEqual(['01:02:03 — first', '01:02:09 — second', 'transcribing…']);
+  expect(container.querySelector('.transcript-skipped')?.textContent).toContain('1 clip skipped');
+  await act(async () => mocks.recorder!.hooks.onSkipped(at + 9000));
+  expect(container.querySelector('.transcript-skipped')?.textContent).toContain('2 clips skipped');
+  expect(lines().some((line) => line.includes('skipped'))).toBe(false);
   const log = container.querySelector('[role="log"]')!;
   expect(log.getAttribute('aria-live')).toBe('polite');
   expect(log.querySelector('.transcript-shimmer')).toBeNull();

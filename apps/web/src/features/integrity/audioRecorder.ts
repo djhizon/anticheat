@@ -4,6 +4,8 @@ import { recordingToWavBase64 } from './wavEncoder.js';
 
 /** Short clips keep the transcript feeling live. */
 export const CLIP_MS = 3000;
+/** A final clip shorter than this is not worth transcribing. */
+const MIN_FINAL_CLIP_MS = 1000;
 
 export function createAudioRecorder(
   attemptId: string,
@@ -22,6 +24,10 @@ export function createAudioRecorder(
   let active = false;
   let ownsStream = true;
   let upload: AbortController | null = null;
+  // flush(): the last clip is cut short and uploaded, and nothing new is started.
+  let finishing = false;
+  let pending: Promise<void> | null = null;
+  let finishedWaiter: (() => void) | null = null;
 
   function stop() {
     active = false;
@@ -63,22 +69,34 @@ export function createAudioRecorder(
       if (!active) return;
       // Recording is continuous: the next clip starts at once. Each clip is a
       // complete container; timeslice fragments are not independently decodable.
-      try {
-        capture();
-      } catch {
-        stop();
-        onStatus('Transcription recording failed. Restart the audio session.');
+      if (!finishing) {
+        try {
+          capture();
+        } catch {
+          stop();
+          onStatus('Transcription recording failed. Restart the audio session.');
+          return;
+        }
+      }
+      const clipMs = Math.min(CLIP_MS, Date.now() - capturedAt);
+      if (finishing && clipMs < MIN_FINAL_CLIP_MS) {
+        // Too short to transcribe: nothing worth sending.
+        void Promise.resolve(pending).then(() => finishedWaiter?.());
         return;
       }
       // Backpressure: never queue uploads behind the local model. A clip that
-      // finishes while another is in flight is dropped.
-      if (inFlight) {
+      // finishes while another is in flight is dropped (except the final one,
+      // which waits its turn so the end of the exam is not lost).
+      if (inFlight && !finishing) {
         hooks.onSkipped?.(capturedAt);
         return;
       }
+      const previous = pending;
+      const isFinal = finishing;
       inFlight = true;
       hooks.onBusy?.(true);
-      void (async () => {
+      const task = (async () => {
+        if (previous) await previous.catch(() => {});
         try {
           onStatus('Transcribing the last clip locally…');
           const base64 = await recordingToWavBase64(
@@ -91,7 +109,7 @@ export function createAudioRecorder(
           const response = await examApi.postAudio(
             attemptId,
             base64,
-            CLIP_MS,
+            finishing ? clipMs : CLIP_MS,
             controller.signal,
             new Date(capturedAt).toISOString(),
           );
@@ -117,11 +135,42 @@ export function createAudioRecorder(
           if (active) hooks.onBusy?.(false);
         }
       })();
+      pending = task;
+      void task.finally(() => {
+        if (pending === task) pending = null;
+        if (isFinal) finishedWaiter?.();
+      });
     };
     current.start();
     timer = setTimeout(() => {
       if (active && current.state !== 'inactive') current.stop();
     }, CLIP_MS);
+  }
+
+  /**
+   * Ends the current clip now and uploads it, waiting (at most `maxMs`) for it and any
+   * clip already uploading. Call before submit so the last seconds of audio are kept;
+   * `stop()` afterwards releases everything.
+   */
+  async function flush(maxMs = 3000): Promise<void> {
+    if (!active || finishing) return;
+    finishing = true;
+    if (timer) clearTimeout(timer);
+    timer = null;
+    const done = new Promise<void>((resolve) => {
+      finishedWaiter = resolve;
+    });
+    if (recorder && recorder.state !== 'inactive') recorder.stop();
+    else if (pending === null) return;
+    else void pending.finally(() => finishedWaiter?.());
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      done,
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, maxMs);
+      }),
+    ]);
+    clearTimeout(timeout);
   }
 
   async function start(shared?: MediaStream) {
@@ -143,7 +192,7 @@ export function createAudioRecorder(
       throw error;
     }
   }
-  return { start, stop };
+  return { start, stop, flush };
 }
 
 function blobToBase64(blob: Blob): Promise<string> {

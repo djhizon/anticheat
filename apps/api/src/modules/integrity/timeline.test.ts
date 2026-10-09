@@ -211,6 +211,37 @@ describe('buildTimeline', () => {
     expect(typing[0]?.data).toEqual({ keystrokes: 2, medianDwellMs: 90, medianFlightMs: 120 });
   });
 
+  it('never dates a keystroke summary before the attempt started', () => {
+    const entries = buildTimeline(
+      rows({
+        meta: { ...meta, startedAt: '2026-09-15T00:00:30.000Z' },
+        keystrokes: [
+          {
+            created_at: '2026-09-15T00:00:45.000Z',
+            question_version_id: 'q',
+            dwell_ms: 80,
+            flight_ms: 100,
+          },
+        ],
+      }),
+    );
+    const typing = entries.find((e) => e.kind === 'typing_rhythm')!;
+    expect(typing.at).toBe('2026-09-15T00:00:30.000Z');
+    expect(typing.summary).toContain('Typed 1 keystroke (');
+    expect(entries[0]?.kind).toBe('attempt_started');
+  });
+
+  it('uses singular wording for a count of one', () => {
+    const entries = buildTimeline(
+      rows({
+        revisions: [
+          { created_at: '2026-09-15T00:08:00.000Z', question_version_id: 'q1', word_count: 1 },
+        ],
+      }),
+    );
+    expect(entries.find((e) => e.kind === 'answer_saved')?.summary).toBe('Answer saved (1 word)');
+  });
+
   it('maps evidence snapshots to non-accusatory notices carrying only ids', () => {
     const entries = buildTimeline(
       rows({

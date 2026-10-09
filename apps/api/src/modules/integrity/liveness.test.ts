@@ -17,16 +17,32 @@ const lit = {
   blue: { r: 121, g: 102, b: 118 },
 };
 
+const score = (base: unknown, frames: unknown, faces: unknown = [true, true, true]) =>
+  scoreColourResponse(sequence, base, frames, faces);
+
 describe('scoreColourResponse', () => {
+  it('fails with the face message when no face was seen, even if colours shift', () => {
+    const frames = [lit.red, lit.green, lit.blue];
+    for (const faces of [[false, false, false], [true, false, false], null, [true]]) {
+      const result = score(baseline, frames, faces);
+      expect(result.passed).toBe(false);
+      expect(result.detail).toContain("We couldn't see your face");
+      expect(result.detail).not.toContain('dimmer');
+    }
+  });
+
+  it('passes with a face in two of three flashes, counting only those flashes', () => {
+    expect(score(baseline, [lit.red, lit.green, lit.blue], [true, true, false]).passed).toBe(true);
+    expect(score(baseline, [lit.red, lit.green, lit.blue], [true, false, true]).passed).toBe(true);
+  });
+
   it('passes when each flashed channel rises more than the others', () => {
-    expect(scoreColourResponse(sequence, baseline, [lit.red, lit.green, lit.blue]).passed).toBe(
-      true,
-    );
+    expect(score(baseline, [lit.red, lit.green, lit.blue]).passed).toBe(true);
   });
 
   it('passes when one flash is missed but two register', () => {
     const dud = { ...baseline };
-    expect(scoreColourResponse(sequence, baseline, [lit.red, dud, lit.blue]).passed).toBe(true);
+    expect(score(baseline, [lit.red, dud, lit.blue]).passed).toBe(true);
   });
 
   it('is fair on dark skin and dim rooms because it uses ratios', () => {
@@ -36,37 +52,35 @@ describe('scoreColourResponse', () => {
       { r: 30.5, g: 28, b: 18.4 },
       { r: 30.2, g: 22.4, b: 23.5 },
     ];
-    expect(scoreColourResponse(sequence, dark, frames).passed).toBe(true);
+    expect(score(dark, frames).passed).toBe(true);
   });
 
   it('fails when the colours arrive in the wrong order', () => {
-    const result = scoreColourResponse(sequence, baseline, [lit.blue, lit.red, lit.green]);
+    const result = score(baseline, [lit.blue, lit.red, lit.green]);
     expect(result.passed).toBe(false);
     expect(result.detail).toContain('head-turn');
   });
 
   it('fails on a flat feed', () => {
-    const result = scoreColourResponse(sequence, baseline, [baseline, baseline, baseline]);
+    const result = score(baseline, [baseline, baseline, baseline]);
     expect(result.passed).toBe(false);
     expect(result.detail).toContain('head-turn');
   });
 
   it('fails in a too-bright room where the sensor is saturated', () => {
     const blown = { r: 255, g: 255, b: 255 };
-    expect(scoreColourResponse(sequence, blown, [blown, blown, blown]).passed).toBe(false);
+    expect(score(blown, [blown, blown, blown]).passed).toBe(false);
   });
 
   it('fails when everything brightens equally (white light, not colours)', () => {
     const white = { r: 150, g: 130, b: 120 };
-    expect(scoreColourResponse(sequence, baseline, [white, white, white]).passed).toBe(false);
+    expect(score(baseline, [white, white, white]).passed).toBe(false);
   });
 
   it('rejects malformed readings', () => {
-    expect(scoreColourResponse(sequence, baseline, [lit.red]).passed).toBe(false);
-    expect(scoreColourResponse(sequence, null, [lit.red, lit.green, lit.blue]).passed).toBe(false);
-    expect(
-      scoreColourResponse(sequence, baseline, [lit.red, lit.green, { r: NaN, g: 0, b: 0 }]).passed,
-    ).toBe(false);
+    expect(score(baseline, [lit.red]).passed).toBe(false);
+    expect(score(null, [lit.red, lit.green, lit.blue]).passed).toBe(false);
+    expect(score(baseline, [lit.red, lit.green, { r: NaN, g: 0, b: 0 }]).passed).toBe(false);
   });
 });
 

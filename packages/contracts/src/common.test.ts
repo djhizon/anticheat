@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DomainError, SystemClock, problemFromError, type AuditEventInput } from './common.ts';
+import {
+  DomainError,
+  SystemClock,
+  plural,
+  problemFromError,
+  type AuditEventInput,
+} from './common.ts';
 
 test('SystemClock returns a valid current date', () => {
   const now = new SystemClock().now();
@@ -51,4 +57,12 @@ test('audit events have an explicit shape', () => {
 
   assert.equal(event.action, 'attempt.started');
   assert.equal(event.metadata?.source, 'server');
+});
+
+test('plural picks the singular only for exactly one', () => {
+  assert.equal(plural(1, 'word'), '1 word');
+  assert.equal(plural(0, 'word'), '0 words');
+  assert.equal(plural(2, 'check'), '2 checks');
+  assert.equal(plural(1, 'colour flash', 'colour flashes'), '1 colour flash');
+  assert.equal(plural(3, 'flash', 'flashes'), '3 flashes');
 });

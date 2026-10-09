@@ -1,3 +1,4 @@
+import { plural } from '@exam-anti-cheat/contracts';
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 
 export const CHALLENGE_TTL_MS = 90_000;
@@ -125,6 +126,8 @@ export const COLOUR_REQUIRED_FLASHES = 2;
 const BASELINE_FLOOR = 10;
 
 const COLOUR_RETRY_HINT = 'Try the head-turn check instead.';
+export const NO_FACE_DETAIL =
+  "We couldn't see your face — sit facing the camera and try again. " + COLOUR_RETRY_HINT;
 
 function validRgb(value: unknown): value is Rgb {
   if (typeof value !== 'object' || value === null) return false;
@@ -138,18 +141,29 @@ function validRgb(value: unknown): value is Rgb {
  * Scores the client's mean-RGB readings of the face region. Each frame is
  * compared with the baseline as a per-channel ratio, so the rule is the same
  * for dark and light skin and for dim and bright rooms: the flashed colour's
- * channel must rise more than the other two.
+ * channel must rise more than the other two. `faces` says, per flash, whether
+ * the on-device face detector saw a face; a pass needs one in at least 2 of 3
+ * flashes, and only those flashes can count as a hit. Without it a blank or
+ * looping feed that happens to shift colour would pass.
  */
 export function scoreColourResponse(
   sequence: readonly Colour[],
   baseline: unknown,
   frames: unknown,
+  faces?: unknown,
 ): VerifyResult {
   if (!validRgb(baseline) || !Array.isArray(frames) || frames.length !== sequence.length) {
     return { passed: false, detail: `Colour readings were incomplete. ${COLOUR_RETRY_HINT}` };
   }
   if (!frames.every(validRgb)) {
     return { passed: false, detail: `Colour readings were invalid. ${COLOUR_RETRY_HINT}` };
+  }
+  const faceSeen =
+    Array.isArray(faces) && faces.length === sequence.length
+      ? faces.map((face) => face === true)
+      : sequence.map(() => false);
+  if (faceSeen.filter(Boolean).length < COLOUR_REQUIRED_FLASHES) {
+    return { passed: false, detail: NO_FACE_DETAIL };
   }
   const channel: Record<Colour, 'r' | 'g' | 'b'> = { red: 'r', green: 'g', blue: 'b' };
   let hits = 0;
@@ -161,7 +175,11 @@ export function scoreColourResponse(
     const flashed = ratio(own);
     const others = (['r', 'g', 'b'] as const).filter((key) => key !== own).map(ratio);
     riseTotal += flashed - 1;
-    if (flashed - 1 >= COLOUR_MIN_RISE && others.every((o) => flashed - o >= COLOUR_MARGIN)) {
+    if (
+      faceSeen[index] &&
+      flashed - 1 >= COLOUR_MIN_RISE &&
+      others.every((o) => flashed - o >= COLOUR_MARGIN)
+    ) {
       hits += 1;
     }
   });
@@ -170,8 +188,8 @@ export function scoreColourResponse(
   return {
     passed,
     detail: passed
-      ? `Check passed (client-measured): screen colours matched on ${hits} of ${sequence.length} flashes`
-      : `Only ${hits} of ${sequence.length} colour flashes were reflected on your face. ` +
+      ? `Check passed (client-measured): screen colours matched on ${hits} of ${plural(sequence.length, 'flash', 'flashes')}`
+      : `Only ${hits} of ${plural(sequence.length, 'colour flash', 'colour flashes')} ${hits === 1 ? 'was' : 'were'} reflected on your face. ` +
         `Face the screen in a dimmer spot and retry. ${COLOUR_RETRY_HINT}`,
   };
 }
@@ -258,8 +276,8 @@ export function verifySpokenWords(words: readonly string[], transcript: string):
   return {
     passed,
     detail: passed
-      ? `Heard ${matched} of ${words.length} words — live person confirmed`
-      : `Heard ${matched} of ${words.length} words; at least ${SPOKEN_WORDS_REQUIRED} are needed`,
+      ? `Heard ${matched} of ${plural(words.length, 'word')} — live person confirmed`
+      : `Heard ${matched} of ${plural(words.length, 'word')}; at least ${SPOKEN_WORDS_REQUIRED} are needed`,
   };
 }
 

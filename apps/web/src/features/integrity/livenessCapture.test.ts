@@ -49,3 +49,17 @@ it('never selects OBS or phone-as-webcam virtual sources', () => {
     'FaceTime HD Camera',
   );
 });
+
+it('reads the colour from the inner half of the face box when one is given', () => {
+  // 10x10 image: a 4x4 "face" at (3,3) is rgb(200, 100, 50); everything else is black.
+  const pixels = new Uint8ClampedArray(10 * 10 * 4);
+  for (let y = 0; y < 10; y += 1) {
+    for (let x = 0; x < 10; x += 1) {
+      const face = x >= 3 && x < 7 && y >= 3 && y < 7;
+      pixels.set(face ? [200, 100, 50, 255] : [0, 0, 0, 255], (y * 10 + x) * 4);
+    }
+  }
+  const box = { x: 0.3, y: 0.3, w: 0.4, h: 0.4 };
+  expect(centreMeanRgb(pixels, 10, 10, box)).toEqual({ r: 200, g: 100, b: 50 });
+  expect(centreMeanRgb(pixels, 10, 10, { x: 0.95, y: 0.95, w: 0.2, h: 0.2 }).r).toBe(0);
+});

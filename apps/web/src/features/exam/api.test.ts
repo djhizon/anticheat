@@ -54,6 +54,44 @@ const delivery = {
   ],
 } as const;
 
+describe('CSRF handling', () => {
+  it('retries once with a refreshed token when a request is rejected with 403', async () => {
+    const tokens: Array<boolean | undefined> = [];
+    const sent: string[] = [];
+    const fetchImpl: FetchLike = async (_input, init) => {
+      const token = (init?.headers as Record<string, string>)['x-csrf-token']!;
+      sent.push(token);
+      return token === 'fresh' ? jsonResponse({ ok: true }) : new Response(null, { status: 403 });
+    };
+    const api = createExamApi(
+      '',
+      async (refresh) => {
+        tokens.push(refresh);
+        return refresh ? 'fresh' : 'stale';
+      },
+      fetchImpl,
+    );
+    await expect(api.patchEvents('attempt', { event: 'x' })).resolves.toEqual({ ok: true });
+    await expect(api.uploadTelemetry('attempt', { gaze: [] })).resolves.toBeUndefined();
+    expect(sent).toEqual(['stale', 'fresh', 'stale', 'fresh']);
+    expect(tokens).toEqual([undefined, true, undefined, true]);
+  });
+
+  it('does not loop when the retry is also rejected', async () => {
+    let calls = 0;
+    const api = createExamApi(
+      '',
+      async () => 'token',
+      async () => {
+        calls += 1;
+        return new Response(null, { status: 403 });
+      },
+    );
+    await expect(api.patchEvents('attempt', {})).rejects.toBeInstanceOf(ExamApiError);
+    expect(calls).toBe(2);
+  });
+});
+
 describe('browser exam API boundary', () => {
   it('uses CSRF for native pairing and validates phone status before granting access', async () => {
     const calls: Array<{ input: RequestInfo | URL; init: RequestInit | undefined }> = [];

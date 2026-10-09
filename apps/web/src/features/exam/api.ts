@@ -40,7 +40,8 @@ export class ExamApiError extends Error {
   }
 }
 
-export type CsrfTokenProvider = () => Promise<string>;
+/** Pass `true` after a 403 to fetch a fresh token instead of the cached one. */
+export type CsrfTokenProvider = (refresh?: boolean) => Promise<string>;
 
 export interface LivenessChallenge {
   readonly nonce: string;
@@ -299,6 +300,8 @@ export interface ExamApi {
   getTranscript?(attemptId: string): Promise<readonly TranscriptEntry[]>;
   /** Unified chronological integrity log (same data the instructor sees). */
   getTimeline?(attemptId: string): Promise<readonly IntegrityTimelineEntry[]>;
+  /** Resolves once in-flight telemetry/event/audio uploads settle (bounded by `maxMs`). */
+  whenIdle?(maxMs?: number): Promise<void>;
   downloadTimeline?(attemptId: string, format: TimelineFormat): Promise<void>;
   /** Triggered still snapshots (see features/evidence). */
   postEvidence?(attemptId: string, request: EvidenceUploadRequest): Promise<void>;
@@ -470,7 +473,17 @@ export class BrowserExamApi implements ExamApi {
     return { passed: body.passed, layer: body.layer, detail: body.detail };
   }
 
-  async postAudio(
+  postAudio(
+    attemptId: string,
+    audioBase64: string,
+    durationMs: number,
+    signal?: AbortSignal,
+    capturedAt?: string,
+  ): Promise<{ readonly transcript?: unknown }> {
+    return this.track(this.sendAudio(attemptId, audioBase64, durationMs, signal, capturedAt));
+  }
+
+  private async sendAudio(
     attemptId: string,
     audioBase64: string,
     durationMs: number,
@@ -483,16 +496,14 @@ export class BrowserExamApi implements ExamApi {
     if (signal?.aborted) cancel();
     const timeout = setTimeout(cancel, 50000); // 15s conversion + 30s inference + transport.
     try {
-      const token = await this.csrfTokenProvider();
-      const response = await this.fetchImpl(
-        `${this.baseUrl}/exam/attempts/${encodeURIComponent(attemptId)}/audio`,
-        {
+      const response = await this.sendWithCsrf((token) =>
+        this.fetchImpl(`${this.baseUrl}/exam/attempts/${encodeURIComponent(attemptId)}/audio`, {
           method: 'POST',
           signal: controller.signal,
           headers: { 'content-type': 'application/json', 'x-csrf-token': token },
           body: JSON.stringify({ audio: audioBase64, durationMs, capturedAt }),
           credentials: 'include',
-        },
+        }),
       );
       if (!response.ok) {
         if (response.status === 503) {
@@ -608,17 +619,22 @@ export class BrowserExamApi implements ExamApi {
     return { token: body.token, qrData: body.qrData, expiresAt: body.expiresAt };
   }
 
-  async patchEvents(attemptId: string, body: Record<string, unknown>): Promise<unknown> {
+  patchEvents(attemptId: string, body: Record<string, unknown>): Promise<unknown> {
+    return this.track(this.sendPatchEvents(attemptId, body));
+  }
+
+  private async sendPatchEvents(
+    attemptId: string,
+    body: Record<string, unknown>,
+  ): Promise<unknown> {
     // Note: patch is not naturally supported by request method, so we make a direct call
-    const token = await this.csrfTokenProvider();
-    const response = await this.fetchImpl(
-      `${this.baseUrl}/exam/attempts/${encodeURIComponent(attemptId)}/events`,
-      {
+    const response = await this.sendWithCsrf((token) =>
+      this.fetchImpl(`${this.baseUrl}/exam/attempts/${encodeURIComponent(attemptId)}/events`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json', 'x-csrf-token': token },
         body: JSON.stringify(body),
         credentials: 'include',
-      },
+      }),
     );
     if (!response.ok) throw new ExamApiError(safeProblems[response.status] ?? fallbackProblem);
     return response.json();
@@ -628,7 +644,11 @@ export class BrowserExamApi implements ExamApi {
     await this.request('/exam/speedtest', 'POST', { data: dummyData }, true);
   }
 
-  async uploadTelemetry(attemptId: string, payload: unknown): Promise<void> {
+  uploadTelemetry(attemptId: string, payload: unknown): Promise<void> {
+    return this.track(this.sendTelemetry(attemptId, payload));
+  }
+
+  private async sendTelemetry(attemptId: string, payload: unknown): Promise<void> {
     await this.request(
       `/exam/attempts/${encodeURIComponent(attemptId)}/telemetry`,
       'POST',
@@ -673,6 +693,7 @@ export class BrowserExamApi implements ExamApi {
   }
 
   async getTransparencyReport(attemptId: string): Promise<readonly TransparencyEvent[]> {
+    await this.whenIdle();
     const body = await this.request(
       `/exam/attempts/${encodeURIComponent(attemptId)}/transparency`,
       'GET',
@@ -707,6 +728,7 @@ export class BrowserExamApi implements ExamApi {
   }
 
   async getTranscript(attemptId: string): Promise<readonly TranscriptEntry[]> {
+    await this.whenIdle();
     const body = await this.request(
       `/exam/attempts/${encodeURIComponent(attemptId)}/transcript`,
       'GET',
@@ -719,6 +741,7 @@ export class BrowserExamApi implements ExamApi {
   }
 
   async getTimeline(attemptId: string): Promise<readonly IntegrityTimelineEntry[]> {
+    await this.whenIdle();
     const body = await this.request(
       `/exam/attempts/${encodeURIComponent(attemptId)}/timeline`,
       'GET',
@@ -745,6 +768,35 @@ export class BrowserExamApi implements ExamApi {
     return sanitizeDelivery(body.delivery);
   }
 
+  private readonly inflight = new Set<Promise<unknown>>();
+
+  /** Remembers a telemetry/events/audio upload so reads can wait for it (see whenIdle). */
+  private track<T>(promise: Promise<T>): Promise<T> {
+    this.inflight.add(promise);
+    const done = () => void this.inflight.delete(promise);
+    promise.then(done, done);
+    return promise;
+  }
+
+  /** Resolves when pending uploads have settled, or after `maxMs`, whichever is first. */
+  async whenIdle(maxMs = 3000): Promise<void> {
+    if (this.inflight.size === 0) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, maxMs);
+    });
+    const settled = Promise.allSettled([...this.inflight]).then(() => undefined);
+    await Promise.race([settled, timeout]);
+    clearTimeout(timer);
+  }
+
+  /** Sends with the cached CSRF token; one 403 retries with a fresh token (it may have rotated). */
+  private async sendWithCsrf(send: (token: string) => Promise<Response>): Promise<Response> {
+    const response = await send(await this.csrfTokenProvider());
+    if (response.status !== 403) return response;
+    return send(await this.csrfTokenProvider(true));
+  }
+
   private async request(
     path: string,
     method: 'GET' | 'POST' | 'PUT',
@@ -756,10 +808,6 @@ export class BrowserExamApi implements ExamApi {
     if (body !== undefined) {
       headers['content-type'] = 'application/json';
     }
-    if (unsafe) {
-      headers['x-csrf-token'] = await this.csrfTokenProvider();
-    }
-
     const init: RequestInit = {
       credentials: 'include',
       headers,
@@ -769,7 +817,14 @@ export class BrowserExamApi implements ExamApi {
     if (body !== undefined) {
       init.body = JSON.stringify(body);
     }
-    const response = await this.fetchImpl(`${this.baseUrl}${path}`, init);
+    const response = unsafe
+      ? await this.sendWithCsrf((token) =>
+          this.fetchImpl(`${this.baseUrl}${path}`, {
+            ...init,
+            headers: { ...headers, 'x-csrf-token': token },
+          }),
+        )
+      : await this.fetchImpl(`${this.baseUrl}${path}`, init);
     if (!response.ok) {
       throw new ExamApiError(safeProblems[response.status] ?? fallbackProblem, response.status);
     }

@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -23,7 +24,8 @@ import {
 export interface AuthContextValue {
   readonly user: AuthUser | null;
   readonly loading: boolean;
-  getCsrfToken(): Promise<string>;
+  /** Cached per session; pass `true` to fetch a fresh one (each fetch rotates the server's token). */
+  getCsrfToken(refresh?: boolean): Promise<string>;
   login(input: CredentialsInput): Promise<AuthSessionResponse>;
   register(input: CredentialsInput): Promise<RegisterResponse>;
   forgotPassword(email: string): Promise<void>;
@@ -55,6 +57,9 @@ export function AuthProvider({ children, api }: AuthProviderProps): ReactNode {
   const authApi = useMemo(() => api ?? createAuthApi(), [api]);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  // GET /auth/csrf rotates the session token, so concurrent callers must share one
+  // fetch and reuse its result or they invalidate each other's token (403).
+  const csrf = useRef<{ token?: string; pending?: Promise<string> }>({});
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -71,6 +76,7 @@ export function AuthProvider({ children, api }: AuthProviderProps): ReactNode {
 
   const login = useCallback(
     async (input: CredentialsInput): Promise<AuthSessionResponse> => {
+      csrf.current = {};
       const session = await authApi.login(input);
       setUser(session.user);
       return session;
@@ -80,6 +86,7 @@ export function AuthProvider({ children, api }: AuthProviderProps): ReactNode {
 
   const register = useCallback(
     async (input: CredentialsInput): Promise<RegisterResponse> => {
+      csrf.current = {};
       const result = await authApi.register(input);
       if ('user' in result) {
         setUser(result.user);
@@ -99,6 +106,7 @@ export function AuthProvider({ children, api }: AuthProviderProps): ReactNode {
       readonly tokenHash: string;
       readonly type: ConfirmLinkType;
     }): Promise<ConfirmResponse> => {
+      csrf.current = {};
       const result = await authApi.confirm(input);
       if ('user' in result) {
         setUser(result.user);
@@ -127,12 +135,29 @@ export function AuthProvider({ children, api }: AuthProviderProps): ReactNode {
 
   const logout = useCallback(async (): Promise<void> => {
     await authApi.logout();
+    csrf.current = {};
     setUser(null);
   }, [authApi]);
 
-  const getCsrfToken = useCallback(async (): Promise<string> => {
-    return (await authApi.getCsrf()).csrfToken;
-  }, [authApi]);
+  const getCsrfToken = useCallback(
+    (refresh = false): Promise<string> => {
+      const state = csrf.current;
+      if (!refresh && state.token !== undefined) return Promise.resolve(state.token);
+      if (state.pending !== undefined) return state.pending;
+      const pending = authApi
+        .getCsrf()
+        .then(({ csrfToken }) => {
+          if (csrf.current === state) state.token = csrfToken;
+          return csrfToken;
+        })
+        .finally(() => {
+          if (state.pending === pending) delete state.pending;
+        });
+      state.pending = pending;
+      return pending;
+    },
+    [authApi],
+  );
 
   const contextValue = useMemo<AuthContextValue>(
     () => ({

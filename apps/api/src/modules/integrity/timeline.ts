@@ -1,3 +1,4 @@
+import { plural } from '@exam-anti-cheat/contracts';
 import type {
   IntegrityTimelineEntry,
   IntegrityTimelineSeverity,
@@ -375,7 +376,7 @@ function livenessEntry(row: TimelineRows['liveness'][number]): Entry | null {
 }
 
 /** Per-minute typing-rhythm summaries so the log is not one row per keystroke. */
-function keystrokeEntries(rows: TimelineRows['keystrokes']): Entry[] {
+function keystrokeEntries(rows: TimelineRows['keystrokes'], attemptStart: string | null): Entry[] {
   const buckets = new Map<string, { at: string; dwell: number[]; flight: number[] }>();
   for (const row of rows) {
     const at = iso(row.created_at);
@@ -393,13 +394,15 @@ function keystrokeEntries(rows: TimelineRows['keystrokes']): Entry[] {
       sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2,
     );
   };
+  // Buckets are keyed by the minute, so the first one can begin before the attempt did.
+  const floor = attemptStart === null ? Number.NEGATIVE_INFINITY : Date.parse(attemptStart);
   return [...buckets.values()].map((bucket) =>
     entry(
-      bucket.at,
+      Date.parse(bucket.at) < floor ? (attemptStart as string) : bucket.at,
       'keyboard',
       'typing_rhythm',
       'info',
-      `Typed ${bucket.dwell.length} keystrokes (median hold ${median(bucket.dwell)} ms, median gap ${median(bucket.flight)} ms)`,
+      `Typed ${plural(bucket.dwell.length, 'keystroke')} (median hold ${median(bucket.dwell)} ms, median gap ${median(bucket.flight)} ms)`,
       {
         keystrokes: bucket.dwell.length,
         medianDwellMs: median(bucket.dwell),
@@ -422,7 +425,7 @@ function inputEntries(rows: TimelineRows['input']): Entry[] {
     const at = iso(row.window_start);
     if (at === null) continue;
     if (row.pointer_outside_ms >= OUTSIDE_LISTED_MS) {
-      const times = row.pointer_leaves > 1 ? ` (${row.pointer_leaves} times)` : '';
+      const times = row.pointer_leaves > 1 ? ` (${plural(row.pointer_leaves, 'time')})` : '';
       out.push(
         entry(
           at,
@@ -474,8 +477,8 @@ function revisionEntries(rows: TimelineRows['revisions']): Entry[] {
         large ? 'answer_large_addition' : 'answer_saved',
         large ? 'notice' : 'info',
         large
-          ? `Answer grew by ${added} words in one save (now ${row.word_count} words)`
-          : `Answer saved (${row.word_count} words)`,
+          ? `Answer grew by ${plural(added, 'word')} in one save (now ${plural(row.word_count, 'word')})`
+          : `Answer saved (${plural(row.word_count, 'word')})`,
         { questionId: row.question_version_id, wordCount: row.word_count, wordsAdded: added },
       ),
     );
@@ -564,7 +567,7 @@ export function buildTimeline(rows: TimelineRows): IntegrityTimelineEntry[] {
   for (const row of rows.gaze) push(gazeEntry(row));
   for (const row of rows.apps) push(appEntry(row));
   for (const row of rows.liveness) push(livenessEntry(row));
-  out.push(...keystrokeEntries(rows.keystrokes));
+  out.push(...keystrokeEntries(rows.keystrokes, iso(meta.startedAt)));
   out.push(...inputEntries(rows.input));
   out.push(...revisionEntries(rows.revisions));
 

@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import type { ExamApi } from '../exam/api.js';
-import { CHECK_TIMEOUT_MS, LivenessModal, NOT_VERIFIED_COPY } from './LivenessModal.js';
+import { HEAD_TURN_TIMEOUT_MS, LivenessModal, NOT_VERIFIED_COPY } from './LivenessModal.js';
 
 const mocks = vi.hoisted(() => ({ flash: vi.fn() }));
 vi.mock('./livenessCapture.js', async (original) => ({
@@ -56,7 +56,7 @@ it('moves to an error state with Close available when the capture hangs', async 
   await act(async () => buttons('Start')!.click());
   expect(container.textContent).toContain('Warning');
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(CHECK_TIMEOUT_MS + 10);
+    await vi.advanceTimersByTimeAsync(HEAD_TURN_TIMEOUT_MS + 10);
   });
   expect(container.textContent).toContain(NOT_VERIFIED_COPY);
   expect(container.textContent).toContain('took too long');

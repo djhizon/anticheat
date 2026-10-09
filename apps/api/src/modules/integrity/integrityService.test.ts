@@ -44,6 +44,7 @@ function sign(type: string, data: string) {
 }
 
 const colourPayload = {
+  faces: [true, true, true],
   baseline: { r: 120, g: 100, b: 90 },
   frames: [
     { r: 150, g: 103, b: 91 },
@@ -132,6 +133,7 @@ it('scores a colour flash from the measured readings', async () => {
   const flatPayload = {
     baseline: colourPayload.baseline,
     frames: [colourPayload.baseline, colourPayload.baseline, colourPayload.baseline],
+    faces: [true, true, true],
   };
   const flat = await service(repoFor(colourData)).verifyLiveness(
     'a',

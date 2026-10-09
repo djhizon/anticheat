@@ -2,6 +2,7 @@ import type {
   AiCheckRunResponse,
   InstructorAttemptSummary,
   InstructorExamVersion,
+  InstructorCapabilities,
   IntegrityTimelineEntry,
   SimilarityRunResponse,
 } from '@exam-anti-cheat/contracts/exam';
@@ -20,6 +21,8 @@ export interface InstructorApi {
   listVersions(): Promise<readonly InstructorExamVersion[]>;
   runSimilarity(versionId: string, questionId: string): Promise<SimilarityRunResponse>;
   runAiCheck(versionId: string, questionId: string): Promise<AiCheckRunResponse>;
+  /** Optional so older callers keep working; absent means "assume everything is available". */
+  getCapabilities?(): Promise<InstructorCapabilities>;
 }
 
 /** Attempt list plus the unified integrity log, used by the per-attempt review panel. */
@@ -82,6 +85,12 @@ export function createInstructorApi(
       } catch {
         throw new InstructorApiError('The log could not be downloaded.');
       }
+    },
+    async getCapabilities() {
+      const body = await request('/exam/instructor/capabilities', 'GET');
+      if (!isRecord(body) || typeof body.gemini !== 'boolean')
+        throw new InstructorApiError('Unexpected response.');
+      return { gemini: body.gemini };
     },
     async listVersions() {
       const body = await request('/exam/instructor/versions', 'GET');

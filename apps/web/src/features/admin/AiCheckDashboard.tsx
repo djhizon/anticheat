@@ -1,8 +1,9 @@
+import { plural } from '@exam-anti-cheat/contracts';
 import { useState } from 'react';
 import type { AiCheckRunResponse } from '@exam-anti-cheat/contracts/exam';
 
 import type { InstructorApi } from './api.js';
-import { QuestionPicker, useInstructorQuestions } from './QuestionPicker.js';
+import { NEEDS_GEMINI_HINT, QuestionPicker, useInstructorQuestions } from './QuestionPicker.js';
 
 const HIGH = 0.7;
 const MEDIUM = 0.4;
@@ -17,7 +18,8 @@ function band(score: number): 'high' | 'medium' | 'low' {
  * judge for themselves. Scores are leads for a conversation, never penalties.
  */
 export function AiCheckDashboard({ api }: { readonly api: InstructorApi }) {
-  const { versions, selection, setSelection, picked, loadError } = useInstructorQuestions(api);
+  const { versions, selection, setSelection, picked, loadError, geminiAvailable } =
+    useInstructorQuestions(api);
   const [result, setResult] = useState<AiCheckRunResponse | null>(null);
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
@@ -60,11 +62,17 @@ export function AiCheckDashboard({ api }: { readonly api: InstructorApi }) {
           <button
             className="submit-button"
             type="button"
-            disabled={running || picked === null}
+            disabled={running || picked === null || !geminiAvailable}
+            aria-describedby={geminiAvailable ? undefined : 'ai-check-needs-gemini'}
             onClick={() => void run()}
           >
             {running ? 'Checking answers…' : 'Run AI check'}
           </button>
+          {!geminiAvailable && (
+            <p id="ai-check-needs-gemini" className="muted">
+              {NEEDS_GEMINI_HINT}
+            </p>
+          )}
         </div>
       )}
 
@@ -77,7 +85,7 @@ export function AiCheckDashboard({ api }: { readonly api: InstructorApi }) {
       {result !== null && (
         <div role="status">
           <p className="similarity-meta">
-            {result.results.length} answer{result.results.length === 1 ? '' : 's'} checked ·{' '}
+            {plural(result.results.length, 'answer')} checked ·{' '}
             {new Date(result.checkedAt).toLocaleString()}
             {result.truncated && ' · only the first 30 answers were checked'}
           </p>

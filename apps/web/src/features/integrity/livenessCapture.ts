@@ -1,11 +1,21 @@
 import type { LivenessColour, LivenessRgb } from '@exam-anti-cheat/contracts/exam';
 
+import type { Box } from './gazeEstimator.js';
 import { acquirePhysicalCamera } from './physicalCamera.js';
 
 export interface ColourEvidence {
   readonly cameraLabel: string;
   readonly baseline: LivenessRgb;
+  /** Mean RGB of the face region (centre of the frame when no face box) per flash. */
   readonly frames: readonly LivenessRgb[];
+  /** Whether a single face was detected on-device during each flash. */
+  readonly faces: readonly boolean[];
+}
+
+/** Resolves the face box of the current video frame, or null when no (single) face is seen. */
+export interface FaceSource {
+  face(): Promise<Box | null>;
+  close(): void;
 }
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -48,16 +58,29 @@ export function meanLuminance(pixels: Uint8ClampedArray): number {
   return count === 0 ? 0 : total / count;
 }
 
-/** Mean RGB of the centre 50% (by width and height) of an RGBA image. */
+/**
+ * Mean RGB of the centre 50% (by width and height) of an RGBA image, or of the
+ * inner half of `box` (normalised 0..1, the detected face) when given, so the
+ * reading is taken on skin rather than on the background.
+ */
 export function centreMeanRgb(
   pixels: Uint8ClampedArray,
   width: number,
   height: number,
+  box?: Box | null,
 ): LivenessRgb {
-  const x0 = Math.floor(width * 0.25);
-  const x1 = Math.ceil(width * 0.75);
-  const y0 = Math.floor(height * 0.25);
-  const y1 = Math.ceil(height * 0.75);
+  const region = box
+    ? {
+        x: box.x + box.w * 0.25,
+        y: box.y + box.h * 0.25,
+        w: box.w * 0.5,
+        h: box.h * 0.5,
+      }
+    : { x: 0.25, y: 0.25, w: 0.5, h: 0.5 };
+  const x0 = Math.max(0, Math.floor(width * region.x));
+  const x1 = Math.min(width, Math.max(x0 + 1, Math.ceil(width * (region.x + region.w))));
+  const y0 = Math.max(0, Math.floor(height * region.y));
+  const y1 = Math.min(height, Math.max(y0 + 1, Math.ceil(height * (region.y + region.h))));
   let r = 0;
   let g = 0;
   let b = 0;
@@ -76,7 +99,7 @@ export function centreMeanRgb(
   return { r: round(r), g: round(g), b: round(b) };
 }
 
-function grab(video: HTMLVideoElement): LivenessRgb {
+function grab(video: HTMLVideoElement, box?: Box | null): LivenessRgb {
   const canvas = document.createElement('canvas');
   canvas.width = video.videoWidth || 640;
   canvas.height = video.videoHeight || 480;
@@ -84,7 +107,17 @@ function grab(video: HTMLVideoElement): LivenessRgb {
   if (!context) throw new Error('Camera frames cannot be read in this browser.');
   context.drawImage(video, 0, 0, canvas.width, canvas.height);
   const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
-  return centreMeanRgb(data, canvas.width, canvas.height);
+  return centreMeanRgb(data, canvas.width, canvas.height, box);
+}
+
+/** Opens the app's MediaPipe face model (imported lazily: headTurn imports this module). */
+async function openFaceSource(video: HTMLVideoElement): Promise<FaceSource> {
+  const { createWorkerPoseSource } = await import('./headTurn.js');
+  const source = await createWorkerPoseSource(video);
+  return {
+    face: async () => (await source.observe())?.faceBox ?? null,
+    close: () => source.close(),
+  };
 }
 
 async function openVideo(stream: MediaStream): Promise<HTMLVideoElement> {
@@ -119,13 +152,18 @@ export async function captureColourFlash(
   sequence: readonly LivenessColour[],
   acquire: () => Promise<MediaStream> = acquirePhysicalCamera,
   signal?: AbortSignal,
+  openFace: (video: HTMLVideoElement) => Promise<FaceSource> = openFaceSource,
 ): Promise<ColourEvidence> {
   const stream = await acquireUnlessAborted(acquire, signal);
   let video: HTMLVideoElement | null = null;
+  let faceSource: FaceSource | null = null;
   const overlay = document.createElement('div');
   overlay.setAttribute('aria-hidden', 'true');
   try {
     video = await openVideo(stream);
+    // Load the face model before any flashing starts so the sequence timing is unaffected.
+    faceSource = await openFace(video);
+    throwIfAborted(signal);
     await wait(600); // let auto-exposure settle
     throwIfAborted(signal);
     const cameraLabel = stream.getVideoTracks()[0]?.label ?? '';
@@ -136,6 +174,7 @@ export async function captureColourFlash(
     throwIfAborted(signal);
     const baseline = grab(video);
     const frames: LivenessRgb[] = [];
+    const faces: boolean[] = [];
     for (const colour of sequence) {
       throwIfAborted(signal);
       overlay.style.background = '#808080';
@@ -143,11 +182,14 @@ export async function captureColourFlash(
       overlay.style.background = FLASH_CSS[colour];
       await wait(FLASH_MS);
       throwIfAborted(signal);
-      frames.push(grab(video));
+      const box = await faceSource.face();
+      faces.push(box !== null);
+      frames.push(grab(video, box));
     }
-    return { cameraLabel, baseline, frames };
+    return { cameraLabel, baseline, frames, faces };
   } finally {
     overlay.remove();
+    faceSource?.close();
     if (video) video.srcObject = null;
     stream.getTracks().forEach((track) => track.stop());
   }

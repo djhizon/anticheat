@@ -71,3 +71,24 @@ it('shows a clear error when the check cannot run', async () => {
   await act(async () => [...container.querySelectorAll('button')].at(-1)!.click());
   expect(container.querySelector('[role="alert"]')?.textContent).toContain('GEMINI_API_KEYS');
 });
+
+it('disables the check with a hint when the server has no Gemini keys', async () => {
+  const api: InstructorApi = {
+    listVersions: async () => [
+      {
+        id: 'v1',
+        title: 'T',
+        versionNumber: 1,
+        questions: [{ id: 'q1', prompt: 'P', type: 'short_answer' }],
+      },
+    ],
+    runAiCheck: vi.fn(),
+    runSimilarity: vi.fn(),
+    getCapabilities: async () => ({ gemini: false }),
+  };
+  await act(async () => root.render(<SimilarityDashboard api={api} />));
+  const button = [...container.querySelectorAll('button')].at(-1)!;
+  expect(button.textContent).toBe('Run similarity check');
+  expect(button.disabled).toBe(true);
+  expect(container.textContent).toContain('Needs GEMINI_API_KEYS on the server');
+});

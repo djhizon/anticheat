@@ -70,6 +70,7 @@ const enrollPhonePattern = /^\/exam\/attempts\/([^/]+)\/enroll-phone$/u;
 const phoneStatusPattern = /^\/exam\/attempts\/([^/]+)\/phone-status$/u;
 const timelinePattern = /^\/exam\/attempts\/([^/]+)\/timeline$/u;
 const instructorAttemptsPath = '/exam/instructor/attempts';
+const instructorCapabilitiesPath = '/exam/instructor/capabilities';
 const evidenceListPattern = /^\/exam\/attempts\/([^/]+)\/evidence$/u;
 const evidenceItemPattern = /^\/exam\/attempts\/([^/]+)\/evidence\/([^/]+)$/u;
 /** Base64 of a 300 KB JPEG is ~400 K characters; reject anything bigger before decoding. */
@@ -174,6 +175,7 @@ function isExamPath(path: string): boolean {
     path === visionStatusPath ||
     path === instructorVersionsPath ||
     path === instructorAttemptsPath ||
+    path === instructorCapabilitiesPath ||
     timelinePattern.test(path) ||
     similarityPattern.test(path) ||
     instructorAiCheckPattern.test(path) ||
@@ -692,6 +694,14 @@ export class ExamRoutes {
           parsePathId<'AttemptId'>(evidenceListMatch[1] ?? '', 'Attempt ID'),
           this.integrity,
         );
+      }
+
+      // ── Instructor: what this server can do (Gemini configured?) ──────────
+      if (method === 'GET' && path === instructorCapabilitiesPath && this.integrity !== null) {
+        this.requireInstructor(request);
+        return jsonResponse(request, this.config.allowedOrigins, 200, {
+          gemini: this.integrity.geminiAvailable,
+        });
       }
 
       // ── Instructor: cross-student similarity review ───────────────────────

@@ -1355,9 +1355,30 @@ describe('exam delivery boundary', () => {
       questions: expect.arrayContaining([expect.objectContaining({ id: shortAnswerId })]),
     });
 
+    const capabilities = await routes.handle(
+      studentRequest(instructor, 'GET', '/exam/instructor/capabilities'),
+    );
+    expect(capabilities).toMatchObject({ status: 200, body: { gemini: true } });
+    const withoutGemini = new ExamRoutes(
+      exam.service,
+      auth.boundary,
+      config,
+      new IntegrityService(new IntegrityRepository(auth.database), null),
+    );
+    expect(
+      (
+        await withoutGemini.handle(
+          studentRequest(instructor, 'GET', '/exam/instructor/capabilities'),
+        )
+      ).body,
+    ).toEqual({ gemini: false });
+
     const path = `/exam/instructor/versions/${seeded.examVersionId}/questions/${shortAnswerId}/similarity`;
     const student = await registerStudent('curious@example.test');
     expect((await routes.handle(studentRequest(student, 'POST', path))).status).toBe(403);
+    expect(
+      (await routes.handle(studentRequest(student, 'GET', '/exam/instructor/capabilities'))).status,
+    ).toBe(403);
     const run = await routes.handle(studentRequest(instructor, 'POST', path));
     expect(run.status).toBe(200);
     const body = run.body as {
