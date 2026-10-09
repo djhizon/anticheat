@@ -20,7 +20,9 @@ checklist under **"Existing code and assets"**.
 >
 > AI development tools: Claude Code (Anthropic) was used throughout the
 > hackathon for planning, implementation, tests, code review and docs, with every
-> change reviewed and committed incrementally in the public history.
+> change reviewed and committed incrementally in the public history. Devin
+> (Cognition) wrote one small change (the optional iPhone toolchain checks in
+> `npm run doctor`), committed under its own author name.
 
 ## AI development tools
 
@@ -29,6 +31,10 @@ checklist under **"Existing code and assets"**.
   and security reviews, and documentation. Work was split into small packages,
   each validated (format, lint, typecheck, tests) and committed separately, so
   every AI-assisted change is visible in `git log` and `CHANGELOG.md`.
+
+- **Devin (Cognition)** — used once through the Devin CLI for a small, self-contained
+  change: the optional iPhone toolchain checks in `npm run doctor`. Its commit is
+  authored by Devin; the change was reviewed and its tests run before merging.
 
 ## Pre-existing (before the hackathon)
 
