@@ -373,6 +373,20 @@ ipcMain.handle('close-app-target', (event, request: unknown) => {
 // inspecting or signalling processes: display names are not safe PID identities.
 ipcMain.handle('kill-app', () => false);
 
+/**
+ * macOS content protection hides the window from every screen capture (other apps, QuickTime, and
+ * the exam's own recording). Strict mode keeps it so students cannot record the questions; Demo
+ * mode turns it off so demo footage and the evidence recording show the exam window as it is.
+ */
+export function contentProtectionFor(mode: RunMode): boolean {
+  return mode === 'strict';
+}
+
+function applyContentProtection(): void {
+  if (mainWindow && !mainWindow.isDestroyed())
+    mainWindow.setContentProtection(contentProtectionFor(runMode));
+}
+
 export async function switchRunMode(target: RunMode): Promise<void> {
   const plan = planModeSwitch(runMode, target);
   if (!plan.change) return;
@@ -399,6 +413,7 @@ export async function switchRunMode(target: RunMode): Promise<void> {
     if (response.response !== 1) return;
   }
   runMode = target;
+  applyContentProtection();
   if (persistRunMode(judgeBuild)) {
     try {
       writeRunMode(app.getPath('userData'), runMode);
@@ -483,7 +498,7 @@ export async function createWindow(): Promise<void> {
 
   mainWindow.maximize();
 
-  mainWindow.setContentProtection(true);
+  applyContentProtection();
 
   // Never open extra windows (target=_blank, window.open); they would escape the exam shell.
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

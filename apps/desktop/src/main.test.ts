@@ -710,3 +710,9 @@ describe('native window recovery', () => {
     });
   });
 });
+
+it('hides the window from screen capture only in Strict mode', async () => {
+  const { contentProtectionFor } = await import('./main');
+  expect(contentProtectionFor('strict')).toBe(true);
+  expect(contentProtectionFor('demo')).toBe(false);
+});
