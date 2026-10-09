@@ -39,7 +39,8 @@
     "test:e2e": "npm run test:e2e --workspace @exam-anti-cheat/api",
     "build": "npm run build --workspace @exam-anti-cheat/api && npm run build --workspace @exam-anti-cheat/web",
     "validate": "npm run format:check && npm run lint && npm run typecheck && npm test",
-    "package:mac": "npm run vision:prepare && npm run build --workspace @exam-anti-cheat/web && npm run build:bundle --workspace @exam-anti-cheat/api && npm run build --workspace @exam-anti-cheat/desktop && npm run pack:judge --workspace @exam-anti-cheat/desktop"
+    "package:mac": "npm run vision:prepare && npm run build --workspace @exam-anti-cheat/web && npm run build:bundle --workspace @exam-anti-cheat/api && npm run build --workspace @exam-anti-cheat/desktop && npm run pack:judge --workspace @exam-anti-cheat/desktop",
+    "test:e2e:demo": "playwright test --config tests/e2e/demo.playwright.config.ts"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",
