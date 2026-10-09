@@ -18,6 +18,7 @@ test-results/
 
 # Large / machine-local artifacts (fetch or build locally, see README)
 /apps/api/vendor/whisper.cpp/
+/apps/api/vendor/whisper.cpp-portable/
 /apps/api/vendor/venv/
 /apps/api/data/
 /apps/desktop/out*/

@@ -23,6 +23,7 @@
     "dev:web": "npm run dev --workspace @exam-anti-cheat/web",
     "demo:seed": "npm run demo:seed --workspace @exam-anti-cheat/api",
     "setup:whisper": "bash scripts/setup-whisper.sh",
+    "build:whisper-portable": "bash scripts/build-whisper-portable.sh",
     "setup:vision": "bash scripts/setup-vision.sh",
     "setup:desktop": "node node_modules/electron/install.js && npm run build --workspace @exam-anti-cheat/desktop",
     "supabase:templates": "node scripts/apply-supabase-templates.mjs",
@@ -39,7 +40,7 @@
     "test:e2e": "npm run test:e2e --workspace @exam-anti-cheat/api",
     "build": "npm run build --workspace @exam-anti-cheat/api && npm run build --workspace @exam-anti-cheat/web",
     "validate": "npm run format:check && npm run lint && npm run typecheck && npm test",
-    "package:mac": "npm run vision:prepare && npm run build --workspace @exam-anti-cheat/web && npm run build:bundle --workspace @exam-anti-cheat/api && npm run build --workspace @exam-anti-cheat/desktop && npm run pack:judge --workspace @exam-anti-cheat/desktop",
+    "package:mac": "npm run vision:prepare && npm run build:whisper-portable && npm run build --workspace @exam-anti-cheat/web && npm run build:bundle --workspace @exam-anti-cheat/api && npm run build --workspace @exam-anti-cheat/desktop && npm run pack:judge --workspace @exam-anti-cheat/desktop",
     "test:electron": "playwright test --config tests/electron/playwright.config.ts",
     "test:e2e:demo": "playwright test --config tests/e2e/demo.playwright.config.ts"
   },

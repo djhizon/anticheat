@@ -63,12 +63,14 @@ export function resolveRuntimePaths(
 ): RuntimePaths {
   if (deps.isPackaged) {
     const base = deps.resourcesPath;
+    // ffmpeg is optional: app-recorded clips are already 16 kHz WAV, so it is not bundled.
+    const ffmpeg = path.join(base, 'ffmpeg', 'ffmpeg');
     return {
       entry: path.join(base, 'api', 'api-server.mjs'),
       webRoot: path.join(base, 'web'),
       whisperBin: path.join(base, 'whisper', 'whisper-cli'),
       whisperModel: path.join(base, 'whisper', 'ggml-base.bin'),
-      ffmpegBin: path.join(base, 'ffmpeg', 'ffmpeg'),
+      ffmpegBin: fs.existsSync(ffmpeg) ? ffmpeg : undefined,
     };
   }
   const api = path.join(deps.repoRoot, 'apps', 'api');
@@ -104,6 +106,7 @@ export function buildServerEnv(
   env.WHISPER_BIN = paths.whisperBin;
   env.WHISPER_MODEL_PATH = paths.whisperModel;
   if (paths.ffmpegBin !== undefined) env.FFMPEG_BIN = paths.ffmpegBin;
+  else if (deps.isPackaged) delete env.FFMPEG_BIN; // Fall back to PATH, never a stale value.
   return env;
 }
 

@@ -1,5 +1,6 @@
 import type { ExamApi } from '../exam/api.js';
 import { acquireBuiltInMicrophone } from './builtInMicrophone.js';
+import { recordingToWavBase64 } from './wavEncoder.js';
 
 /** Short clips keep the transcript feeling live. */
 export const CLIP_MS = 3000;
@@ -80,7 +81,10 @@ export function createAudioRecorder(
       void (async () => {
         try {
           onStatus('Transcribing the last clip locally…');
-          const base64 = await blobToBase64(new Blob(chunks, { type: current.mimeType }));
+          const base64 = await recordingToWavBase64(
+            new Blob(chunks, { type: current.mimeType }),
+            blobToBase64,
+          );
           if (!active) return;
           const controller = new AbortController();
           upload = controller;

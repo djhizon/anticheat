@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -75,7 +75,7 @@ describe('runtime paths and environment', () => {
       webRoot: '/res/web',
       whisperBin: '/res/whisper/whisper-cli',
       whisperModel: '/res/whisper/ggml-base.bin',
-      ffmpegBin: '/res/ffmpeg/ffmpeg',
+      ffmpegBin: undefined,
     });
     expect(
       resolveRuntimePaths({ isPackaged: false, resourcesPath: '/res', repoRoot: '/repo' }),
@@ -99,10 +99,22 @@ describe('runtime paths and environment', () => {
       SERVE_WEB_DIST: '/res/web',
       WHISPER_BIN: '/res/whisper/whisper-cli',
       WHISPER_MODEL_PATH: '/res/whisper/ggml-base.bin',
-      FFMPEG_BIN: '/res/ffmpeg/ffmpeg',
     });
+    expect(env.FFMPEG_BIN).toBeUndefined();
     expect(env.NODE_ENV).toBeUndefined();
     expect(env.ELECTRON_RUN_AS_NODE).toBeUndefined();
+  });
+
+  it('uses a bundled ffmpeg only when it exists', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'eac-res-'));
+    try {
+      mkdirSync(join(dir, 'ffmpeg'));
+      writeFileSync(join(dir, 'ffmpeg', 'ffmpeg'), '');
+      const deps = { isPackaged: true, resourcesPath: dir, repoRoot: '/repo', userDataPath: '/ud' };
+      expect(buildServerEnv(deps, {}).FFMPEG_BIN).toBe(join(dir, 'ffmpeg', 'ffmpeg'));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('sets the seed flag only for the judge build and never inherits it', () => {

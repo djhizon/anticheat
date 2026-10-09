@@ -1,4 +1,5 @@
 import { acquireBuiltInMicrophone } from './builtInMicrophone.js';
+import { recordingToWavBase64 } from './wavEncoder.js';
 import { acquireUnlessAborted, readCameraLabel, throwIfAborted } from './livenessCapture.js';
 
 export const SPOKEN_WORDS_RECORD_MS = 4000;
@@ -59,7 +60,10 @@ export async function captureSpokenWords(
       signal?.removeEventListener('abort', onAbort);
     }
     throwIfAborted(signal);
-    const audioBase64 = await blobToBase64(new Blob(chunks, { type: recorder.mimeType }));
+    const audioBase64 = await recordingToWavBase64(
+      new Blob(chunks, { type: recorder.mimeType }),
+      blobToBase64,
+    );
     return { cameraLabel, audioBase64 };
   } finally {
     stream.getTracks().forEach((track) => track.stop());
