@@ -191,7 +191,7 @@ export class IntegrityRepository {
   }
 
   getPhoneEnrollmentByAttempt(attemptId: string): PhoneEnrollmentRow | null {
-    const query = `SELECT * FROM integrity_phone_enrollments WHERE attempt_id = ? LIMIT 1`;
+    const query = `SELECT * FROM phone_enrollments WHERE attempt_id = ? ORDER BY created_at DESC LIMIT 1`;
     return (this.db.prepare(query).get(attemptId) as PhoneEnrollmentRow | undefined) ?? null;
   }
 
