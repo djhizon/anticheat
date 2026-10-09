@@ -24,6 +24,13 @@ import { TransparencyReport } from '../integrity/TransparencyReport.js';
 import type { IntegrityTimelineApi } from '../integrity/timelineApi.js';
 import { startCameraGuard } from '../integrity/cameraGuard.js';
 import { activeCameraTrack } from '../integrity/physicalCamera.js';
+import { checkCamera } from '../integrity/cameraGate.js';
+import {
+  createCameraContinuity,
+  type CameraContinuity,
+  type ContinuityState,
+} from '../integrity/cameraContinuity.js';
+import { CameraLostOverlay } from '../integrity/CameraGatePanel.js';
 import { desktopWatcherBridge, startDesktopWatcher } from '../integrity/desktopWatcher.js';
 
 /** Optional per-question time limit (focused mode); not every question has one. */
@@ -110,6 +117,15 @@ export function StudentExamPage({
     currentDelivery?.attempt.status === 'in_progress',
     examApi,
   );
+  const [cameraState, setCameraState] = useState<ContinuityState>({
+    paused: false,
+    checking: false,
+    reason: null,
+    block: null,
+    epoch: 0,
+  });
+  const continuityRef = useRef<CameraContinuity | null>(null);
+  const cameraPaused = cameraState.paused;
   const phoneBlockedRef = useRef(phonePresence.blocked);
   phoneBlockedRef.current = phonePresence.blocked;
 
@@ -321,6 +337,28 @@ export function StudentExamPage({
     return startDesktopWatcher(bridge, attemptId, (event) => examApi.patchEvents(attemptId, event));
   }, [currentDelivery?.attempt.id, currentDelivery?.attempt.status, examApi]);
 
+  // Mid-exam camera continuity: a lost/virtual feed pauses answering until a native webcam
+  // passes the camera gate again. Pauses and resumes are logged as integrity events.
+  useEffect(() => {
+    if (!examApi || !currentDelivery || currentDelivery.attempt.status !== 'in_progress') return;
+    if (!sensorsConsented || typeof navigator === 'undefined' || !navigator.mediaDevices) return;
+    const attemptId = currentDelivery.attempt.id;
+    const continuity = createCameraContinuity({
+      check: () => checkCamera(),
+      report: (event) => {
+        examApi.patchEvents(attemptId, { event }).catch(() => {});
+      },
+      onChange: setCameraState,
+      getTrack: activeCameraTrack,
+      media: navigator.mediaDevices,
+    });
+    continuityRef.current = continuity;
+    return () => {
+      continuity.stop();
+      continuityRef.current = null;
+    };
+  }, [currentDelivery?.attempt.id, currentDelivery?.attempt.status, examApi, sensorsConsented]);
+
   // Mid-exam camera swap / capture-device guard (event-driven, flags server-side).
   useEffect(() => {
     if (!examApi || !currentDelivery || currentDelivery.attempt.status !== 'in_progress') return;
@@ -331,9 +369,11 @@ export function StudentExamPage({
       getActiveTrack: activeCameraTrack,
       report: (event) => {
         examApi.patchEvents(attemptId, { event }).catch(() => {});
+        continuityRef.current?.notify(event);
       },
     });
-  }, [currentDelivery?.attempt.id, currentDelivery?.attempt.status, examApi]);
+    // A new epoch (after a resume) restarts the guard so repeat events are reported again.
+  }, [currentDelivery?.attempt.id, currentDelivery?.attempt.status, examApi, cameraState.epoch]);
 
   // Explicit opt-in recording; adapts to the network and never blocks the exam.
 
@@ -635,6 +675,7 @@ export function StudentExamPage({
       submitting ||
       examApi === undefined ||
       examPaused ||
+      cameraPaused ||
       phonePresence.blocked ||
       timeOut;
 
@@ -793,6 +834,13 @@ export function StudentExamPage({
         <div className="paste-toast" role="alert">
           🚫 Paste is not allowed — please type your answer
         </div>
+      )}
+      {isActive && cameraPaused && (
+        <CameraLostOverlay
+          checking={cameraState.checking}
+          block={cameraState.block}
+          onRetry={() => void continuityRef.current?.recheck()}
+        />
       )}
       {examPaused && !phonePresence.blocked && (
         <div className="exam-pause-overlay" onClick={() => setExamPaused(false)}>
@@ -963,6 +1011,7 @@ export function StudentExamPage({
               <p className="sidebar-label">📷 Camera &amp; Detection</p>
               <Suspense fallback={<p className="sidebar-loading">Loading…</p>}>
                 <CameraIntegrityPanel
+                  key={cameraState.epoch}
                   attempt={attemptProps}
                   autoStart={sensorsConsented}
                   api={examApi}
@@ -972,7 +1021,11 @@ export function StudentExamPage({
           </aside>
 
           {/* CENTER: One question at a time */}
-          <main className="exam-center" ref={questionRootRef}>
+          <main
+            className="exam-center"
+            ref={questionRootRef}
+            {...(cameraPaused ? { style: { visibility: 'hidden' as const } } : {})}
+          >
             {/* Progress bar */}
             <div className="exam-progress-bar">
               <div

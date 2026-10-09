@@ -20,7 +20,7 @@ import { DemoModeBanner } from './features/integrity/DemoModeBanner.js';
 import { DevelopmentExemptions } from './features/integrity/DevelopmentExemptions.js';
 import { AUDIO_CONSENT_TEXT } from './features/integrity/audioSession.js';
 import { acquireBuiltInMicrophone } from './features/integrity/builtInMicrophone.js';
-import { acquirePhysicalCamera } from './features/integrity/physicalCamera.js';
+import { CameraGatePanel, useCameraGate } from './features/integrity/CameraGatePanel.js';
 
 export function isSessionExpiredError(error: unknown): boolean {
   return error instanceof ExamApiError && error.problem.code === 'unauthorized';
@@ -206,6 +206,12 @@ function StudentWorkspace({
   const [consentChecked, setConsentChecked] = useState(false);
   const [permissionsGranted, setPermissionsGranted] = useState(false);
   const [permissionsError, setPermissionsError] = useState<string | null>(null);
+  const cameraGate = useCameraGate();
+  const resetCameraGate = cameraGate.reset;
+  // The preview stream is only for the consent step; free the camera once it closes.
+  useEffect(() => {
+    if (pendingAssignment === null) resetCameraGate();
+  }, [pendingAssignment, resetCameraGate]);
   const tabGuardRef = useRef<{ release(): void } | null>(null);
   const [violations, setViolations] = useState<
     import('./features/integrity/tabGuard.js').ViolationEvent[]
@@ -233,11 +239,13 @@ function StudentWorkspace({
     }
   }
 
-  async function requestHardwarePermissions(): Promise<void> {
+  async function requestHardwarePermissions(preferredId?: string): Promise<void> {
     try {
       setPermissionsError(null);
-      const camera = await acquirePhysicalCamera();
-      camera.getTracks().forEach((track) => track.stop());
+      setPermissionsGranted(false);
+      // Camera gate: a real native webcam with a live, non-static feed, or the exam cannot start.
+      const gate = await cameraGate.run(preferredId);
+      if (gate.state !== 'ok') return;
       const microphone = await acquireBuiltInMicrophone();
       microphone.getTracks().forEach((track) => track.stop());
       setPermissionsGranted(true);
@@ -406,6 +414,13 @@ function StudentWorkspace({
               <span>I understand and agree to these monitoring conditions for this exam.</span>
             </label>
 
+            <CameraGatePanel
+              state={cameraGate.state}
+              cameras={cameraGate.cameras}
+              stream={cameraGate.stream}
+              onCheck={(id) => void requestHardwarePermissions(id)}
+            />
+
             {!permissionsGranted ? (
               <div style={{ marginTop: '1rem', textAlign: 'center' }}>
                 <button
@@ -423,7 +438,7 @@ function StudentWorkspace({
                       {permissionsError}
                     </p>
                     <button
-                      onClick={requestHardwarePermissions}
+                      onClick={() => void requestHardwarePermissions()}
                       className="btn btn-secondary"
                       style={{ fontSize: '0.8rem', padding: '0.25rem 0.75rem' }}
                     >
