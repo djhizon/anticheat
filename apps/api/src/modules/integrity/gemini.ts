@@ -77,7 +77,8 @@ export class GeminiRotatingClient {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': this.nextKey() },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(30_000),
+        // Thinking models can take well over 30s to generate a full exam.
+        signal: AbortSignal.timeout(90_000),
       });
 
       if (response.ok) {
@@ -107,8 +108,9 @@ export class GeminiRotatingClient {
       generationConfig: {
         responseMimeType: 'application/json',
         temperature: 0.1,
-        // Thinking models spend ~500 tokens reasoning before the JSON answer.
-        maxOutputTokens: 2048,
+        // Thinking models spend ~500+ tokens reasoning before the JSON answer, and a
+        // 10-question exam needs several thousand more; this is a cap, not a cost.
+        maxOutputTokens: 8192,
       },
     };
 
