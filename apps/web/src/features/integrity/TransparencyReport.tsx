@@ -6,6 +6,7 @@ import { EvidenceGallery, type EvidenceGalleryProps } from '../evidence/Evidence
 import type { TranscriptEntry, TransparencyEvent } from '@examguard/contracts/exam';
 import type { FindingNotesApi } from '../triage/findingsApi.js';
 import { StudentFindings } from '../triage/StudentFindings.js';
+import { RecordingFolderButton } from './RecordingFolderButton.js';
 
 const typeIcon: Record<TransparencyEvent['type'], string> = {
   HARDWARE: '🖥️',
@@ -73,6 +74,7 @@ export function TransparencyReport({
   return (
     <section className="transparency-report" aria-labelledby="transparency-title">
       <h2 id="transparency-title">What monitoring recorded</h2>
+      <RecordingFolderButton />
       <p className="transparency-note">
         This is the full list of integrity events stored for this attempt. An instructor reviews
         them in context — none of them is an automatic cheating verdict.

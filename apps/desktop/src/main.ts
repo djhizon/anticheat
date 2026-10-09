@@ -16,9 +16,9 @@ import {
 import { execFile, execSync } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
-import { appendFileSync, existsSync, statSync, writeFileSync } from 'fs';
+import { appendFileSync, existsSync, mkdirSync, statSync, writeFileSync } from 'fs';
 import { createAppController, createHelperCall, readDemoExemptions } from './appControl';
-import { registerRecordingDownloads } from './recordingDownloads';
+import { recordingFolder, registerRecordingDownloads } from './recordingDownloads';
 import { classifyDisplays, detectVirtualMachine } from './environment';
 import { defaultRunMode, mayCloseApps, planModeSwitch, type RunMode } from './mode';
 import {
@@ -310,6 +310,15 @@ ipcMain.handle('get-demo-info', (event) => {
     exemptApps,
     packaged: app.isPackaged,
   }));
+});
+// After submit: open the folder with this Mac's screen-recording segments in Finder.
+ipcMain.handle('open-recordings-folder', async (event) => {
+  if (!trustedAppFrame(event)) throw new Error('Untrusted application request.');
+  if (lockdown.isActive()) return { opened: false, error: 'The exam is still locked.' };
+  const folder = recordingFolder(app.getPath('videos'));
+  mkdirSync(folder, { recursive: true });
+  const error = await shell.openPath(folder);
+  return error ? { opened: false, error } : { opened: true, path: folder };
 });
 ipcMain.handle('start-phone-lan', (event) => {
   if (!trustedAppFrame(event)) throw new Error('Untrusted application request.');

@@ -3199,3 +3199,17 @@ button.timeline-chip[aria-pressed='false'] {
   font-size: 0.85rem;
   color: #51607a;
 }
+
+/* ── After submit: open the local screen recordings ───────────────────── */
+.recording-folder {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 8px 0 12px;
+}
+.recording-folder-note {
+  color: #cbd5e1;
+  font-size: 0.85rem;
+  margin: 0;
+}
