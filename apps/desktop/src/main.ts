@@ -131,6 +131,30 @@ export function shouldUseDevServers(
 
 const useDevServers = shouldUseDevServers(app.isPackaged, process.argv, process.env);
 
+/** Chromium switches that expose a DevTools endpoint (`--remote-debugging-port=…`, `--remote-debugging-pipe`). */
+export const REMOTE_DEBUGGING_SWITCHES = [
+  'remote-debugging-port',
+  'remote-debugging-pipe',
+] as const;
+
+/**
+ * A DevTools endpoint lets anyone on this Mac drive the exam window (the Electron fuses only
+ * disable the Node `--inspect` flags, not Chromium's remote debugging). Chromium opens that
+ * endpoint before any app code runs, so the switch cannot be stripped here; the only safe answer
+ * is to refuse to start. Allowed in the unpackaged dev build and in the packaged judge build, whose
+ * automated tests (`npm run test:electron`) drive it over CDP; refused in every other packaged build.
+ */
+export function refusesRemoteDebugging(
+  isPackaged: boolean,
+  judgeBuild: boolean,
+  argv: readonly string[],
+  hasSwitch: (name: string) => boolean = () => false,
+): boolean {
+  if (!isPackaged || judgeBuild) return false;
+  const pattern = new RegExp(`^--(${REMOTE_DEBUGGING_SWITCHES.join('|')})(=|$)`);
+  return argv.some((arg) => pattern.test(arg)) || REMOTE_DEBUGGING_SWITCHES.some(hasSwitch);
+}
+
 /** Same origin and path as the app page; query/hash differences (e.g. SPA state) are tolerated. */
 export function isAppUrl(url: unknown): boolean {
   if (typeof url !== 'string') return false;
@@ -711,6 +735,23 @@ export async function startApp(): Promise<void> {
     readJudgeBuild(app.getAppPath(), app.isPackaged) ||
     (!app.isPackaged && process.env.EAC_TEST_JUDGE_BUILD === '1');
   runMode = readRunMode(app.getPath('userData'), defaultRunMode(judgeBuild), judgeBuild);
+  if (
+    refusesRemoteDebugging(app.isPackaged, judgeBuild, process.argv, (name) =>
+      app.commandLine.hasSwitch(name),
+    )
+  ) {
+    diagnostic('remote-debugging-refused');
+    try {
+      dialog.showErrorBox(
+        'ExamGuard cannot start with remote debugging',
+        'This build refuses the --remote-debugging-port / --remote-debugging-pipe switches because they would let another program control the exam window. Start the app normally.',
+      );
+    } catch {
+      /* Quit regardless. */
+    }
+    app.quit();
+    return;
+  }
   if (!(await startLocalServer())) {
     app.quit();
     return;

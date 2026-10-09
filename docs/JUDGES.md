@@ -95,3 +95,25 @@ These are the defaults from `apps/api/src/demoSeed.ts`.
 
 - "Port 3000/5173 is already in use": quit whatever is using it and reopen the app.
 - Server log: `~/Library/Application Support/@examguard/desktop/logs/api.log`.
+
+## Automated tests of the desktop app
+
+`npm run test:electron` (macOS only, not run in CI) rehearses the student flow and the Strict-mode
+pre-exam check against two builds, each in a throwaway `--user-data-dir` so no real app data is
+touched, with Chromium's fake camera and microphone:
+
+- **dev build** (`apps/desktop/dist`, needs `npm run build:server` and
+  `npm run build --workspace @examguard/desktop`): driven by Playwright's Electron driver.
+- **packaged app** (`apps/desktop/release/mac/ExamGuard.app`, built by `npm run package:mac`; set
+  `EAC_PACKAGED_APP` to point at another binary): the packaged build turns off the Node inspector
+  fuse, so Playwright's Electron driver cannot attach. The test starts the binary with
+  `--remote-debugging-port=0`, reads the `DevTools listening on ws://…` line from stderr and connects
+  over CDP; it quits the app with SIGTERM and checks that the process exited and ports 3000/5173 are
+  free again.
+
+Security note: a DevTools endpoint would let any program on the Mac drive the exam window, so only
+the **judge build** accepts `--remote-debugging-port` / `--remote-debugging-pipe`. Every other
+packaged build refuses to start with those switches (an error dialog explains why; the unpackaged
+dev build is unaffected). Chromium opens the endpoint before any app code runs, which is why the
+switch is refused rather than stripped. See `refusesRemoteDebugging` in `apps/desktop/src/main.ts`
+and its unit test.

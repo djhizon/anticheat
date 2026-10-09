@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   writeRunMode: vi.fn(),
   showErrorBox: vi.fn(),
   quit: vi.fn(),
+  hasSwitch: vi.fn((_name: string) => false),
+  appState: { isPackaged: false },
   permissionRequest: vi.fn(),
   permissionCheck: vi.fn(),
   displayHandler: vi.fn(),
@@ -37,8 +39,11 @@ vi.mock('electron', () => ({
     on: vi.fn(),
     getPath: () => '/tmp',
     getAppPath: () => '/app',
-    isPackaged: false,
+    get isPackaged() {
+      return mocks.appState.isPackaged;
+    },
     quit: mocks.quit,
+    commandLine: { hasSwitch: mocks.hasSwitch },
   },
   BrowserWindow: class extends EventEmitter {
     webContents = Object.assign(new EventEmitter(), {
@@ -89,8 +94,10 @@ import { screen } from 'electron';
 import {
   createWindow,
   isAppUrl,
+  refusesRemoteDebugging,
   reportStartupFailure,
   shouldUseDevServers,
+  startApp,
   switchRunMode,
 } from './main.js';
 const flush = async () => {
@@ -466,6 +473,46 @@ describe('native window recovery', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+  describe('remote debugging guard', () => {
+    const port = ['/app', '--remote-debugging-port=0'];
+    const pipe = ['/app', '--remote-debugging-pipe'];
+    it('refuses the DevTools switches only in a packaged non-judge build', () => {
+      expect(refusesRemoteDebugging(true, false, port)).toBe(true);
+      expect(refusesRemoteDebugging(true, false, pipe)).toBe(true);
+      expect(refusesRemoteDebugging(true, false, ['/app', '--remote-debugging-port'])).toBe(true);
+      expect(refusesRemoteDebugging(true, false, ['/app', '--user-data-dir=/x'])).toBe(false);
+      // A look-alike flag is not the switch.
+      expect(refusesRemoteDebugging(true, false, ['/app', '--remote-debugging-portal=1'])).toBe(
+        false,
+      );
+      // Chromium's own parse is consulted too (the switch may be spelled in a way argv misses).
+      expect(refusesRemoteDebugging(true, false, [], (n) => n === 'remote-debugging-port')).toBe(
+        true,
+      );
+      // The packaged judge build (automated tests) and the unpackaged dev build may use it.
+      expect(refusesRemoteDebugging(true, true, port)).toBe(false);
+      expect(refusesRemoteDebugging(false, false, port)).toBe(false);
+      expect(refusesRemoteDebugging(false, false, pipe)).toBe(false);
+    });
+    it('quits with an error before starting any server or window when refused', async () => {
+      const argv = process.argv;
+      mocks.appState.isPackaged = true;
+      mocks.showErrorBox.mockClear();
+      mocks.quit.mockClear();
+      mocks.windows.length = 0;
+      process.argv = ['/app', '--remote-debugging-port=9222'];
+      try {
+        await startApp();
+      } finally {
+        process.argv = argv;
+        mocks.appState.isPackaged = false;
+      }
+      expect(mocks.showErrorBox).toHaveBeenCalledTimes(1);
+      expect(mocks.showErrorBox.mock.calls[0]?.[0]).toContain('remote debugging');
+      expect(mocks.quit).toHaveBeenCalledTimes(1);
+      expect(mocks.windows).toHaveLength(0);
     });
   });
   describe('startup failure', () => {

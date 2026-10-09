@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { EvidenceSnapshotMeta } from '@examguard/contracts/exam';
 
 export const evidenceTriggerLabel: Readonly<Record<string, string>> = {
@@ -44,6 +44,50 @@ export function EvidenceGallery({
   const [failed, setFailed] = useState(false);
   const [urls, setUrls] = useState<Readonly<Record<string, string>>>({});
   const [open, setOpen] = useState<EvidenceSnapshotMeta | null>(null);
+  const lightboxRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  // The thumbnail that opened the lightbox; focus goes back to it when the lightbox closes.
+  const openerRef = useRef<HTMLElement | null>(null);
+
+  // Modal behaviour for the lightbox: focus moves to Close on open, Escape closes, Tab stays
+  // inside, and focus returns to the thumbnail afterwards.
+  useEffect(() => {
+    if (open === null) return;
+    closeButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setOpen(null);
+        return;
+      }
+      if (event.key !== 'Tab' || lightboxRef.current === null) return;
+      const focusable = [
+        ...lightboxRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ];
+      if (focusable.length === 0) return;
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      const active = document.activeElement;
+      const inside = active instanceof HTMLElement && lightboxRef.current.contains(active);
+      if (!inside || focusable.length === 1) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      openerRef.current?.focus();
+    };
+  }, [open]);
 
   useEffect(() => {
     let active = true;
@@ -98,7 +142,10 @@ export function EvidenceGallery({
                 type="button"
                 className="evidence-thumb"
                 aria-label={`Enlarge: ${describe(item)}`}
-                onClick={() => setOpen(item)}
+                onClick={(event) => {
+                  openerRef.current = event.currentTarget;
+                  setOpen(item);
+                }}
               >
                 {urls[item.id] !== undefined ? (
                   <img src={urls[item.id]} alt={describe(item)} />
@@ -117,6 +164,7 @@ export function EvidenceGallery({
       )}
       {open !== null && (
         <div
+          ref={lightboxRef}
           className="evidence-lightbox"
           role="dialog"
           aria-modal="true"
@@ -126,7 +174,7 @@ export function EvidenceGallery({
           <p>
             {describe(open)} — {new Date(open.capturedAt).toLocaleString()}
           </p>
-          <button type="button" onClick={() => setOpen(null)}>
+          <button ref={closeButtonRef} type="button" onClick={() => setOpen(null)}>
             Close
           </button>
         </div>
