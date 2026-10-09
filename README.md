@@ -89,6 +89,15 @@ packages/contracts  Shared types
 Configuration lives in a gitignored `.env.local` (see [.env.example](.env.example)); every
 cloud key is optional.
 
+## Team n00bies
+
+| Member               | Role       |
+| -------------------- | ---------- |
+| Dustin Hizon         | Student    |
+| John Mhalic Pagaduan | Freelancer |
+| Justen Rey Resari    | Student    |
+| Rommeniel Osorio     | Student    |
+
 ## License
 
 [MIT](LICENSE) © 2026 Dustin Hizon.

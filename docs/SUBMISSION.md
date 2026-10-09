@@ -22,8 +22,7 @@ never an automatic verdict.
 
 ## Team members
 
-**TODO**: official team name and member names exactly as listed on
-appbuildersph.com/hackathon.
+Team **n00bies**: Dustin Hizon, John Mhalic Pagaduan, Justen Rey Resari, Rommeniel Osorio.
 
 ## Public GitHub repository
 
