@@ -7,9 +7,36 @@ import { fileURLToPath } from 'node:url';
 
 const execute = promisify(execFile);
 const apiRoot = fileURLToPath(new URL('../../../', import.meta.url));
-let busy = false;
 
 export class TranscriptionError extends Error {}
+
+// A small worker pool replaces the old global busy flag: a few clips run in
+// parallel and a bounded queue absorbs bursts instead of failing every other
+// student with 503. Only overflow beyond the queue is rejected.
+let active = 0;
+const waiting: Array<() => void> = [];
+
+function limit(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+async function acquireSlot(): Promise<void> {
+  if (active < limit('WHISPER_CONCURRENCY', 2)) {
+    active += 1;
+    return;
+  }
+  if (waiting.length >= limit('WHISPER_MAX_QUEUE', 8))
+    throw new TranscriptionError('Local transcription is busy. Wait a moment and retry audio.');
+  // The releasing request hands its slot straight to us, so `active` is unchanged.
+  await new Promise<void>((resolve) => waiting.push(resolve));
+}
+
+function releaseSlot(): void {
+  const next = waiting.shift();
+  if (next) next();
+  else active -= 1;
+}
 
 function failed(stage: string, error: unknown): TranscriptionError {
   const detail = error as { code?: string; killed?: boolean; signal?: string };
@@ -27,11 +54,9 @@ function failed(stage: string, error: unknown): TranscriptionError {
 }
 
 export async function transcribeAudio(audioBuffer: Buffer): Promise<string> {
-  if (busy)
-    throw new TranscriptionError('Local transcription is busy. Wait a moment and retry audio.');
   if (!audioBuffer.length || audioBuffer.length > 1024 * 1024)
     throw new Error('Invalid audio clip size.');
-  busy = true;
+  await acquireSlot();
   let directory: string | undefined;
   try {
     const whisperBin =
@@ -72,7 +97,7 @@ export async function transcribeAudio(audioBuffer: Buffer): Promise<string> {
       throw failed('Audio conversion', error);
     });
     // A small CPU model keeps the demo responsive and avoids unavailable Metal
-    // devices. Never send audio to a remote fallback or queue it behind inference.
+    // devices. Never send audio to a remote fallback.
     const args = ['-m', modelPath, '-f', wav, '-nt', '-bo', '1', '-bs', '1', '-l', 'auto'];
     if (process.env.WHISPER_USE_GPU !== '1') args.push('-ng');
     const { stdout } = await execute(whisperBin, args, {
@@ -85,6 +110,6 @@ export async function transcribeAudio(audioBuffer: Buffer): Promise<string> {
   } finally {
     // Unique, request-owned temporary audio only; never touch source recordings.
     if (directory) await fs.rm(directory, { recursive: true, force: true }).catch(() => {});
-    busy = false;
+    releaseSlot();
   }
 }

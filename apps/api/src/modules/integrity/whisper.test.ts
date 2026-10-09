@@ -48,9 +48,25 @@ describe('bounded local transcription', () => {
     await expect(transcribeAudio(Buffer.from('fixture'))).rejects.toThrow('base model is missing');
     expect(mocks.execute).not.toHaveBeenCalled();
   });
-  it('reports timeouts and releases the busy flag for a retry', async () => {
+  it('reports timeouts and releases its worker slot for a retry', async () => {
     mocks.execute.mockResolvedValueOnce({ stdout: '' }).mockRejectedValueOnce({ killed: true });
     await expect(transcribeAudio(Buffer.from('fixture'))).rejects.toThrow('timed out');
     expect(await transcribeAudio(Buffer.from('fixture'))).toBe('Test speech');
+  });
+  it('runs clips in parallel up to the pool size and queues the rest', async () => {
+    vi.stubEnv('WHISPER_CONCURRENCY', '1');
+    vi.stubEnv('WHISPER_MAX_QUEUE', '1');
+    let finishFirst!: () => void;
+    mocks.execute
+      .mockImplementationOnce(() => new Promise((resolve) => { finishFirst = () => resolve({ stdout: '' }); }))
+      .mockResolvedValue({ stdout: ' queued ' });
+    const first = transcribeAudio(Buffer.from('one'));
+    const second = transcribeAudio(Buffer.from('two'));
+    await expect(transcribeAudio(Buffer.from('three'))).rejects.toThrow('busy');
+    await vi.waitFor(() => expect(finishFirst).toBeTypeOf('function'));
+    finishFirst();
+    await expect(first).resolves.toBe('queued');
+    await expect(second).resolves.toBe('queued');
+    vi.unstubAllEnvs();
   });
 });
