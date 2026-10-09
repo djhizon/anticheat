@@ -105,24 +105,34 @@ describe('authentication boundary', () => {
     await expect(verifyPassword('wrong password', encoded)).resolves.toBe(false);
   });
 
-  it('runs the migration with identity, session, audit, and ledger tables', () => {
+  it('runs every migration, including integrity and phone presence tables', () => {
     const rows = plugin.database
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
       .all();
 
     expect(rows.map((row) => row.name)).toEqual([
+      'answer_revisions',
+      'app_events',
       'attempt_answers',
       'attempt_mutations',
+      'audio_sessions',
       'audit_events',
       'exam_assignments',
       'exam_attempts',
       'exam_version_questions',
       'exam_versions',
       'exams',
+      'gaze_events',
+      'keystroke_events',
+      'liveness_challenges',
+      'liveness_events',
+      'phone_enrollments',
+      'phone_presence',
       'question_versions',
       'schema_migrations',
       'sessions',
       'users',
+      'voice_events',
     ]);
   });
 
