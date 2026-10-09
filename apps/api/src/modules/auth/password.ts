@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import * as crypto from 'node:crypto';
 
 import { DomainError } from '@exam-anti-cheat/contracts';
+import { argon2id as wasmArgon2id } from 'hash-wasm';
 
 export const ARGON2_MEMORY_KIB = 19_456;
 export const ARGON2_PASSES = 2;
@@ -36,12 +37,21 @@ function assertPasswordLength(password: string): void {
   }
 }
 
-function deriveArgon2id(password: string, salt: Buffer): Promise<Buffer> {
-  if (nativeArgon2 === undefined) {
-    return Promise.reject(new Error('Node crypto.argon2 is required for password hashing.'));
-  }
+export type Argon2Implementation = (password: string, salt: Buffer) => Promise<Buffer>;
 
-  return new Promise((resolve, reject) => {
+/** Native node:crypto Argon2id. Rejects with ERR_CRYPTO_ARGON2_NOT_SUPPORTED on BoringSSL builds (Electron). */
+export const nativeArgon2Implementation: Argon2Implementation = (password, salt) =>
+  new Promise((resolve, reject) => {
+    if (nativeArgon2 === undefined) {
+      reject(
+        Object.assign(new Error('Node crypto.argon2 is unavailable.'), {
+          code: 'ERR_CRYPTO_ARGON2_NOT_SUPPORTED',
+        }),
+      );
+      return;
+    }
+
+    // Electron's Node throws synchronously; the Promise executor turns that into a rejection.
     nativeArgon2(
       'argon2id',
       {
@@ -67,7 +77,46 @@ function deriveArgon2id(password: string, salt: Buffer): Promise<Buffer> {
       },
     );
   });
+
+/** Pure-WASM Argon2id (hash-wasm); identical parameters and output to the native path. */
+export const wasmArgon2Implementation: Argon2Implementation = async (password, salt) => {
+  const digest = await wasmArgon2id({
+    password,
+    salt,
+    parallelism: ARGON2_PARALLELISM,
+    iterations: ARGON2_PASSES,
+    memorySize: ARGON2_MEMORY_KIB,
+    hashLength: ARGON2_TAG_LENGTH,
+    outputType: 'binary',
+  });
+  return Buffer.from(digest);
+};
+
+function isUnsupportedError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === 'ERR_CRYPTO_ARGON2_NOT_SUPPORTED'
+  );
 }
+
+let nativeUnsupported = false;
+
+/** Native first; falls back to WASM (and remembers) when native Argon2 is unsupported. */
+export const defaultArgon2Implementation: Argon2Implementation = async (password, salt) => {
+  if (!nativeUnsupported) {
+    try {
+      return await nativeArgon2Implementation(password, salt);
+    } catch (error) {
+      if (!isUnsupportedError(error)) {
+        throw error;
+      }
+      nativeUnsupported = true;
+    }
+  }
+
+  return wasmArgon2Implementation(password, salt);
+};
 
 function encodePhcBase64(value: Buffer): string {
   return value.toString('base64').replace(/=+$/u, '');
@@ -121,11 +170,14 @@ function parsePasswordHash(encoded: string): ParsedPasswordHash | null {
   return { salt, digest };
 }
 
-export async function hashPassword(password: string): Promise<string> {
+export async function hashPassword(
+  password: string,
+  derive: Argon2Implementation = defaultArgon2Implementation,
+): Promise<string> {
   assertPasswordLength(password);
 
   const salt = randomBytes(ARGON2_SALT_LENGTH);
-  const digest = await deriveArgon2id(password, salt);
+  const digest = await derive(password, salt);
 
   return [
     '$argon2id$v=19',
@@ -135,7 +187,11 @@ export async function hashPassword(password: string): Promise<string> {
   ].join('$');
 }
 
-export async function verifyPassword(password: string, encodedHash: string): Promise<boolean> {
+export async function verifyPassword(
+  password: string,
+  encodedHash: string,
+  derive: Argon2Implementation = defaultArgon2Implementation,
+): Promise<boolean> {
   assertPasswordLength(password);
 
   const parsed = parsePasswordHash(encodedHash);
@@ -143,6 +199,6 @@ export async function verifyPassword(password: string, encodedHash: string): Pro
     return false;
   }
 
-  const digest = await deriveArgon2id(password, parsed.salt);
+  const digest = await derive(password, parsed.salt);
   return digest.length === parsed.digest.length && timingSafeEqual(digest, parsed.digest);
 }

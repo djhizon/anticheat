@@ -10,6 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const bundle = resolve(root, 'apps/api/dist/api-server.mjs');
+// SMOKE_NODE selects the runtime (e.g. Electron with ELECTRON_RUN_AS_NODE=1); defaults to this node.
+const runtime = process.env.SMOKE_NODE || process.execPath;
+console.log(`Smoke runtime: ${runtime}`);
 if (!existsSync(bundle)) {
   console.error('Missing bundle; run `npm run build:bundle --workspace @exam-anti-cheat/api`.');
   process.exit(1);
@@ -44,7 +47,7 @@ function startServer() {
     WEB_PORT: String(webPort),
     GEMINI_API_KEYS: '',
   });
-  const child = spawn(process.execPath, [bundle], {
+  const child = spawn(runtime, [bundle], {
     cwd: temp,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
