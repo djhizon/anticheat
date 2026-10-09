@@ -59,7 +59,7 @@ Video and audio are processed locally on your machine. If you decline, the rest 
 opens, but the related checks cannot run.
 
 Speech transcription runs fully on your machine: the app bundles a portable `whisper-cli` and the
-Whisper base model, and the web client sends 16 kHz mono WAV clips so no ffmpeg is needed. If the
+quantized Whisper base model (`ggml-base-q5_1`), and the web client sends 16 kHz mono WAV clips so no ffmpeg is needed. If the
 bundled components are missing, the app still launches and shows transcription as unavailable.
 
 ## Demo mode

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build a portable (static, no native-CPU flags, no Metal) whisper-cli for the packaged
-# desktop app. Output: apps/desktop/native-bin/whisper/{whisper-cli,ggml-base.bin}.
-# Builds x86_64, plus arm64 merged with lipo into a universal binary when it builds cleanly.
+# desktop app. Output: apps/desktop/native-bin/whisper/{whisper-cli,ggml-base-q5_1.bin}.
+# The model is the 5-bit quantized multilingual base (about 57 MB vs 148 MB, same jfk.wav transcript).
+# Builds x86_64 only (the dmg is x64); set WHISPER_UNIVERSAL=1 to also build arm64 and lipo them.
 # Skips everything if the output already exists (pass --force to rebuild).
 set -euo pipefail
 
@@ -10,12 +11,13 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/apps/api/vendor/whisper.cpp-portable"
 OUT="$ROOT/apps/desktop/native-bin/whisper"
 TARGET="13.0"
+MODEL="ggml-base-q5_1.bin"
 
 if [ "$(uname -s)" != "Darwin" ]; then
   echo "build-whisper-portable.sh targets macOS only; skipping." >&2
   exit 0
 fi
-if [ "${1:-}" != "--force" ] && [ -x "$OUT/whisper-cli" ] && [ -f "$OUT/ggml-base.bin" ]; then
+if [ "${1:-}" != "--force" ] && [ -x "$OUT/whisper-cli" ] && [ -f "$OUT/$MODEL" ]; then
   echo "whisper-cli already built: $OUT (use --force to rebuild)"
   exit 0
 fi
@@ -35,7 +37,9 @@ build_arch() {
 
 build_arch x86_64
 BINS=("$SRC/build-x86_64/bin/whisper-cli")
-if build_arch arm64; then
+if [ "${WHISPER_UNIVERSAL:-0}" != "1" ]; then
+  :
+elif build_arch arm64; then
   BINS+=("$SRC/build-arm64/bin/whisper-cli")
 else
   echo "arm64 build failed; shipping x86_64 only." >&2
@@ -47,10 +51,11 @@ else
 fi
 chmod +x "$OUT/whisper-cli"
 
-if [ ! -f "$OUT/ggml-base.bin" ]; then
-  bash "$SRC/models/download-ggml-model.sh" base
-  mv "$SRC/models/ggml-base.bin" "$OUT/ggml-base.bin"
+rm -f "$OUT/ggml-base.bin" # drop the old full-size model if a previous build left it behind
+if [ ! -f "$OUT/$MODEL" ]; then
+  bash "$SRC/models/download-ggml-model.sh" base-q5_1
+  mv "$SRC/models/$MODEL" "$OUT/$MODEL"
 fi
 echo "whisper-cli: $OUT/whisper-cli ($(lipo -archs "$OUT/whisper-cli"))"
-echo "model:       $OUT/ggml-base.bin"
+echo "model:       $OUT/$MODEL"
 otool -L "$OUT/whisper-cli"

@@ -74,7 +74,7 @@ describe('runtime paths and environment', () => {
       entry: '/res/api/api-server.mjs',
       webRoot: '/res/web',
       whisperBin: '/res/whisper/whisper-cli',
-      whisperModel: '/res/whisper/ggml-base.bin',
+      whisperModel: '/res/whisper/ggml-base-q5_1.bin',
       ffmpegBin: undefined,
     });
     expect(
@@ -98,7 +98,7 @@ describe('runtime paths and environment', () => {
       DATABASE_PATH: '/ud/data/exam-anti-cheat.sqlite',
       SERVE_WEB_DIST: '/res/web',
       WHISPER_BIN: '/res/whisper/whisper-cli',
-      WHISPER_MODEL_PATH: '/res/whisper/ggml-base.bin',
+      WHISPER_MODEL_PATH: '/res/whisper/ggml-base-q5_1.bin',
     });
     expect(env.FFMPEG_BIN).toBeUndefined();
     expect(env.NODE_ENV).toBeUndefined();

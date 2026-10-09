@@ -38,7 +38,13 @@
       },
       {
         "from": "../web/dist",
-        "to": "web"
+        "to": "web",
+        "filter": [
+          "**/*",
+          "!vision/wasm/vision_wasm_internal.*",
+          "!vision/wasm/vision_wasm_nosimd_internal.*",
+          "!vision/wasm/vision_wasm_module_internal.js"
+        ]
       },
       {
         "from": "native-bin/whisper",
@@ -76,9 +82,14 @@
     "directories": {
       "output": "release"
     },
-    "asarUnpack": [
-      "**/native-bin/**"
+    "files": [
+      "dist/**/*",
+      "package.json",
+      "!**/*.map",
+      "!**/*.test.*",
+      "!dist/**/*.d.ts"
     ],
+    "compression": "maximum",
     "afterPack": "scripts/adhoc-sign.cjs",
     "dmg": {
       "title": "Install Exam Anti-Cheat",

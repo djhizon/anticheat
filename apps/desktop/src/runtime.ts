@@ -69,7 +69,7 @@ export function resolveRuntimePaths(
       entry: path.join(base, 'api', 'api-server.mjs'),
       webRoot: path.join(base, 'web'),
       whisperBin: path.join(base, 'whisper', 'whisper-cli'),
-      whisperModel: path.join(base, 'whisper', 'ggml-base.bin'),
+      whisperModel: path.join(base, 'whisper', 'ggml-base-q5_1.bin'),
       ffmpegBin: fs.existsSync(ffmpeg) ? ffmpeg : undefined,
     };
   }
