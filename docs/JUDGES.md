@@ -96,6 +96,48 @@ These are the defaults from `apps/api/src/demoSeed.ts`.
 - "Port 3000/5173 is already in use": quit whatever is using it and reopen the app.
 - Server log: `~/Library/Application Support/@examguard/desktop/logs/api.log`.
 
+## Rebuild everything from source
+
+Everything in this repo can be rebuilt on a Mac with Node 24.7+ and Xcode 16+.
+
+**Mac app (.dmg)**
+
+```sh
+git clone https://github.com/djhizon/examguard.git && cd examguard
+npm install
+npm run package:mac      # → apps/desktop/release/ExamGuard-0.1.0.dmg (x64; ~10 min first time)
+```
+
+`package:mac` prepares the vision models, builds a self-contained whisper.cpp with the speech
+model, bundles the local server and web UI, then signs the app ad hoc. Check it with
+`npm run validate` (unit tests) and `npm run test:e2e:demo` (full flow in Chromium).
+
+**iPhone app (Exam Companion, iOS 16+)**
+
+The Xcode project is committed: open `apps/ios/ExamCompanion.xcodeproj` in Xcode.
+
+- **Simulator (no Apple ID needed):** pick any iPhone simulator and press Run. The simulator has
+  no camera, so pairing uses the "paste link" field — copy the link from the Mac app's iPhone step.
+  Tests: `xcodebuild test -project apps/ios/ExamCompanion.xcodeproj -scheme ExamCompanion
+-destination 'platform=iOS Simulator,name=iPhone 16'`.
+- **Your own iPhone (free Apple ID works):** turn on Developer Mode on the phone, plug it in, then
+  either select your team under Signing & Capabilities in Xcode and change the bundle identifier
+  to something of your own, or run:
+
+  ```sh
+  IOS_TEAM_ID=<your team id> IOS_BUNDLE_ID=com.<you>.examcompanion npm run ios:device
+  ```
+
+  The script builds, installs and launches the app. On first launch, trust the developer profile
+  in Settings › General › VPN & Device Management.
+
+- **Prebuilt copies:** the release page has `ExamCompanion-simulator.zip` (drag the `.app` onto a
+  booted simulator) and `ExamCompanion-unsigned.ipa` (must be re-signed with your own certificate
+  before it installs on a phone; iOS never runs unsigned apps).
+
+Mac and iPhone must be on the same Wi-Fi; the Mac app shows a QR code during setup and the phone
+pairs by scanning it. The phone only sends presence pings — no camera, microphone or screen data.
+
 ## Automated tests of the desktop app
 
 `npm run test:electron` (macOS only, not run in CI) rehearses the student flow and the Strict-mode

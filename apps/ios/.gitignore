@@ -1,7 +1,9 @@
 .build/
 .swiftpm/
 DerivedData/
-*.xcodeproj/
-Info.plist
+# The generated Xcode project and Info.plist are committed so judges can open the app in Xcode
+# without installing xcodegen (regenerate with `xcodegen generate` after editing project.yml).
+xcuserdata/
 *.xcuserstate
 docs-screenshots/
+build-artifacts/

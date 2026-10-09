@@ -54,7 +54,10 @@ pre-seeded. Full steps: [docs/JUDGES.md](docs/JUDGES.md).
 
 **iPhone app:** with the iPhone plugged in and Developer Mode on, run `npm run ios:device`
 (builds, installs and launches Exam Companion). Open it, scan the QR the Mac shows during setup,
-put the phone face-down. Details: [docs/iphone-presence.md](docs/iphone-presence.md).
+put the phone face-down. The Xcode project is committed (`apps/ios/ExamCompanion.xcodeproj`), so
+judges can also open it in Xcode and run it on a simulator or their own iPhone. Rebuild guide:
+[docs/JUDGES.md](docs/JUDGES.md#rebuild-everything-from-source) · details:
+[docs/iphone-presence.md](docs/iphone-presence.md).
 
 | Demo account | Email                          | Password                         |
 | ------------ | ------------------------------ | -------------------------------- |

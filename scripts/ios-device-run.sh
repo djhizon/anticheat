@@ -7,6 +7,8 @@
 #
 # Environment:
 #   IOS_TEAM_ID        Apple development team (default: ZFC558KX53, the owner's Personal Team)
+#   IOS_BUNDLE_ID      Bundle identifier (default: com.djhizon.examcompanion). Judges signing with
+#                      their own free Apple ID must pick their own, e.g. com.<you>.examcompanion
 #   IOS_DEVICE         devicectl identifier or hardware UDID (default: first connected physical iOS device)
 #   IOS_CONFIGURATION  Xcode configuration (default: Debug)
 #   IOS_DERIVED_DATA   DerivedData path (default: apps/ios/DerivedData, git-ignored)
@@ -18,7 +20,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IOS_DIR="$ROOT/apps/ios"
 SCHEME="ExamCompanion"
-BUNDLE_ID="com.djhizon.examcompanion"
+BUNDLE_ID="${IOS_BUNDLE_ID:-com.djhizon.examcompanion}"
 TEAM_ID="${IOS_TEAM_ID:-ZFC558KX53}"
 CONFIGURATION="${IOS_CONFIGURATION:-Debug}"
 DERIVED_DATA="${IOS_DERIVED_DATA:-$IOS_DIR/DerivedData}"
@@ -93,6 +95,7 @@ xcodebuild \
   -derivedDataPath "$DERIVED_DATA" \
   -allowProvisioningUpdates \
   DEVELOPMENT_TEAM="$TEAM_ID" \
+  PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
   build -quiet
 
 APP="$DERIVED_DATA/Build/Products/$CONFIGURATION-iphoneos/$SCHEME.app"
